@@ -33,6 +33,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /profile", s.handleProfileSave)
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.handleLoginPost)
+	mux.HandleFunc("GET /signup", s.handleSignupForm)
+	mux.HandleFunc("POST /signup", s.handleSignupPost)
 	mux.HandleFunc("POST /logout", s.handleLogout)
 	mux.HandleFunc("GET /api/scrape", s.handleScrapeSSE)
 	mux.HandleFunc("GET /api/rerate", s.handleRerateSSE)

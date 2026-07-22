@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -17,6 +18,8 @@ const (
 	sessionTTL        = 30 * 24 * time.Hour
 	loginErrorCopy    = "이메일 또는 비밀번호를 확인해주세요."
 )
+
+var errSessionNotCreated = errors.New("server: authenticated user changed before session creation")
 
 type loginPage struct {
 	Error     string
@@ -43,7 +46,8 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 }
 
 func publicAuthPath(r *http.Request) bool {
-	if r.URL.Path == "/login" && (r.Method == http.MethodGet || r.Method == http.MethodPost) {
+	if (r.URL.Path == "/login" || r.URL.Path == "/signup") &&
+		(r.Method == http.MethodGet || r.Method == http.MethodPost) {
 		return true
 	}
 	if r.URL.Path == "/logout" && r.Method == http.MethodPost {
@@ -123,26 +127,41 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		s.renderLoginFailure(w, r)
 		return
 	}
-	token, err := auth.GenerateSessionToken()
-	if err != nil {
+	if err := s.startSession(w, r.Context(), user.ID, user.PasswordHash); err != nil {
+		if errors.Is(err, errSessionNotCreated) {
+			s.renderLoginFailure(w, r)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	expiresAt := time.Now().Add(sessionTTL)
-	created, err := s.store.CreateSessionIfPasswordHash(
-		r.Context(), user.ID, user.PasswordHash, auth.HashSessionToken(token), expiresAt,
-	)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if !created {
-		s.renderLoginFailure(w, r)
 		return
 	}
 	s.loginLimiter.reset(ip, email)
-	http.SetCookie(w, s.sessionCookie(token, expiresAt))
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// startSession creates one opaque browser session. Login supplies the exact
+// password hash it verified so concurrent password changes retain their atomic
+// guard; signup has just created the user and needs no prior-hash condition.
+func (s *Server) startSession(w http.ResponseWriter, ctx context.Context, userID int64, verifiedHash ...string) error {
+	token, err := auth.GenerateSessionToken()
+	if err != nil {
+		return err
+	}
+	expiresAt := time.Now().Add(sessionTTL)
+	tokenHash := auth.HashSessionToken(token)
+	if len(verifiedHash) > 0 {
+		created, err := s.store.CreateSessionIfPasswordHash(ctx, userID, verifiedHash[0], tokenHash, expiresAt)
+		if err != nil {
+			return err
+		}
+		if !created {
+			return errSessionNotCreated
+		}
+	} else if err := s.store.CreateSession(ctx, userID, tokenHash, expiresAt); err != nil {
+		return err
+	}
+	http.SetCookie(w, s.sessionCookie(token, expiresAt))
+	return nil
 }
 
 func (s *Server) renderLoginFailure(w http.ResponseWriter, r *http.Request) {

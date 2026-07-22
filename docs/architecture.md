@@ -48,9 +48,9 @@ whether demo mode comes from the environment or the command line.
 
 `JOBCRON_SIGNUP_ACCESS_CODE` and `JOBCRON_STAGE1_SPONSOR_USER_ID` are optional. A configured
 sponsor ID must be a positive base-10 integer. Startup loads both settings and wires them into the
-server, while the production Compose file passes them through without defaults. Task 3 does not
-yet expose signup or spend the sponsor's AI budget; those behaviors remain in later account and
-scheduler tasks.
+server, while the production Compose file passes them through without defaults. The access code
+opens cohort signup; leaving it unset keeps the signup page visible but closes account creation.
+Sponsor-funded AI work remains part of later scheduler tasks.
 
 The daily scheduler is enabled by configuration and runs inside the application process at
 `JOBCRON_DAILY_SCRAPE_TIME` in Asia/Seoul (`05:00` by default). The current scheduled scrape
@@ -124,16 +124,23 @@ database. Production cookies are `HttpOnly`, `Secure`, and `SameSite=Lax`. Login
 rate-limited by client address and normalized email. Forwarded client addresses are trusted only
 when the request carries the configured proxy secret.
 
+`GET /signup` and CSRF-protected `POST /signup` are public authentication routes. A configured
+cohort code is compared through fixed-size SHA-256 digests in constant time. Valid requests
+canonicalize the email, validate the 15-character password policy, create an Argon2id password
+hash, start an opaque session, and redirect to profile setup. Signup has a separate client-address
+and normalized-email rate-limit budget from login. Invalid codes, invalid account data, and
+duplicate addresses share generic failure wording; an unset code fails closed without creating a
+user or session.
+
 Every authenticated handler resolves a `userID` before accessing profiles, saved-job state,
 scores, AI usage, or credentials. Local mode supplies the fixed local owner's ID through the same
 server methods. This keeps storage calls user-scoped while the broader account rollout remains
 incomplete.
 
-Public signup, sponsor-funded onboarding, password recovery, organizations, and per-user schedules
-are not implemented. The optional signup access code and Stage 1 sponsor ID are wired runtime
-configuration for that follow-up. The
+Sponsor-funded onboarding, password recovery, self-service account deletion (operator deletion
+exists), organizations, and per-user schedules are not implemented. The
 [multi-user expansion follow-up](superpowers/specs/260715-multi-user-account-expansion.md) records
-that deferred product work.
+that remaining product work.
 
 ## Scrape pipeline
 

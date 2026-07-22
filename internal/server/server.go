@@ -105,13 +105,14 @@ func minPositive(a, b int) int {
 
 // Server wires storage, one or more scrapers, and the HTTP handlers together.
 type Server struct {
-	store        *storage.Store
-	sources      []scraper.Scraper
-	tmpl         *template.Template
-	flight       *singleFlight
-	rerates      *rerateTracker
-	csrfSecret   []byte
-	loginLimiter *loginRateLimiter
+	store         *storage.Store
+	sources       []scraper.Scraper
+	tmpl          *template.Template
+	flight        *singleFlight
+	rerates       *rerateTracker
+	csrfSecret    []byte
+	loginLimiter  *loginRateLimiter
+	signupLimiter *loginRateLimiter
 
 	credentialCipher credential.Cipher
 	newAIProvider    aiProviderFactory
@@ -400,6 +401,7 @@ func newServer(store *storage.Store, localUserID int64, sources ...scraper.Scrap
 		rerates:       newRerateTracker(),
 		csrfSecret:    newCSRFSecret(),
 		loginLimiter:  newLoginRateLimiter(),
+		signupLimiter: newLoginRateLimiter(),
 		newAIProvider: ai.New,
 		localUserID:   localUserID,
 	}

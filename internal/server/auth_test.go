@@ -81,11 +81,11 @@ func TestProductionAuthRejectsAnonymousAPIWithUnauthorizedJSON(t *testing.T) {
 	}
 }
 
-func TestProductionAuthKeepsLoginAndStaticPublic(t *testing.T) {
+func TestProductionAuthKeepsSignupLoginAndStaticPublic(t *testing.T) {
 	srv, _ := newTestServer(t, &fakeScraper{})
 	srv.SetProductionMode(true)
 
-	for _, path := range []string{"/login", "/static/styles.css", "/favicon.ico"} {
+	for _, path := range []string{"/signup", "/login", "/static/styles.css", "/favicon.ico"} {
 		t.Run(path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))

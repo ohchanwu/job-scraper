@@ -63,7 +63,7 @@ func (s *Server) ensureCSRFCookie(w http.ResponseWriter, r *http.Request) string
 		return cookie.Value
 	}
 	value := randomToken()
-	http.SetCookie(w, &http.Cookie{
+	cookie := &http.Cookie{
 		Name:     csrfCookieName,
 		Value:    value,
 		Path:     "/",
@@ -71,7 +71,9 @@ func (s *Server) ensureCSRFCookie(w http.ResponseWriter, r *http.Request) string
 		HttpOnly: true,
 		Secure:   s.productionMode,
 		SameSite: http.SameSiteLaxMode,
-	})
+	}
+	http.SetCookie(w, cookie)
+	r.AddCookie(cookie)
 	return value
 }
 
@@ -125,6 +127,9 @@ func (s *Server) renderWithRequest(w http.ResponseWriter, r *http.Request, name 
 func withCSRFToken(data any, token string) any {
 	switch v := data.(type) {
 	case loginPage:
+		v.CSRFToken = token
+		return v
+	case signupPage:
 		v.CSRFToken = token
 		return v
 	case briefing:

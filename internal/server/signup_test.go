@@ -1,0 +1,232 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"log"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/ohchanwu/jobcron/internal/auth"
+	"github.com/ohchanwu/jobcron/internal/storage"
+)
+
+const testSignupAccessCode = "cohort-only-code"
+
+func TestSignupBrowserFormUsesRenderedCSRFToken(t *testing.T) {
+	srv, st := newTestServer(t, &fakeScraper{})
+	srv.SetProductionMode(true)
+	srv.SetSignupAccessCode(testSignupAccessCode)
+	get := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/signup", nil))
+	csrfCookie := cookieNamed(t, get, csrfCookieName)
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(get.Body.String())
+	if len(match) != 2 || match[1] == "" {
+		t.Fatalf("signup form has no rendered CSRF token: %q", get.Body.String())
+	}
+	form := validSignupForm("wrong-code")
+	form.Set(csrfFieldName, match[1])
+	req := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(csrfCookie)
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("browser-form status = %d, want 422 after CSRF acceptance; body=%q", rec.Code, rec.Body.String())
+	}
+	assertAccountCounts(t, st, 0, 0)
+}
+
+func TestSignupClosedGate(t *testing.T) {
+	srv, st := newTestServer(t, &fakeScraper{})
+	srv.SetProductionMode(true)
+
+	get := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/signup", nil))
+	if get.Code != http.StatusOK {
+		t.Fatalf("GET /signup status = %d, want 200", get.Code)
+	}
+	if body := get.Body.String(); !strings.Contains(body, "현재 가입을 받고 있지 않아요") {
+		t.Fatalf("closed signup body = %q, want closed-cohort notice", body)
+	}
+
+	post := postSignup(t, srv, validSignupForm("anything"))
+	if post.Code != http.StatusForbidden {
+		t.Fatalf("closed POST /signup status = %d, want 403", post.Code)
+	}
+	assertAccountCounts(t, st, 0, 0)
+}
+
+func TestSignupRejectsIncorrectAccessCode(t *testing.T) {
+	srv, st := newTestServer(t, &fakeScraper{})
+	srv.SetProductionMode(true)
+	srv.SetSignupAccessCode(testSignupAccessCode)
+
+	rec := postSignup(t, srv, validSignupForm("wrong-code"))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), testSignupAccessCode) {
+		t.Fatal("signup response revealed configured access code")
+	}
+	assertAccountCounts(t, st, 0, 0)
+}
+
+func TestSignupValidatesInput(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(url.Values)
+	}{
+		{name: "email syntax", change: func(v url.Values) { v.Set("email", "not-an-email") }},
+		{name: "minimum password length", change: func(v url.Values) {
+			v.Set("password", "too short")
+			v.Set("password_confirm", "too short")
+		}},
+		{name: "password confirmation", change: func(v url.Values) {
+			v.Set("password_confirm", "different long password")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, st := newTestServer(t, &fakeScraper{})
+			srv.SetProductionMode(true)
+			srv.SetSignupAccessCode(testSignupAccessCode)
+			form := validSignupForm(testSignupAccessCode)
+			tt.change(form)
+
+			rec := postSignup(t, srv, form)
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want 422", rec.Code)
+			}
+			assertAccountCounts(t, st, 0, 0)
+		})
+	}
+}
+
+func TestSignupRejectsMalformedForm(t *testing.T) {
+	srv, st := newTestServer(t, &fakeScraper{})
+	srv.SetProductionMode(true)
+	srv.SetSignupAccessCode(testSignupAccessCode)
+	req := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader("email=%zz"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	addCSRF(t, srv, req, "")
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	assertAccountCounts(t, st, 0, 0)
+}
+
+func TestSignupCreatesCanonicalUserAndSession(t *testing.T) {
+	srv, st := newTestServer(t, &fakeScraper{})
+	srv.SetProductionMode(true)
+	srv.SetSignupAccessCode(testSignupAccessCode)
+	form := validSignupForm(testSignupAccessCode)
+	form.Set("email", "  New.User@Example.COM ")
+
+	rec := postSignup(t, srv, form)
+
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/profile" {
+		t.Fatalf("signup = status %d location %q, want 303 /profile; body=%q", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	}
+	user, ok, err := st.UserByEmail(context.Background(), "new.user@example.com")
+	if err != nil || !ok {
+		t.Fatalf("UserByEmail: ok=%v err=%v", ok, err)
+	}
+	if user.Email != "new.user@example.com" {
+		t.Fatalf("stored email = %q, want canonical email", user.Email)
+	}
+	if matches, err := auth.VerifyPassword(user.PasswordHash, form.Get("password")); err != nil || !matches {
+		t.Fatalf("stored password is not a matching Argon2id hash: matches=%v err=%v", matches, err)
+	}
+	cookie := cookieNamed(t, rec, sessionCookieName)
+	if cookie.Value == "" || cookie.Value == form.Get("password") || cookie.Value == form.Get("access_code") {
+		t.Fatal("session cookie is empty or not opaque")
+	}
+	if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "/" {
+		t.Fatalf("session cookie flags = %+v", cookie)
+	}
+	if _, ok, err := st.UserBySessionToken(context.Background(), cookie.Value); err != nil || !ok {
+		t.Fatalf("UserBySessionToken: ok=%v err=%v", ok, err)
+	}
+	assertAccountCounts(t, st, 1, 1)
+}
+
+func TestSignupDuplicateUsesGenericFailureWithoutLoggingIdentity(t *testing.T) {
+	srv, st := newTestServer(t, &fakeScraper{})
+	srv.SetProductionMode(true)
+	srv.SetSignupAccessCode(testSignupAccessCode)
+	first := postSignup(t, srv, validSignupForm(testSignupAccessCode))
+	if first.Code != http.StatusSeeOther {
+		t.Fatalf("first signup status = %d, want 303", first.Code)
+	}
+
+	var logs bytes.Buffer
+	oldWriter := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(oldWriter) })
+	duplicate := postSignup(t, srv, validSignupForm(testSignupAccessCode))
+
+	if duplicate.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("duplicate status = %d, want 422", duplicate.Code)
+	}
+	for _, forbidden := range []string{"new@example.com", "already", "exists", "registered", "storage:"} {
+		if strings.Contains(strings.ToLower(duplicate.Body.String()), forbidden) || strings.Contains(strings.ToLower(logs.String()), forbidden) {
+			t.Fatalf("duplicate response or logs revealed account details: body=%q logs=%q", duplicate.Body.String(), logs.String())
+		}
+	}
+	assertAccountCounts(t, st, 1, 1)
+}
+
+func validSignupForm(code string) url.Values {
+	return url.Values{
+		"email":            {"new@example.com"},
+		"password":         {"correct horse battery staple"},
+		"password_confirm": {"correct horse battery staple"},
+		"access_code":      {code},
+	}
+}
+
+func postSignup(t *testing.T, srv *Server, form url.Values) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(form.Encode()))
+	req.RemoteAddr = "198.51.100.10:1234"
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	addCSRF(t, srv, req, "")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+func assertAccountCounts(t *testing.T, st *storage.Store, wantUsers, wantSessions int) {
+	t.Helper()
+	for table, want := range map[string]int{"users": wantUsers, "sessions": wantSessions} {
+		var got int
+		if err := st.SQLDB().QueryRowContext(context.Background(), "SELECT COUNT(*) FROM "+table).Scan(&got); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if got != want {
+			t.Fatalf("%s count = %d, want %d", table, got, want)
+		}
+	}
+}
+
+func cookieNamed(t *testing.T, rec *httptest.ResponseRecorder, name string) *http.Cookie {
+	t.Helper()
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	t.Fatalf("response has no %s cookie", name)
+	return nil
+}

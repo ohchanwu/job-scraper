@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>계정 만들기 — 오늘의 채용 브리핑</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico" sizes="16x16 32x32 48x48">
+  <meta name="csrf-token" content="{{.CSRFToken}}">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-demo="{{demoMode}}">
+  <div class="wrap login-wrap">
+    <header>
+      <div>
+        <p class="eyebrow">초대받은 분</p>
+        <h1>계정 만들기</h1>
+      </div>
+      <div class="head-right">
+        <button id="theme-toggle" class="theme-toggle" type="button" title="테마 (자동·낮·밤)"></button>
+      </div>
+    </header>
+
+    <main class="login-main">
+      {{if .Closed}}
+      <p class="auth-notice" role="status"><strong>현재 가입을 받고 있지 않아요.</strong><br>운영자에게 가입 일정을 문의해 주세요.</p>
+      {{else}}
+      {{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{end}}
+      <p class="auth-note">이메일 소유 여부는 확인하지 않아요. 비밀번호를 잊으면 운영자에게 문의해야 해요.</p>
+      <form class="login-form" method="post" action="/signup">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <label>이메일
+          <input type="email" name="email" autocomplete="username" required autofocus>
+        </label>
+        <label>비밀번호
+          <input type="password" name="password" autocomplete="new-password" minlength="15" required>
+          <span class="field-hint">15자 이상의 긴 문장을 권장해요.</span>
+        </label>
+        <label>비밀번호 확인
+          <input type="password" name="password_confirm" autocomplete="new-password" minlength="15" required>
+        </label>
+        <label>가입 코드
+          <input type="password" name="access_code" autocomplete="off" required>
+        </label>
+        <button type="submit" class="btn-primary">계정 만들기 <span class="arrow">→</span></button>
+      </form>
+      {{end}}
+      <p class="auth-switch">이미 계정이 있나요? <a href="/login">로그인</a></p>
+    </main>
+  </div>
+  <script src="/static/theme.js"></script>
+</body>
+</html>

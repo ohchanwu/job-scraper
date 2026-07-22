@@ -156,6 +156,33 @@ func TestLoginRateLimitReservationIsAtomic(t *testing.T) {
 	}
 }
 
+func TestSignupRateLimitIsIndependentAndBlocksBeforePasswordValidation(t *testing.T) {
+	srv, st := newTestServer(t, &fakeScraper{})
+	srv.SetProductionMode(true)
+	srv.SetSignupAccessCode(testSignupAccessCode)
+
+	for i := 0; i < loginRateLimitMaxFailures; i++ {
+		rec := postSignup(t, srv, validSignupForm("wrong-code"))
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("attempt %d status = %d, want 422", i+1, rec.Code)
+		}
+	}
+	overLimit := validSignupForm(testSignupAccessCode)
+	tooLong := strings.Repeat("a", auth.MaxPasswordBytes+1)
+	overLimit.Set("password", tooLong)
+	overLimit.Set("password_confirm", tooLong)
+	rec := postSignup(t, srv, overLimit)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("sixth signup status = %d, want 429 before password validation or hashing", rec.Code)
+	}
+	assertAccountCounts(t, st, 0, 0)
+
+	login := postLogin(t, srv, "198.51.100.10:1234", "new@example.com", "wrong-password")
+	if login.Code != http.StatusUnauthorized {
+		t.Fatalf("independent first login status = %d, want 401", login.Code)
+	}
+}
+
 func postLogin(t *testing.T, srv *Server, remoteAddr, email, password string) *httptest.ResponseRecorder {
 	return postLoginWithForwardedFor(t, srv, remoteAddr, "", email, password)
 }
