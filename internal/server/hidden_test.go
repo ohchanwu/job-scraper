@@ -96,7 +96,7 @@ func TestHiddenPageHasNavLink(t *testing.T) {
 	srv, _ := newTestServer(t, &fakeScraper{})
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/hidden", nil))
-	if !strings.Contains(rec.Body.String(), `<a href="/hidden" class="active">숨긴 공고</a>`) {
+	if !strings.Contains(rec.Body.String(), `<a href="/hidden" class="active" aria-current="page">숨긴 공고</a>`) {
 		t.Error("/hidden missing the active 숨긴 공고 nav link")
 	}
 }

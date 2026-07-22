@@ -85,49 +85,87 @@ SELECT id, ?, ?, ?, ?
 	return created == 1, nil
 }
 
-// ChangePassword replaces one user's password hash and revokes every session
-// except the caller's current hashed token in the same transaction.
-func (s *Store) ChangePassword(ctx context.Context, userID int64, passwordHash, keepSessionHash string) error {
+// ChangePassword replaces one user's expected password hash only while the
+// caller's current hashed session still belongs to that user and is unexpired.
+// It revokes every other session in the same transaction.
+func (s *Store) ChangePassword(
+	ctx context.Context,
+	userID int64,
+	expectedPasswordHash, passwordHash, keepSessionHash string,
+) (bool, error) {
 	if userID <= 0 {
-		return errors.New("storage: user id is required")
+		return false, errors.New("storage: user id is required")
+	}
+	if expectedPasswordHash == "" {
+		return false, errors.New("storage: expected user password hash is required")
 	}
 	if passwordHash == "" {
-		return errors.New("storage: user password hash is required")
+		return false, errors.New("storage: user password hash is required")
 	}
 	if keepSessionHash == "" {
-		return errors.New("storage: current session token hash is required")
+		return false, errors.New("storage: current session token hash is required")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("storage: begin password change: %w", err)
+		return false, fmt.Errorf("storage: begin password change: %w", err)
 	}
 	defer tx.Rollback()
 
-	result, err := tx.ExecContext(ctx, s.query(`
+	var query string
+	var args []any
+	if s.dialect == DialectPostgres {
+		matched, mutationTime, err := s.lockPostgresAccountMutation(ctx, tx, userID, expectedPasswordHash, keepSessionHash)
+		if err != nil {
+			return false, fmt.Errorf("storage: lock password change: %w", err)
+		}
+		if !matched {
+			return false, nil
+		}
+		query = `
 UPDATE users
    SET password_hash = ?,
        updated_at = ?
- WHERE id = ?`), passwordHash, time.Now().UTC(), userID)
+ WHERE id = ?
+   AND password_hash = ?`
+		args = []any{passwordHash, mutationTime, userID, expectedPasswordHash}
+	} else {
+		now := time.Now().UTC()
+		query = `
+UPDATE users
+   SET password_hash = ?,
+       updated_at = ?
+ WHERE id = ?
+   AND password_hash = ?
+   AND EXISTS (
+       SELECT 1
+         FROM sessions
+        WHERE sessions.user_id = users.id
+          AND session_token_hash = ?
+          AND expires_at > ?
+   )`
+		args = []any{passwordHash, now, userID, expectedPasswordHash, keepSessionHash, now}
+	}
+	result, err := tx.ExecContext(ctx, s.query(query), args...)
 	if err != nil {
-		return fmt.Errorf("storage: change password: %w", err)
+		return false, fmt.Errorf("storage: change password: %w", err)
 	}
 	updated, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("storage: count changed users: %w", err)
+		return false, fmt.Errorf("storage: count changed users: %w", err)
 	}
 	if updated == 0 {
-		return errors.New("storage: user does not exist")
+		return false, nil
 	}
 	if _, err := tx.ExecContext(ctx, s.query(`
 DELETE FROM sessions
  WHERE user_id = ?
    AND session_token_hash <> ?`), userID, keepSessionHash); err != nil {
-		return fmt.Errorf("storage: revoke other sessions: %w", err)
+		return false, fmt.Errorf("storage: revoke other sessions: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("storage: commit password change: %w", err)
+		return false, fmt.Errorf("storage: commit password change: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // UserBySessionToken returns the user for an unexpired raw session token.

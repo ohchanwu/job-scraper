@@ -234,6 +234,104 @@ func (s *Store) DeleteUser(ctx context.Context, userID int64) (bool, error) {
 	return deleted > 0, nil
 }
 
+// DeleteSelf deletes one account only while its expected password hash and the
+// caller's current unexpired hashed session still match in the same transaction.
+func (s *Store) DeleteSelf(
+	ctx context.Context,
+	userID int64,
+	expectedPasswordHash, sessionHash string,
+) (bool, error) {
+	if userID <= 0 {
+		return false, errors.New("storage: user id is required")
+	}
+	if expectedPasswordHash == "" {
+		return false, errors.New("storage: expected user password hash is required")
+	}
+	if sessionHash == "" {
+		return false, errors.New("storage: current session token hash is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("storage: begin self deletion: %w", err)
+	}
+	defer tx.Rollback()
+
+	var query string
+	var args []any
+	if s.dialect == DialectPostgres {
+		matched, _, err := s.lockPostgresAccountMutation(ctx, tx, userID, expectedPasswordHash, sessionHash)
+		if err != nil {
+			return false, fmt.Errorf("storage: lock self deletion: %w", err)
+		}
+		if !matched {
+			return false, nil
+		}
+		query = `DELETE FROM users WHERE id = ? AND password_hash = ?`
+		args = []any{userID, expectedPasswordHash}
+	} else {
+		now := time.Now().UTC()
+		query = `
+DELETE FROM users
+ WHERE id = ?
+   AND password_hash = ?
+   AND EXISTS (
+       SELECT 1
+         FROM sessions
+        WHERE sessions.user_id = users.id
+          AND session_token_hash = ?
+          AND expires_at > ?
+   )`
+		args = []any{userID, expectedPasswordHash, sessionHash, now}
+	}
+	result, err := tx.ExecContext(ctx, s.query(query), args...)
+	if err != nil {
+		return false, fmt.Errorf("storage: delete self: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("storage: count self deletion: %w", err)
+	}
+	if deleted == 0 {
+		return false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("storage: commit self deletion: %w", err)
+	}
+	return true, nil
+}
+
+func (s *Store) lockPostgresAccountMutation(
+	ctx context.Context,
+	tx *sql.Tx,
+	userID int64,
+	expectedPasswordHash, sessionHash string,
+) (bool, time.Time, error) {
+	var matched int
+	if err := tx.QueryRowContext(ctx, `
+SELECT 1
+  FROM users
+ WHERE id = $1
+   AND password_hash = $2
+   FOR UPDATE`, userID, expectedPasswordHash).Scan(&matched); errors.Is(err, sql.ErrNoRows) {
+		return false, time.Time{}, nil
+	} else if err != nil {
+		return false, time.Time{}, err
+	}
+	var expiresAt time.Time
+	if err := tx.QueryRowContext(ctx, `
+SELECT expires_at
+  FROM sessions
+ WHERE user_id = $1
+   AND session_token_hash = $2
+   FOR UPDATE`, userID, sessionHash).Scan(&expiresAt); errors.Is(err, sql.ErrNoRows) {
+		return false, time.Time{}, nil
+	} else if err != nil {
+		return false, time.Time{}, err
+	}
+	now := time.Now().UTC()
+	return expiresAt.After(now), now, nil
+}
+
 func (s *Store) lockUsersForOwnerChange(ctx context.Context, tx *sql.Tx) error {
 	if s.dialect == DialectPostgres {
 		if _, err := tx.ExecContext(ctx, `LOCK TABLE users IN EXCLUSIVE MODE`); err != nil {

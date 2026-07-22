@@ -319,7 +319,18 @@ func TestApplicationPagesUseSharedPrimaryNav(t *testing.T) {
 		t.Fatalf("ReadFile(_nav.html): %v", err)
 	}
 	nav := string(shared)
-	for _, want := range []string{`{{define "primaryNav"}}`, `href="/briefing"`, `class="briefing-dot"`, `aria-label="새 데일리 브리핑 있음"`} {
+	for _, want := range []string{
+		`{{define "primaryNav"}}`,
+		`href="/briefing"`,
+		`class="briefing-dot"`,
+		`aria-label="새 데일리 브리핑 있음"`,
+		`eq .Active "briefing"}} aria-current="page"`,
+		`eq .Active "archive"}} class="active" aria-current="page"`,
+		`eq .Active "bookmarks"}} class="active" aria-current="page"`,
+		`eq .Active "hidden"}} class="active" aria-current="page"`,
+		`eq .Active "profile"}} class="active" aria-current="page"`,
+		`eq .Active "account"}} class="active" aria-current="page"`,
+	} {
 		if !strings.Contains(nav, want) {
 			t.Errorf("shared nav missing %q", want)
 		}
