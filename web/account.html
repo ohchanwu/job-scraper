@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>계정 — 오늘의 채용 브리핑</title>
+  <link rel="canonical" href="/account">
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico" sizes="16x16 32x32 48x48">
+  <meta name="csrf-token" content="{{.CSRFToken}}">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-demo="{{demoMode}}">
+  <div class="wrap">
+    <header>
+      <div>
+        <p class="eyebrow">계정</p>
+        <h1>내 계정 관리</h1>
+      </div>
+      <div class="head-right">
+        <button id="theme-toggle" class="theme-toggle" type="button" title="테마 (자동·낮·밤)"></button>
+      </div>
+    </header>
+
+    {{template "primaryNav" (navData "account" .CSRFToken)}}
+
+    <p class="form-intro"><strong class="account-email">{{.Email}}</strong> 계정의 비밀번호와 저장 정보를 관리해요.</p>
+    {{if .Error}}<p class="form-error account-error" role="alert">{{.Error}}</p>{{end}}
+
+    <main class="account-main">
+      <section class="account-section" aria-labelledby="password-heading">
+        <p class="eyebrow">보안</p>
+        <h2 id="password-heading">비밀번호 바꾸기</h2>
+        <p class="account-copy">현재 브라우저는 그대로 유지하고, 다른 기기의 로그인은 모두 종료해요.</p>
+        <form method="post" action="/account/password">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <label>현재 비밀번호
+            <input type="password" name="current_password" autocomplete="current-password" required>
+          </label>
+          <label>새 비밀번호
+            <input type="password" name="new_password" autocomplete="new-password" minlength="15" required>
+            <span class="field-hint">15자 이상의 긴 문장을 권장해요.</span>
+          </label>
+          <label>새 비밀번호 확인
+            <input type="password" name="password_confirm" autocomplete="new-password" minlength="15" required>
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="btn-primary">비밀번호 바꾸기 <span class="arrow">→</span></button>
+          </div>
+        </form>
+      </section>
+
+      <section class="account-section danger-zone" aria-labelledby="delete-heading">
+        <p class="eyebrow">위험 구역</p>
+        <h2 id="delete-heading">계정 삭제</h2>
+        <p class="account-copy"><strong>삭제하면 되돌릴 수 없어요.</strong> 저장한 정보와 AI 제공자 키가 모두 삭제돼요.</p>
+        <form method="post" action="/account/delete">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <label>현재 비밀번호
+            <input type="password" name="current_password" autocomplete="current-password" required>
+          </label>
+          <label>확인을 위해 이메일 입력
+            <span class="field-hint">{{.Email}}</span>
+            <input type="email" name="confirm_email" autocomplete="off" required>
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="btn-danger">계정 영구 삭제</button>
+          </div>
+        </form>
+      </section>
+    </main>
+  </div>
+  <script src="/static/theme.js"></script>
+  <script src="/static/briefing-notification.js"></script>
+</body>
+</html>

@@ -134,13 +134,20 @@ concurrent Argon2id hashing are bounded. Invalid codes, invalid account data, an
 addresses share generic failure wording; an unset code fails closed without creating a user or
 session.
 
+Authenticated users manage their account at `GET /account`. Password changes require the current
+password plus a policy-valid confirmed replacement. The server writes a new Argon2id hash and,
+in the same transaction, revokes every session except the browser that submitted the change.
+Self-service deletion requires both the current password and the account's canonical email. It
+deletes the exact user row, lets foreign-key cascades remove that user's private state and provider
+credentials, expires the browser session cookie, and redirects to login.
+
 Every authenticated handler resolves a `userID` before accessing profiles, saved-job state,
 scores, AI usage, or credentials. Local mode supplies the fixed local owner's ID through the same
 server methods. This keeps storage calls user-scoped while the broader account rollout remains
 incomplete.
 
-Sponsor-funded onboarding, password recovery, self-service account deletion (operator deletion
-exists), organizations, and per-user schedules are not implemented. The
+Sponsor-funded onboarding, password recovery, organizations, and per-user schedules are not
+implemented. The
 [multi-user expansion follow-up](superpowers/specs/260715-multi-user-account-expansion.md) records
 that remaining product work.
 
@@ -265,12 +272,14 @@ application roles. The deployment-only owner bootstrap remains table-locked and 
 database that already contains an account.
 
 Login creates a session only if the user's password hash still equals the exact hash just verified,
-while holding the same PostgreSQL user-row lock used by password mutation. A concurrent password
-change or operator reset therefore cannot leave a session authenticated by the old password.
+while holding the same PostgreSQL user-row lock used by password mutation. A concurrent
+self-service password change or operator reset therefore cannot leave a session authenticated by
+the old password. Self-service changes preserve only the submitting session; operator resets revoke
+all sessions.
 
 Foreign keys remove dependent user state when its owner is deleted. Composite keys and repository
-methods include `user_id` wherever two accounts must not share state. The current owner-only UI is
-therefore a product limitation, not a storage shortcut.
+methods include `user_id` wherever two accounts must not share state. Account settings use these
+same exact-user boundaries for password changes and deletion.
 
 Legacy SQLite is not an ordinary writable runtime. The tracked read-only demo may open an uploaded
 snapshot through `--demo --db`; all other application startup paths use PostgreSQL.
@@ -278,9 +287,9 @@ snapshot through `--demo --db`; all other application startup paths use PostgreS
 preserved local data into an existing PostgreSQL owner. It inserts all postings before restoring
 their self-referencing canonical-duplicate links, so a link may safely point to a posting with a
 later ID.
-`cmd/jobcron-user` bootstraps the owner and resets or deletes exact accounts outside the public
-application surface. SQLite migrations remain embedded for importer compatibility, the read-only
-demo, and tests.
+`cmd/jobcron-user` bootstraps the owner and provides operator-side password reset or deletion when
+the user cannot sign in. SQLite migrations remain embedded for importer compatibility, the
+read-only demo, and tests.
 
 See the [hosted-first storage decision][hosted-first-storage] and the
 [local import procedure](../deploy/local/README.md#verified-sqlite-import).

@@ -5,6 +5,7 @@
   <a href="/bookmarks"{{if eq .Active "bookmarks"}} class="active"{{end}}>북마크</a>
   <a href="/hidden"{{if eq .Active "hidden"}} class="active"{{end}}>숨긴 공고</a>
   <a href="/profile"{{if eq .Active "profile"}} class="active"{{end}}>프로필 설정</a>
+  {{if productionMode}}<a href="/account"{{if eq .Active "account"}} class="active"{{end}}>계정</a>{{end}}
   {{if productionMode}}<form method="post" action="/logout" class="nav-logout"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button type="submit">로그아웃</button></form>{{end}}
 </nav>
 {{end}}
