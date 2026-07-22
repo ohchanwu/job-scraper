@@ -61,7 +61,7 @@ func TestBookmarksPageUsesAllPostingsArchiveNav(t *testing.T) {
 	if !strings.Contains(body, `<a href="/">전체 공고</a>`) {
 		t.Error("/bookmarks nav missing 전체 공고 archive link")
 	}
-	if !strings.Contains(body, `<a href="/bookmarks" class="active">북마크</a>`) {
+	if !strings.Contains(body, `<a href="/bookmarks" class="active" aria-current="page">북마크</a>`) {
 		t.Error("/bookmarks should keep 북마크 as its active page label")
 	}
 }

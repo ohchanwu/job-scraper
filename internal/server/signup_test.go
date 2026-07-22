@@ -261,14 +261,26 @@ func TestSignupBoundsConcurrentPasswordHashing(t *testing.T) {
 	srv, st := newTestServer(t, &fakeScraper{})
 	srv.SetProductionMode(true)
 	srv.SetSignupAccessCode(testSignupAccessCode)
-	for range cap(srv.signupHashSlots) {
-		srv.signupHashSlots <- struct{}{}
+	for range cap(srv.passwordWorkSlots) {
+		srv.passwordWorkSlots <- struct{}{}
 	}
 
 	if rec := postSignup(t, srv, validSignupForm(testSignupAccessCode)); rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("status = %d, want 429 while password hashing is saturated", rec.Code)
 	}
 	assertAccountCounts(t, st, 0, 0)
+}
+
+func TestPasswordWorkCapacityRejectsCancelledAcquisition(t *testing.T) {
+	srv, _ := newTestServer(t, &fakeScraper{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if srv.acquirePasswordWork(ctx) {
+		t.Fatal("password-work acquisition succeeded after cancellation")
+	}
+	if got := len(srv.passwordWorkSlots); got != 0 {
+		t.Fatalf("password-work slots in use = %d, want 0", got)
+	}
 }
 
 func TestSignupDuplicateUsesGenericFailureWithoutLoggingIdentity(t *testing.T) {

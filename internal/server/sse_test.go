@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http/httptest"
 	"testing"
 )
@@ -19,6 +20,25 @@ func TestSingleFlight(t *testing.T) {
 	sf.release("jumpit")
 	if !sf.tryAcquire("jumpit") {
 		t.Error("acquire after release = false, want true")
+	}
+}
+
+func TestSingleFlightAcquireRespectsCancellation(t *testing.T) {
+	sf := newSingleFlight()
+	if !sf.tryAcquire("jumpit") {
+		t.Fatal("initial acquire")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if sf.acquire(ctx, "jumpit") {
+		t.Fatal("acquire succeeded after cancellation")
+	}
+	sf.release("jumpit")
+	if sf.acquire(ctx, "jumpit") {
+		t.Fatal("free acquire succeeded after cancellation")
+	}
+	if !sf.acquire(context.Background(), "jumpit") {
+		t.Fatal("acquire after release")
 	}
 }
 

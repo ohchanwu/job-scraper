@@ -3,11 +3,18 @@ package storage
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 )
+
+type accountMutationResult struct {
+	changed bool
+	err     error
+}
 
 func TestChangePasswordUpdatesHashAndKeepsOnlyCurrentSession(t *testing.T) {
 	st := newPostgresTestStore(t)
@@ -22,8 +29,9 @@ func TestChangePasswordUpdatesHashAndKeepsOnlyCurrentSession(t *testing.T) {
 		}
 	}
 
-	if err := st.ChangePassword(ctx, user.ID, "new-hash", "current-session"); err != nil {
-		t.Fatalf("ChangePassword: %v", err)
+	changed, err := st.ChangePassword(ctx, user.ID, "old-hash", "new-hash", "current-session")
+	if err != nil || !changed {
+		t.Fatalf("ChangePassword: changed=%v err=%v", changed, err)
 	}
 	var passwordHash string
 	if err := st.db.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id = $1`, user.ID).Scan(&passwordHash); err != nil {
@@ -68,10 +76,134 @@ func TestChangePasswordRollsBackWhenSessionRevocationFails(t *testing.T) {
 	}
 	installRejectingSessionDeleteTrigger(t, st)
 
-	if err := st.ChangePassword(ctx, user.ID, "new-hash", "current-session"); err == nil {
+	if _, err := st.ChangePassword(ctx, user.ID, "old-hash", "new-hash", "current-session"); err == nil {
 		t.Fatal("ChangePassword error = nil, want session revocation failure")
 	}
 	assertPasswordHash(t, st, user.ID, "old-hash")
+}
+
+func TestChangePasswordRequiresExpectedHashAndCurrentSession(t *testing.T) {
+	forEachAccountStore(t, func(t *testing.T, st *Store) {
+		ctx := context.Background()
+		user, err := st.CreateUser(ctx, "member@example.com", "old-hash")
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		for _, session := range []string{"current-session", "other-session"} {
+			if err := st.CreateSession(ctx, user.ID, session, time.Now().Add(time.Hour)); err != nil {
+				t.Fatalf("CreateSession(%q): %v", session, err)
+			}
+		}
+
+		changed, err := st.ChangePassword(ctx, user.ID, "stale-hash", "stale-update", "current-session")
+		if err != nil || changed {
+			t.Fatalf("stale ChangePassword: changed=%v err=%v, want false nil", changed, err)
+		}
+		assertPasswordHash(t, st, user.ID, "old-hash")
+		assertRowCount(t, st, "sessions", "user_id", user.ID, 2)
+
+		if _, err := st.db.ExecContext(ctx, st.query(`DELETE FROM sessions WHERE session_token_hash = ?`), "current-session"); err != nil {
+			t.Fatalf("revoke current session: %v", err)
+		}
+		changed, err = st.ChangePassword(ctx, user.ID, "old-hash", "missing-session-update", "current-session")
+		if err != nil || changed {
+			t.Fatalf("revoked-session ChangePassword: changed=%v err=%v, want false nil", changed, err)
+		}
+		assertPasswordHash(t, st, user.ID, "old-hash")
+		assertRowCount(t, st, "sessions", "user_id", user.ID, 1)
+
+		if err := st.CreateSession(ctx, user.ID, "current-session", time.Now().Add(time.Hour)); err != nil {
+			t.Fatalf("restore current session: %v", err)
+		}
+		changed, err = st.ChangePassword(ctx, user.ID, "old-hash", "new-hash", "current-session")
+		if err != nil || !changed {
+			t.Fatalf("valid ChangePassword: changed=%v err=%v, want true nil", changed, err)
+		}
+		assertPasswordHash(t, st, user.ID, "new-hash")
+		assertRowCount(t, st, "sessions", "user_id", user.ID, 1)
+	})
+}
+
+func TestAccountMutationsRejectExpiredSession(t *testing.T) {
+	for _, mutation := range []string{"change password", "delete self"} {
+		t.Run(mutation, func(t *testing.T) {
+			forEachAccountStore(t, func(t *testing.T, st *Store) {
+				ctx := context.Background()
+				user, err := st.CreateUser(ctx, "member@example.com", "old-hash")
+				if err != nil {
+					t.Fatalf("CreateUser: %v", err)
+				}
+				if err := st.CreateSession(ctx, user.ID, "expired-session", time.Now().Add(-time.Hour)); err != nil {
+					t.Fatalf("CreateSession expired: %v", err)
+				}
+				if err := st.CreateSession(ctx, user.ID, "other-session", time.Now().Add(time.Hour)); err != nil {
+					t.Fatalf("CreateSession other: %v", err)
+				}
+				const profileJSON = `{"career_years":0}`
+				if _, _, err := st.SaveProfileForUser(ctx, user.ID, profileJSON); err != nil {
+					t.Fatalf("SaveProfileForUser: %v", err)
+				}
+
+				var changed bool
+				if mutation == "change password" {
+					changed, err = st.ChangePassword(ctx, user.ID, "old-hash", "new-hash", "expired-session")
+				} else {
+					changed, err = st.DeleteSelf(ctx, user.ID, "old-hash", "expired-session")
+				}
+				if err != nil || changed {
+					t.Fatalf("expired-session mutation: changed=%v err=%v, want false nil", changed, err)
+				}
+				assertPasswordHash(t, st, user.ID, "old-hash")
+				assertRowCount(t, st, "users", "id", user.ID, 1)
+				assertRowCount(t, st, "sessions", "user_id", user.ID, 2)
+				gotProfile, _, ok, err := st.ProfileForUser(ctx, user.ID)
+				if err != nil || !ok || gotProfile != profileJSON {
+					t.Fatalf("ProfileForUser: profile=%q ok=%v err=%v", gotProfile, ok, err)
+				}
+			})
+		})
+	}
+}
+
+func TestDeleteUserSelfServiceRequiresExpectedHashAndCurrentSession(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		expectedHash  string
+		revokeSession bool
+		wantDeleted   bool
+	}{
+		{name: "stale password hash", expectedHash: "stale-hash"},
+		{name: "revoked session", expectedHash: "old-hash", revokeSession: true},
+		{name: "matching credential and session", expectedHash: "old-hash", wantDeleted: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			forEachAccountStore(t, func(t *testing.T, st *Store) {
+				ctx := context.Background()
+				user, err := st.CreateUser(ctx, "member@example.com", "old-hash")
+				if err != nil {
+					t.Fatalf("CreateUser: %v", err)
+				}
+				if err := st.CreateSession(ctx, user.ID, "current-session", time.Now().Add(time.Hour)); err != nil {
+					t.Fatalf("CreateSession: %v", err)
+				}
+				if tc.revokeSession {
+					if _, err := st.db.ExecContext(ctx, st.query(`DELETE FROM sessions WHERE session_token_hash = ?`), "current-session"); err != nil {
+						t.Fatalf("revoke current session: %v", err)
+					}
+				}
+
+				deleted, err := st.DeleteSelf(ctx, user.ID, tc.expectedHash, "current-session")
+				if err != nil || deleted != tc.wantDeleted {
+					t.Fatalf("DeleteSelf: deleted=%v err=%v, want %v nil", deleted, err, tc.wantDeleted)
+				}
+				wantUsers := 1
+				if tc.wantDeleted {
+					wantUsers = 0
+				}
+				assertRowCount(t, st, "users", "id", user.ID, wantUsers)
+			})
+		})
+	}
 }
 
 func TestResetUserPasswordNormalizesEmailAndRevokesOnlyTargetSessions(t *testing.T) {
@@ -172,6 +304,217 @@ func TestDeleteUserCascadesPrivateStateAndPreservesSharedState(t *testing.T) {
 	assertTotalRowCount(t, st, "scrape_runs", 1)
 }
 
+func TestPostgresAccountMutationInterleavings(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		winner       string
+		stale        string
+		wantHash     string
+		wantSessions int
+	}{
+		{name: "change versus change", winner: "change", stale: "change", wantHash: "winner-hash", wantSessions: 1},
+		{name: "reset versus change", winner: "reset", stale: "change", wantHash: "reset-hash", wantSessions: 0},
+		{name: "reset versus delete", winner: "reset", stale: "delete", wantHash: "reset-hash", wantSessions: 0},
+		{name: "change versus delete", winner: "change", stale: "delete", wantHash: "winner-hash", wantSessions: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newPostgresTestStore(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			user, err := st.CreateUser(ctx, "member@example.com", "old-hash")
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			for _, session := range []string{"winner-session", "stale-session"} {
+				if err := st.CreateSession(ctx, user.ID, session, time.Now().Add(time.Hour)); err != nil {
+					t.Fatalf("CreateSession(%q): %v", session, err)
+				}
+			}
+			if _, err := st.db.ExecContext(ctx, `
+INSERT INTO profiles (user_id, profile_json, profile_hash, updated_at)
+VALUES ($1, '{}', 'profile', now())`, user.ID); err != nil {
+				t.Fatalf("seed profile: %v", err)
+			}
+
+			gateTx, err := st.db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatalf("begin lock gate: %v", err)
+			}
+			defer gateTx.Rollback()
+			var blockerPID int
+			if err := gateTx.QueryRowContext(ctx, `
+SELECT pg_backend_pid()
+  FROM sessions
+ WHERE user_id = $1
+   AND session_token_hash = 'stale-session'
+   FOR UPDATE`, user.ID).Scan(&blockerPID); err != nil {
+				t.Fatalf("lock session gate: %v", err)
+			}
+
+			winnerResult := make(chan accountMutationResult, 1)
+			go func() {
+				if tc.winner == "change" {
+					changed, err := st.ChangePassword(ctx, user.ID, "old-hash", "winner-hash", "winner-session")
+					winnerResult <- accountMutationResult{changed: changed, err: err}
+					return
+				}
+				_, err := st.ResetUserPassword(ctx, user.Email, "reset-hash")
+				winnerResult <- accountMutationResult{changed: err == nil, err: err}
+			}()
+			winnerPID := waitForPostgresBlocker(t, st.db, blockerPID)
+
+			staleResult := make(chan accountMutationResult, 1)
+			go func() {
+				if tc.stale == "change" {
+					changed, err := st.ChangePassword(ctx, user.ID, "old-hash", "stale-hash", "stale-session")
+					staleResult <- accountMutationResult{changed: changed, err: err}
+					return
+				}
+				deleted, err := st.DeleteSelf(ctx, user.ID, "old-hash", "stale-session")
+				staleResult <- accountMutationResult{changed: deleted, err: err}
+			}()
+			waitForPostgresBlocker(t, st.db, winnerPID)
+
+			if err := gateTx.Commit(); err != nil {
+				t.Fatalf("release lock gate: %v", err)
+			}
+
+			winner := receiveMutationResult(t, "winner", winnerResult)
+			if winner.err != nil || !winner.changed {
+				t.Fatalf("winner mutation: changed=%v err=%v, want true nil", winner.changed, winner.err)
+			}
+			stale := receiveMutationResult(t, "stale", staleResult)
+			if stale.err != nil || stale.changed {
+				t.Fatalf("stale mutation: changed=%v err=%v, want false nil", stale.changed, stale.err)
+			}
+			assertPasswordHash(t, st, user.ID, tc.wantHash)
+			assertRowCount(t, st, "sessions", "user_id", user.ID, tc.wantSessions)
+			if tc.winner == "change" {
+				assertRowCount(t, st, "sessions", "session_token_hash", "winner-session", 1)
+				assertRowCount(t, st, "sessions", "session_token_hash", "stale-session", 0)
+			}
+			assertRowCount(t, st, "users", "id", user.ID, 1)
+			assertRowCount(t, st, "profiles", "user_id", user.ID, 1)
+		})
+	}
+}
+
+func TestPostgresAccountMutationsRejectSessionExpiredWhileWaitingForLock(t *testing.T) {
+	for _, mutation := range []string{"change password", "delete self"} {
+		t.Run(mutation, func(t *testing.T) {
+			st := newPostgresTestStore(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			user, err := st.CreateUser(ctx, "member@example.com", "old-hash")
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			if err := st.CreateSession(ctx, user.ID, "current-session", time.Now().Add(time.Hour)); err != nil {
+				t.Fatalf("CreateSession: %v", err)
+			}
+			const profileJSON = `{"career_years":0}`
+			if _, _, err := st.SaveProfileForUser(ctx, user.ID, profileJSON); err != nil {
+				t.Fatalf("SaveProfileForUser: %v", err)
+			}
+
+			gateTx, err := st.db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatalf("begin lock gate: %v", err)
+			}
+			defer gateTx.Rollback()
+			var gatePID int
+			if err := gateTx.QueryRowContext(ctx, `
+SELECT pg_backend_pid()
+  FROM sessions
+ WHERE user_id = $1
+   AND session_token_hash = 'current-session'
+   FOR UPDATE`, user.ID).Scan(&gatePID); err != nil {
+				t.Fatalf("lock session gate: %v", err)
+			}
+
+			result := make(chan accountMutationResult, 1)
+			go func() {
+				if mutation == "change password" {
+					changed, err := st.ChangePassword(ctx, user.ID, "old-hash", "new-hash", "current-session")
+					result <- accountMutationResult{changed: changed, err: err}
+					return
+				}
+				deleted, err := st.DeleteSelf(ctx, user.ID, "old-hash", "current-session")
+				result <- accountMutationResult{changed: deleted, err: err}
+			}()
+			waitForPostgresBlocker(t, st.db, gatePID)
+
+			if _, err := gateTx.ExecContext(ctx, `
+UPDATE sessions
+   SET expires_at = clock_timestamp()
+ WHERE user_id = $1
+   AND session_token_hash = 'current-session'`, user.ID); err != nil {
+				t.Fatalf("expire locked session: %v", err)
+			}
+			if err := gateTx.Commit(); err != nil {
+				t.Fatalf("release lock gate: %v", err)
+			}
+
+			got := receiveMutationResult(t, mutation, result)
+			if got.err != nil || got.changed {
+				t.Fatalf("expired mutation: changed=%v err=%v, want false nil", got.changed, got.err)
+			}
+			assertPasswordHash(t, st, user.ID, "old-hash")
+			assertRowCount(t, st, "users", "id", user.ID, 1)
+			assertRowCount(t, st, "sessions", "user_id", user.ID, 1)
+			gotProfile, _, ok, err := st.ProfileForUser(ctx, user.ID)
+			if err != nil || !ok || gotProfile != profileJSON {
+				t.Fatalf("ProfileForUser: profile=%q ok=%v err=%v", gotProfile, ok, err)
+			}
+		})
+	}
+}
+
+func waitForPostgresBlocker(t *testing.T, db *sql.DB, blockerPID int) int {
+	t.Helper()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var blockedPID int
+		err := db.QueryRow(`
+SELECT pid
+  FROM pg_stat_activity
+ WHERE $1 = ANY(pg_blocking_pids(pid))
+ ORDER BY pid
+ LIMIT 1`, blockerPID).Scan(&blockedPID)
+		if err == nil {
+			return blockedPID
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("inspect blocked PostgreSQL query: %v", err)
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("no mutation blocked behind PostgreSQL backend %d", blockerPID)
+		case <-ticker.C:
+		}
+	}
+}
+
+func receiveMutationResult(t *testing.T, name string, result <-chan accountMutationResult) accountMutationResult {
+	t.Helper()
+	select {
+	case got := <-result:
+		return got
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s mutation did not complete", name)
+		return accountMutationResult{}
+	}
+}
+
+func forEachAccountStore(t *testing.T, test func(*testing.T, *Store)) {
+	t.Helper()
+	t.Run("SQLite", func(t *testing.T) { test(t, newTestStore(t)) })
+	t.Run("PostgreSQL", func(t *testing.T) { test(t, newPostgresTestStore(t)) })
+}
+
 func installRejectingSessionDeleteTrigger(t *testing.T, st *Store) {
 	t.Helper()
 	if _, err := st.db.Exec(`
@@ -190,7 +533,7 @@ FOR EACH ROW EXECUTE FUNCTION reject_session_delete()`); err != nil {
 func assertPasswordHash(t *testing.T, st *Store, userID int64, want string) {
 	t.Helper()
 	var got string
-	if err := st.db.QueryRow(`SELECT password_hash FROM users WHERE id = $1`, userID).Scan(&got); err != nil {
+	if err := st.db.QueryRow(st.query(`SELECT password_hash FROM users WHERE id = ?`), userID).Scan(&got); err != nil {
 		t.Fatalf("query password hash: %v", err)
 	}
 	if got != want {
@@ -198,10 +541,10 @@ func assertPasswordHash(t *testing.T, st *Store, userID int64, want string) {
 	}
 }
 
-func assertRowCount(t *testing.T, st *Store, table, column string, value int64, want int) {
+func assertRowCount(t *testing.T, st *Store, table, column string, value any, want int) {
 	t.Helper()
 	var got int
-	query := fmt.Sprintf("SELECT count(*) FROM %s WHERE %s = $1", table, column)
+	query := st.query(fmt.Sprintf("SELECT count(*) FROM %s WHERE %s = ?", table, column))
 	if err := st.db.QueryRow(query, value).Scan(&got); err != nil {
 		t.Fatalf("count %s rows: %v", table, err)
 	}

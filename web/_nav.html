@@ -1,10 +1,11 @@
 {{define "primaryNav"}}
 <nav class="primary" data-primary-nav>
-  <a href="/briefing" class="briefing-nav-link{{if eq .Active "briefing"}} active{{end}}">데일리 브리핑<span class="briefing-dot" role="status" aria-label="새 데일리 브리핑 있음" hidden></span></a>
-  <a href="/"{{if eq .Active "archive"}} class="active"{{end}}>전체 공고</a>
-  <a href="/bookmarks"{{if eq .Active "bookmarks"}} class="active"{{end}}>북마크</a>
-  <a href="/hidden"{{if eq .Active "hidden"}} class="active"{{end}}>숨긴 공고</a>
-  <a href="/profile"{{if eq .Active "profile"}} class="active"{{end}}>프로필 설정</a>
+  <a href="/briefing" class="briefing-nav-link{{if eq .Active "briefing"}} active{{end}}"{{if eq .Active "briefing"}} aria-current="page"{{end}}>데일리 브리핑<span class="briefing-dot" role="status" aria-label="새 데일리 브리핑 있음" hidden></span></a>
+  <a href="/"{{if eq .Active "archive"}} class="active" aria-current="page"{{end}}>전체 공고</a>
+  <a href="/bookmarks"{{if eq .Active "bookmarks"}} class="active" aria-current="page"{{end}}>북마크</a>
+  <a href="/hidden"{{if eq .Active "hidden"}} class="active" aria-current="page"{{end}}>숨긴 공고</a>
+  <a href="/profile"{{if eq .Active "profile"}} class="active" aria-current="page"{{end}}>프로필 설정</a>
+  {{if productionMode}}<a href="/account"{{if eq .Active "account"}} class="active" aria-current="page"{{end}}>계정</a>{{end}}
   {{if productionMode}}<form method="post" action="/logout" class="nav-logout"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button type="submit">로그아웃</button></form>{{end}}
 </nav>
 {{end}}
