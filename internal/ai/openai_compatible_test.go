@@ -91,12 +91,22 @@ func TestChatCompletionsRejectsMalformedEnvelope(t *testing.T) {
 	for _, name := range []string{"openai", "gemini"} {
 		t.Run(name, func(t *testing.T) {
 			spec := newChatCompletionsSpec(name, "https://example.com")
-			for _, body := range [][]byte{
-				[]byte(`not json`),
-				[]byte(`{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}`),
+			for _, body := range []string{
+				`not json`,
+				`{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}`,
+				`{"choices":[{"message":{"content":""}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`,
+				`{"choices":[{"message":{"content":" \n\t"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`,
+				`{"choices":[{"message":{"content":"{}"}}]}`,
+				`{"choices":[{"message":{"content":"{}"}}],"usage":{"prompt_tokens":0,"completion_tokens":1}}`,
+				`{"choices":[{"message":{"content":"{}"}}],"usage":{"prompt_tokens":-1,"completion_tokens":1}}`,
+				`{"choices":[{"message":{"content":"{}"}}],"usage":{"prompt_tokens":1,"completion_tokens":-1}}`,
 			} {
-				if _, _, err := spec.parseResp(body); err == nil {
+				text, usage, err := spec.parseResp([]byte(body))
+				if err == nil {
 					t.Fatalf("parseResp(%q) succeeded", body)
+				}
+				if text != "" || usage != (Usage{}) {
+					t.Fatalf("parseResp(%q) returned text %q and usage %+v on error", body, text, usage)
 				}
 			}
 		})
@@ -134,7 +144,7 @@ func TestChatCompletionsPacingCancellation(t *testing.T) {
 			var calls int
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
-				io.WriteString(w, `{"choices":[{"message":{"content":"{}"}}],"usage":{}}`)
+				io.WriteString(w, `{"choices":[{"message":{"content":"{}"}}],"usage":{"prompt_tokens":1,"completion_tokens":0}}`)
 			}))
 			defer srv.Close()
 

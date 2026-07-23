@@ -53,6 +53,29 @@ func TestModelsForProvider(t *testing.T) {
 	if ModelsForProvider("groq") != nil {
 		t.Error("an unknown provider must return nil models")
 	}
+	if DefaultModel("groq") != "" {
+		t.Error("an unknown provider must return an empty default model")
+	}
+}
+
+func TestDefaultModelHandlesEmptyRegistryEntry(t *testing.T) {
+	const provider = "empty-test-provider"
+	modelsByProvider[provider] = nil
+	t.Cleanup(func() { delete(modelsByProvider, provider) })
+
+	if got := DefaultModel(provider); got != "" {
+		t.Fatalf("DefaultModel(%q) = %q, want empty", provider, got)
+	}
+}
+
+func TestDefaultModelUsesFirstRegistryEntry(t *testing.T) {
+	original := modelsByProvider["anthropic"]
+	modelsByProvider["anthropic"] = []string{"registry-default"}
+	t.Cleanup(func() { modelsByProvider["anthropic"] = original })
+
+	if got := DefaultModel("anthropic"); got != "registry-default" {
+		t.Fatalf("DefaultModel(anthropic) = %q, want first registry entry", got)
+	}
 }
 
 func TestProviderRegistryIncludesOpenAIAndGemini(t *testing.T) {

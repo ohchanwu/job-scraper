@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 var (
@@ -40,10 +41,15 @@ func newChatCompletionsSpec(name, baseURL string) providerSpec {
 			if len(r.Choices) == 0 {
 				return "", Usage{}, fmt.Errorf("ai: %s response has no choices", name)
 			}
-			return r.Choices[0].Message.Content, Usage{
+			content := r.Choices[0].Message.Content
+			usage := Usage{
 				InputTokens:  r.Usage.PromptTokens,
 				OutputTokens: r.Usage.CompletionTokens,
-			}, nil
+			}
+			if strings.TrimSpace(content) == "" || usage.InputTokens <= 0 || usage.OutputTokens < 0 {
+				return "", Usage{}, fmt.Errorf("ai: %s response has invalid content or usage", name)
+			}
+			return content, usage, nil
 		},
 	}
 }

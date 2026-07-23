@@ -118,20 +118,15 @@ func New(providerName, apiKey, model string, rateLimit time.Duration) (Provider,
 	return newHTTPProvider(spec, apiKey, model, spec.defaultBaseURL, rateLimit)
 }
 
-// defaultModelByProvider is the model used when the user selects a provider but
-// leaves the model field blank. The default is the provider's small, cheap tier
-// — the extraction/scoring task is short, and BYOK users pay per token.
-var defaultModelByProvider = map[string]string{
-	"anthropic": "claude-haiku-4-5-20251001",
-	"openai":    "gpt-5.6-luna",
-	"gemini":    "gemini-3.5-flash-lite",
-}
-
 // DefaultModel returns the fallback model id for a provider, or "" for an
 // unknown provider name. Used by the server when the profile sets a provider but
 // no explicit model.
 func DefaultModel(providerName string) string {
-	return defaultModelByProvider[providerName]
+	models := modelsByProvider[providerName]
+	if len(models) == 0 {
+		return ""
+	}
+	return models[0]
 }
 
 // modelsByProvider is the set of selectable model ids per provider, default
