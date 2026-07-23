@@ -346,8 +346,14 @@ One secret version contains the existing production environment values plus:
 - the approved immutable image reference;
 - the production credential-encryption master key;
 - the lower-privilege application `DATABASE_URL`;
+- `JOBCRON_SIGNUP_ACCESS_CODE=<cohort-access-code>`;
+- `JOBCRON_STAGE1_SPONSOR_USER_ID=<sponsor-user-id>`;
 - the Cloudflare Origin CA certificate; and
 - its private key.
+
+The sponsor user ID assigns global Stage 1A billing. It is not authorization and does not create
+an application role. Both application values remain placeholder-only in tracked documentation;
+their real values exist only in the runtime secret.
 
 No real value appears in Git, Terraform variables, Terraform plans, Terraform state, EC2 user
 data, chat, or logs.

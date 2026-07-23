@@ -7,8 +7,10 @@ configured database URL, session secret, environment, host, port, no-open
 setting, and daily scrape time.
 
 For the first rollout, preserve those existing values and add only
-`JOBCRON_IMAGE`, `JOBCRON_CREDENTIAL_ENCRYPTION_KEY`, and
-`JOBCRON_PROXY_SECRET`. Validate Compose before starting anything. From the
+`JOBCRON_IMAGE`, `JOBCRON_CREDENTIAL_ENCRYPTION_KEY`, `JOBCRON_PROXY_SECRET`,
+`JOBCRON_SIGNUP_ACCESS_CODE=<cohort-access-code>`, and
+`JOBCRON_STAGE1_SPONSOR_USER_ID=<sponsor-user-id>`. The sponsor ID assigns
+global Stage 1A billing; it is not authorization or an application role. Validate Compose before starting anything. From the
 trusted Mac, open the localhost-only tunnel,
 silently read private values only into the current shell, and export
 `JOBCRON_ENV=production` so import fails closed, run `create-owner`, create the
@@ -44,6 +46,8 @@ DATABASE_URL='postgres://example:example@db.example.invalid:5432/example?sslmode
 SESSION_SECRET=synthetic-session-secret \
 JOBCRON_CREDENTIAL_ENCRYPTION_KEY='MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=' \
 JOBCRON_PROXY_SECRET='synthetic-proxy-secret' \
+JOBCRON_SIGNUP_ACCESS_CODE='synthetic-cohort-code' \
+JOBCRON_STAGE1_SPONSOR_USER_ID='1' \
 JOBCRON_DAILY_SCRAPE_TIME='06:15' \
 docker compose config
 ```

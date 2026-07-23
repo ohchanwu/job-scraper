@@ -44,7 +44,7 @@ application container backed by private Amazon RDS. The first production rollout
 
 Production startup opens PostgreSQL without resolving a sole owner. Authenticated requests resolve
 their user from the session, so both empty and multi-user databases can start successfully.
-Startup also skips the legacy sole-owner rescore pass.
+Startup cache-only recovery visits each profiled user and isolates failures.
 Production and demo modes are mutually exclusive; configuration loading rejects their combination
 whether demo mode comes from the environment or the command line.
 
@@ -53,10 +53,15 @@ sponsor ID must be a positive base-10 integer. Startup loads both settings and w
 server, while the production Compose file passes them through without defaults. The access code
 opens cohort signup; leaving it unset keeps the signup page visible but closes account creation.
 Global Stage 1A cache misses use only the configured sponsor's provider and usage ledger.
+The sponsor ID assigns Stage 1A billing; it grants no authorization and creates no application
+role. Missing, invalid, deleted, unconfigured, or exhausted sponsorship produces a bounded,
+value-blind warning and deterministic fallback without charging another user.
 
 The daily scheduler is enabled by configuration and runs inside the application process at
-`JOBCRON_DAILY_SCRAPE_TIME` in Asia/Seoul (`05:00` by default). The current scheduled scrape
-still resolves exactly one owner and records a skipped run when the owner is missing or ambiguous.
+`JOBCRON_DAILY_SCRAPE_TIME` in Asia/Seoul (`05:00` by default). It collects all registered sources
+once, then analyzes profiled users sequentially in ascending ID order while holding the shared
+scrape/re-rate gate. One user's credential or scoring failure is summarized and does not abort
+later users.
 
 See the [production deployment reference](../deploy/production/README.md), the
 [human rollout guide](../deploy/production/HUMAN_DEPLOY_GUIDE.md), and the
@@ -138,6 +143,9 @@ concurrent Argon2id hashing are bounded. Invalid codes, invalid account data, an
 addresses share generic failure wording; an unset code fails closed without creating a user or
 session.
 
+The cohort gate does not verify email ownership. Forgotten-password recovery is operator-assisted;
+email verification, public recovery, and open signup remain follow-up work.
+
 Authenticated users manage their account at `GET /account`. Password changes require the current
 password plus a policy-valid confirmed replacement. Login and account password verification plus
 signup and replacement hashing share bounded password-work capacity and finish before any database
@@ -158,12 +166,11 @@ the browser session cookie and redirects to login.
 
 Every authenticated handler resolves a `userID` before accessing profiles, saved-job state,
 scores, AI usage, or credentials. Local mode supplies the fixed local owner's ID through the same
-server methods. This keeps storage calls user-scoped while the broader account rollout remains
-incomplete.
+server methods. This keeps storage calls user-scoped across the implemented multi-user cohort.
 
-Sponsor-funded onboarding, password recovery, organizations, and per-user schedules are not
+Email verification, public password recovery, organizations, and per-user schedules are not
 implemented. The
-[multi-user expansion follow-up](superpowers/specs/260715-multi-user-account-expansion.md) records
+[multi-user expansion follow-up](superpowers/archive/2026-07-22-multi-user-account-expansion/260715-multi-user-account-expansion.md) records
 that remaining product work.
 
 ## Scrape pipeline
@@ -188,6 +195,11 @@ One scrape executes these steps:
     verdicts.
 11. Optionally run Stage 2 for the corrected eligible set and merge its cached deltas.
 12. Finish the `scrape_runs` record with counts and any bounded error summary.
+
+The scheduled path separates this into one global collection phase (sources, details, upserts,
+sweeping, deduplication, and sponsor-funded Stage 1A) followed by sequential per-user analysis
+(Stage 1B, deterministic scoring, and Stage 2). Interactive scrapes use the same phases for one
+authenticated user and only that profile's enabled sources.
 
 Scraper clients use shared request pacing and robots-policy helpers. The project prefers stable
 HTTP or JSON endpoints and does not use browser automation for production scraping. See the
@@ -357,18 +369,10 @@ overview.
 - AI failure degrades to deterministic scoring rather than failing the scrape or page.
 - Stage 1B failure retains the deterministic exclusion with an unverified status; it cannot abort
   scrape, profile save, startup, or provider-free rescoring.
-- Missing or ambiguous scheduler ownership records a skipped run instead of selecting a user.
+- An unavailable sponsor degrades global Stage 1A misses without selecting or charging another
+  user; one user's analysis failure does not stop later users.
 - Startup rescoring repairs postings left without scores after an interrupted prior run.
 - Database migration failure prevents startup before the server accepts requests.
-
-## Planned architecture changes
-
-The following work is documented but is not part of the implemented architecture:
-
-- [Multi-user account and scheduler expansion][multi-user-spec]
-
-When this change is implemented, update this document to describe the resulting current state
-and move completed implementation records through the documented lifecycle.
 
 ## Related documentation
 
@@ -386,5 +390,3 @@ and move completed implementation records through the documented lifecycle.
   superpowers/archive/2026-07-18-contextual-dealbreaker-validation/260718-stage-1-contextual-dealbreaker-validation-and-exclusion-evidence.md
 [hosted-first-storage]:
   superpowers/decisions/260714-hosted-first-local-database-convergence.md
-[multi-user-spec]:
-  superpowers/specs/260715-multi-user-account-expansion.md

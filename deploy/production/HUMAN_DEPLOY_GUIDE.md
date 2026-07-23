@@ -100,6 +100,8 @@ scrape time (`JOBCRON_DAILY_SCRAPE_TIME`). Add only:
 JOBCRON_IMAGE=<registry-user>/jobcron:sha-<12-character-commit>
 JOBCRON_CREDENTIAL_ENCRYPTION_KEY=<base64-32-byte-master-key>
 JOBCRON_PROXY_SECRET=<random-shared-proxy-secret>
+JOBCRON_SIGNUP_ACCESS_CODE=<cohort-access-code>
+JOBCRON_STAGE1_SPONSOR_USER_ID=<sponsor-user-id>
 ```
 
 Generate the credential master key on a trusted machine, keep a separate secure
@@ -107,6 +109,10 @@ backup, and validate that it decodes to exactly 32 bytes without printing it.
 Generate the proxy secret independently; it is shared only by Caddy and the app
 so authentication throttles use the real client address. Keep demo mode, the
 legacy admin token, and the Worknet key unset for this first pass.
+The signup code gates the initial cohort. The sponsor user ID assigns global
+Stage 1A billing only; it grants no authorization and creates no application role.
+Email ownership is not verified, and forgotten-password recovery remains
+operator-assisted until the public-signup follow-up is implemented.
 
 Validate Compose before starting anything:
 
@@ -324,11 +330,15 @@ Use the approved headless browser workflow to verify the real user path:
 - HTTPS works with a valid certificate and HTTP redirects to HTTPS.
 - `www` redirects to the canonical apex host.
 - The owner can sign in with the newly created password.
+- Access-code signup creates a separate cohort account without claiming to verify email ownership.
 - The migrated profile, one known rule score, one known AI score, one bookmark,
   and one hidden job match the approved source evidence.
-- Saving a BYOK credential, reloading it, and using it works through the
-  PostgreSQL-backed credential path.
-- The daily scrape time matches the preserved EC2 `.env` value.
+- Saving, replacing, and deleting synthetic Anthropic, OpenAI, and Gemini credentials stays
+  isolated to the signed-in account through the PostgreSQL-backed credential path.
+- Password change, logout/login, and self-service account deletion preserve session and cascade
+  boundaries; operator assistance remains the recovery path.
+- The daily scrape time matches the preserved EC2 `.env` value, and one global collection is
+  followed by sequential per-user analysis.
 
 Keep exact URLs, identities, screenshots, and logs out of tracked documentation.
 

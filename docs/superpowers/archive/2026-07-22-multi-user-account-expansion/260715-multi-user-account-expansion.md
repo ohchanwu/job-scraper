@@ -4,9 +4,9 @@
 - **Last updated:** 2026-07-22
 - **Status:** Active; product decisions approved, implementation plan pending
 - **Depends on:**
-  [`260714-postgresql-local-convergence-user-ai-credentials.md`](260714-postgresql-local-convergence-user-ai-credentials.md)
+  [`260714-postgresql-local-convergence-user-ai-credentials.md`](../../specs/260714-postgresql-local-convergence-user-ai-credentials.md)
 - **Related:**
-  [`260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md`](260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md)
+  [`260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md`](../../specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md)
 
 ## Purpose
 
