@@ -387,7 +387,7 @@ func (s *Server) runRerate(ctx context.Context, surface string, emit func(event,
 	// and Stage 2 have independent cache identities, so only extractStage1's own
 	// exact eligibility/content cache check can make this call free.
 	for _, p := range candidates {
-		s.extractStage1(ctx, p.ID, p, now, stage1)
+		s.extractStage1(ctx, p.ID, p, now, func() *stage1Funding { return stage1 })
 	}
 	if validationCalls, validationErr := s.validateDealbreakers(ctx, userID, candidates, prof, runtime, budget, calls, emit); validationErr != nil {
 		summary.ProviderCalls += validationCalls

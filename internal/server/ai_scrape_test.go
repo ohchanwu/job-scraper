@@ -61,6 +61,10 @@ func testStage1Funding(srv *Server, ctx context.Context, userID int64, runtime *
 	}
 }
 
+func testStage1Resolver(funding *stage1Funding) func() *stage1Funding {
+	return func() *stage1Funding { return funding }
+}
+
 // TestRunScrapeAutoRatesFreshBriefingWithStage2 proves the fix: a scrape now
 // runs Stage-2 over the fresh briefing, so new postings carry their evidence-
 // cited AI delta WITHOUT a manual 재평가 press.
@@ -355,7 +359,7 @@ func TestRunUSDCapHaltsManualScrapeExtractionAfterFirstCall(t *testing.T) {
 		ctx,
 		f,
 		time.Now().UTC(),
-		testStage1Funding(srv, ctx, 1, runtime),
+		testStage1Resolver(testStage1Funding(srv, ctx, 1, runtime)),
 		noopEmit,
 	); err != nil {
 		t.Fatalf("runScrapeSource: %v", err)
@@ -382,7 +386,7 @@ func TestRunScrapeSourceSponsorExtractsNewPostings(t *testing.T) {
 		ctx,
 		f,
 		time.Now().UTC(),
-		testStage1Funding(srv, ctx, 1, runtime),
+		testStage1Resolver(testStage1Funding(srv, ctx, 1, runtime)),
 		noopEmit,
 	); err != nil {
 		t.Fatalf("runScrapeSource: %v", err)
@@ -434,7 +438,7 @@ func TestRunScrapeSourceProviderFailsAndRegexScoringContinues(t *testing.T) {
 		ctx,
 		f,
 		time.Now().UTC(),
-		testStage1Funding(srv, ctx, 1, runtime),
+		testStage1Resolver(testStage1Funding(srv, ctx, 1, runtime)),
 		noopEmit,
 	)
 	if err != nil {
@@ -492,7 +496,7 @@ func TestRunScrapeAlreadySeenDoesNotExtract(t *testing.T) {
 		ctx,
 		f,
 		time.Now().UTC(),
-		testStage1Funding(srv, ctx, 1, runtime),
+		testStage1Resolver(testStage1Funding(srv, ctx, 1, runtime)),
 		noopEmit,
 	); err != nil {
 		t.Fatalf("runScrapeSource: %v", err)
@@ -517,7 +521,13 @@ func TestExtractStage1CacheHitSurvivesProviderAndModelChange(t *testing.T) {
 	originalProvider := newcomerStub()
 	originalProvider.NameVal = "provider-a"
 	originalRuntime := testAIRuntime(1, originalProvider, "model-a")
-	srv.extractStage1(ctx, id, p, time.Now().UTC(), testStage1Funding(srv, ctx, 1, originalRuntime))
+	srv.extractStage1(
+		ctx,
+		id,
+		p,
+		time.Now().UTC(),
+		testStage1Resolver(testStage1Funding(srv, ctx, 1, originalRuntime)),
+	)
 	if originalProvider.Calls != 1 {
 		t.Fatalf("initial Extract calls = %d, want cache population", originalProvider.Calls)
 	}
@@ -525,7 +535,13 @@ func TestExtractStage1CacheHitSurvivesProviderAndModelChange(t *testing.T) {
 	changedProvider := newcomerStub()
 	changedProvider.NameVal = "provider-b"
 	runtime := testAIRuntime(1, changedProvider, "model-b")
-	srv.extractStage1(ctx, id, p, time.Now().UTC(), testStage1Funding(srv, ctx, 1, runtime))
+	srv.extractStage1(
+		ctx,
+		id,
+		p,
+		time.Now().UTC(),
+		testStage1Resolver(testStage1Funding(srv, ctx, 1, runtime)),
+	)
 
 	if changedProvider.Calls != 0 {
 		t.Fatalf("Extract called %d times after provider/model change; want global cache hit", changedProvider.Calls)
@@ -564,7 +580,13 @@ func TestExtractStage1CacheMissesWhenContentOrContractChanges(t *testing.T) {
 
 			stub := newcomerStub()
 			runtime := testAIRuntime(1, stub, "model-b")
-			srv.extractStage1(ctx, id, p, time.Now().UTC(), testStage1Funding(srv, ctx, 1, runtime))
+			srv.extractStage1(
+				ctx,
+				id,
+				p,
+				time.Now().UTC(),
+				testStage1Resolver(testStage1Funding(srv, ctx, 1, runtime)),
+			)
 
 			if stub.Calls != 1 {
 				t.Fatalf("Extract calls = %d, want cache miss", stub.Calls)
@@ -599,7 +621,13 @@ func TestExtractStage1FailuresDoNotWriteCache(t *testing.T) {
 			}
 			runtime := testAIRuntime(1, stub, "model")
 
-			srv.extractStage1(ctx, id, p, time.Now().UTC(), testStage1Funding(srv, ctx, 1, runtime))
+			srv.extractStage1(
+				ctx,
+				id,
+				p,
+				time.Now().UTC(),
+				testStage1Resolver(testStage1Funding(srv, ctx, 1, runtime)),
+			)
 
 			if n := aiExtractionCount(t, srv); n != 0 {
 				t.Fatalf("ai_extractions rows = %d, want 0", n)
@@ -613,7 +641,7 @@ func TestExtractStage1DeterministicFallbackDoesNotWriteCache(t *testing.T) {
 	p := listingPosting("1", "백엔드 신입")
 	id := mustUpsert(t, st, p)
 
-	srv.extractStage1(context.Background(), id, p, time.Now().UTC(), nil)
+	srv.extractStage1(context.Background(), id, p, time.Now().UTC(), testStage1Resolver(nil))
 
 	if n := aiExtractionCount(t, srv); n != 0 {
 		t.Fatalf("ai_extractions rows = %d, want 0", n)
@@ -631,11 +659,19 @@ func TestExtractStage1CacheReadErrorDoesNotCallProvider(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
+	resolutions := 0
 
-	srv.extractStage1(ctx, id, p, time.Now().UTC(), funding)
+	srv.extractStage1(ctx, id, p, time.Now().UTC(), func() *stage1Funding {
+		resolutions++
+		return funding
+	})
 
-	if stub.Calls != 0 {
-		t.Fatalf("Extract calls = %d, want 0 after cache read error", stub.Calls)
+	if resolutions != 0 || stub.Calls != 0 {
+		t.Fatalf(
+			"sponsor resolutions=%d Extract calls=%d, want 0/0 after cache read error",
+			resolutions,
+			stub.Calls,
+		)
 	}
 }
 
@@ -652,7 +688,7 @@ func TestStage1SponsorCoreFundingSQLite(t *testing.T) {
 		id,
 		p,
 		time.Now().UTC(),
-		testStage1Funding(srv, ctx, 1, sponsorRuntime),
+		testStage1Resolver(testStage1Funding(srv, ctx, 1, sponsorRuntime)),
 	)
 
 	if sponsor.Calls != 1 {
@@ -714,7 +750,7 @@ func TestRunScrapePerRunBudgetHalts(t *testing.T) {
 		ctx,
 		f,
 		time.Now().UTC(),
-		funding,
+		testStage1Resolver(funding),
 		noopEmit,
 	); err != nil {
 		t.Fatalf("runScrapeSource: %v", err)
@@ -752,7 +788,7 @@ func TestRunScrapeEndToEndScoreCorrection(t *testing.T) {
 		ctx,
 		f,
 		time.Now().UTC(),
-		testStage1Funding(srv, ctx, 1, runtime),
+		testStage1Resolver(testStage1Funding(srv, ctx, 1, runtime)),
 		noopEmit,
 	); err != nil {
 		t.Fatalf("runScrapeSource: %v", err)

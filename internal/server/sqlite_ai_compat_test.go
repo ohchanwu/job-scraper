@@ -45,8 +45,8 @@ func TestLegacySQLiteRenderAndRescoreNeverReadOrModifyAIKeysFile(t *testing.T) {
 		t.Fatalf("UpsertPosting: %v", err)
 	}
 
-	if _, err := srv.RescoreSoleOwner(context.Background()); err != nil {
-		t.Fatalf("RescoreSoleOwner: %v", err)
+	if _, err := srv.RescoreUsers(context.Background()); err != nil {
+		t.Fatalf("RescoreUsers: %v", err)
 	}
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/briefing", nil))

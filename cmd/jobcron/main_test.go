@@ -331,7 +331,7 @@ func TestMainWiresRuntimeModeAndCohortConfiguration(t *testing.T) {
 		"srv = server.NewForLocalUser(store, resolved.UserID, sources...)",
 		"srv.SetSignupAccessCode(cfg.SignupAccessCode)",
 		"srv.SetStage1SponsorUserID(cfg.Stage1SponsorUserID)",
-		"if !cfg.Production {\n\t\tif _, err := srv.RescoreSoleOwner",
+		"if _, err := srv.RescoreUsers",
 	} {
 		if !bytes.Contains(source, []byte(want)) {
 			t.Errorf("main.go missing %q", want)

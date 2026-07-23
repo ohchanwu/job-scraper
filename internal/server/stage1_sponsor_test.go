@@ -18,6 +18,108 @@ const (
 	stage1TriggerFixture = "fixture-trigger"
 )
 
+func TestCollectPostingsResolvesSponsorLazily(t *testing.T) {
+	t.Run("all cache hits skip sponsor resolution", func(t *testing.T) {
+		p := listingPosting("cached", "백엔드 신입")
+		p.FirstSeenAt = time.Now().UTC().Add(-25 * time.Hour)
+		p.LastSeenAt = p.FirstSeenAt
+		f := &fakeScraper{
+			listing: []scraper.Posting{p},
+			details: map[string]scraper.Posting{"cached": p},
+		}
+		srv, st, _, _, _, _ := newStage1SponsorTestServer(t, f)
+		ctx := context.Background()
+		id := mustUpsert(t, st, p)
+		_, contentHash, _ := ai.ModelInput(p)
+		if err := st.UpsertAIExtraction(
+			ctx,
+			id,
+			contentHash,
+			ai.ExtractionContractVersion(),
+			ai.Extraction{Newcomer: true, EducationEnum: ai.EduNone},
+			time.Now().UTC(),
+		); err != nil {
+			t.Fatalf("seed Stage 1 cache: %v", err)
+		}
+		constructions := 0
+		factory := srv.newAIProvider
+		srv.newAIProvider = func(
+			provider, key, model string,
+			rateLimit time.Duration,
+		) (ai.Provider, error) {
+			constructions++
+			return factory(provider, key, model, rateLimit)
+		}
+
+		if _, err := srv.collectPostings(ctx, noopEmit, func(string) bool { return true }); err != nil {
+			t.Fatalf("collectPostings: %v", err)
+		}
+		if constructions != 0 {
+			t.Fatalf("provider constructions = %d, want 0 for cache hits", constructions)
+		}
+	})
+
+	t.Run("first miss resolves once for later misses", func(t *testing.T) {
+		f := &fakeScraper{
+			listing: []scraper.Posting{
+				listingPosting("one", "백엔드 신입"),
+				listingPosting("two", "서버 신입"),
+			},
+		}
+		srv, _, _, _, sponsor, _ := newStage1SponsorTestServer(t, f)
+		constructions := 0
+		factory := srv.newAIProvider
+		srv.newAIProvider = func(
+			provider, key, model string,
+			rateLimit time.Duration,
+		) (ai.Provider, error) {
+			constructions++
+			return factory(provider, key, model, rateLimit)
+		}
+
+		if _, err := srv.collectPostings(
+			context.Background(),
+			noopEmit,
+			func(string) bool { return true },
+		); err != nil {
+			t.Fatalf("collectPostings: %v", err)
+		}
+		if constructions != 1 || sponsor.Calls != 2 {
+			t.Fatalf(
+				"provider constructions=%d Extract calls=%d, want 1/2",
+				constructions,
+				sponsor.Calls,
+			)
+		}
+	})
+
+	t.Run("resolution failure is memoized", func(t *testing.T) {
+		f := &fakeScraper{
+			listing: []scraper.Posting{
+				listingPosting("one", "백엔드 신입"),
+				listingPosting("two", "서버 신입"),
+			},
+		}
+		srv, _, _, _, _, _ := newStage1SponsorTestServer(t, f)
+		constructions := 0
+		srv.newAIProvider = func(string, string, string, time.Duration) (ai.Provider, error) {
+			constructions++
+			return nil, errors.New("synthetic provider rejected")
+		}
+
+		if _, err := srv.collectPostings(
+			context.Background(),
+			noopEmit,
+			func(string) bool { return true },
+		); err != nil {
+			t.Fatalf("collectPostings: %v", err)
+		}
+		if constructions != 1 {
+			t.Fatalf("provider constructions = %d, want 1 after two misses", constructions)
+		}
+	})
+}
+
 func TestStage1SponsorMissBillsOnlySponsor(t *testing.T) {
 	for _, trigger := range []string{
 		storage.ScrapeTriggerManual,
@@ -243,7 +345,13 @@ func TestStage1SponsorUnavailableFallsBackWithoutCrossUserCharge(t *testing.T) {
 
 			p := listingPosting("fallback", "신입 백엔드")
 			id := mustUpsert(t, st, p)
-			srv.extractStage1(context.Background(), id, p, time.Now().UTC(), funding)
+			srv.extractStage1(
+				context.Background(),
+				id,
+				p,
+				time.Now().UTC(),
+				testStage1Resolver(funding),
+			)
 			if n := aiExtractionCount(t, srv); n != 0 {
 				t.Fatalf("ai_extractions rows = %d, want deterministic fallback", n)
 			}
@@ -289,7 +397,7 @@ func TestStage1SponsorCacheHitNeedsNoAvailableSponsor(t *testing.T) {
 		t.Fatalf("resolveStage1Funding = funding:%v err:%v, want unavailable", funding, err)
 	}
 
-	srv.extractStage1(ctx, id, p, time.Now().UTC(), funding)
+	srv.extractStage1(ctx, id, p, time.Now().UTC(), testStage1Resolver(funding))
 	if _, err := srv.scoreAll(ctx, 1, nil); err != nil {
 		t.Fatalf("scoreAll: %v", err)
 	}

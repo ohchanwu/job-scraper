@@ -28,6 +28,7 @@ type fakeScraper struct {
 	accessPanic    string
 	listingPanic   string
 	detailCalls    []string // SourcePostingIDs FetchDetail was called for
+	listingCalls   int
 	listingStarted chan struct{}
 	listingRelease <-chan struct{}
 }
@@ -47,6 +48,7 @@ func (f *fakeScraper) CheckAccess(ctx context.Context) error {
 }
 
 func (f *fakeScraper) FetchListing(ctx context.Context, limit int) ([]scraper.Posting, error) {
+	f.listingCalls++
 	if f.listingPanic != "" {
 		panic(f.listingPanic)
 	}
@@ -380,6 +382,32 @@ func TestRunScrapeStoresAndScoresPostings(t *testing.T) {
 	scores, err := st.ScoresByPostingID(ctx)
 	if err != nil || len(scores) != 2 {
 		t.Fatalf("ScoresByPostingID: got %d (err=%v), want 2", len(scores), err)
+	}
+}
+
+func TestRunScrapeCollectsOnlySignedInUsersEnabledSources(t *testing.T) {
+	first := &fakeScraper{
+		source:  "jumpit",
+		listing: []scraper.Posting{listingPosting("interactive-first", "첫 출처 공고")},
+	}
+	secondPosting := listingPosting("interactive-second", "둘째 출처 공고")
+	secondPosting.Source = "rallit"
+	second := &fakeScraper{source: "rallit", listing: []scraper.Posting{secondPosting}}
+	srv, st := newTestServer(t, first)
+	srv.sources = []scraper.Scraper{first, second}
+	saveTestProfile(t, st, profile.Profile{
+		CareerYears: 0, DisabledSources: []string{"rallit"},
+	})
+
+	res, err := srv.runScrape(context.Background(), noopEmit, 0, nil)
+	if err != nil {
+		t.Fatalf("runScrape: %v", err)
+	}
+	if first.listingCalls != 1 || second.listingCalls != 0 {
+		t.Fatalf("listing calls=(%d,%d), want enabled source only", first.listingCalls, second.listingCalls)
+	}
+	if res.Scored != 1 {
+		t.Fatalf("scored=%d, want signed-in user analyzed once", res.Scored)
 	}
 }
 

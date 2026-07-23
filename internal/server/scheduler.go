@@ -69,7 +69,7 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 }
 
 func (s *Server) runScheduledScrape(ctx context.Context) {
-	// Serialize the complete owner/runtime snapshot with profile saves and all
+	// Serialize the complete cohort/runtime snapshot with profile saves and all
 	// scrape/rerate work. Resolving before this lock could pair an old credential
 	// and budget configuration with a profile committed while waiting.
 	lease := s.flight.tryAcquire(scrapeAllKey)
@@ -78,27 +78,93 @@ func (s *Server) runScheduledScrape(ctx context.Context) {
 		return
 	}
 	defer lease.release()
-	if s.store.Dialect() == storage.DialectSQLite {
-		_, _ = s.runScrapeWithHistory(ctx, storage.ScrapeTriggerScheduled, noopSchedulerEmit, 0, nil)
-		return
-	}
-	userID, ok, err := s.store.SoleOwnerUserID(ctx)
-	if err != nil {
-		s.recordSkippedScheduledRun(ctx, "skipped: scheduled owner is ambiguous")
-		return
-	}
-	if !ok {
-		s.recordSkippedScheduledRun(ctx, "skipped: scheduled owner is unavailable")
-		return
-	}
-	runtime, err := s.aiRuntimeForUser(ctx, userID)
-	if err != nil {
-		log.Printf("jobcron: user %d scheduled AI runtime unavailable; continuing with rule-based scoring: %v", userID, err)
-		runtime = nil
-	}
 	scrapeCtx, cancel := context.WithTimeout(ctx, scrapeMaxDuration)
 	defer cancel()
-	_, _ = s.runScrapeWithHistory(scrapeCtx, storage.ScrapeTriggerScheduled, noopSchedulerEmit, userID, runtime)
+	_, _ = s.runScheduledScrapeWithHistory(scrapeCtx)
+}
+
+func (s *Server) runScheduledScrapeWithHistory(
+	ctx context.Context,
+) (result ScrapeResult, err error) {
+	run, err := s.store.StartScrapeRun(ctx, storage.ScrapeTriggerScheduled)
+	if err != nil {
+		return ScrapeResult{}, err
+	}
+	status := storage.ScrapeRunStatusSuccess
+	summary := ""
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("server: scrape panic: %v", recovered)
+		}
+		if err != nil {
+			status = storage.ScrapeRunStatusFailure
+			summary = err.Error()
+		}
+		finishCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		finishErr := s.store.FinishScrapeRun(
+			finishCtx, run.ID, result, status, truncateScrapeRunError(summary),
+		)
+		if finishErr != nil && err == nil {
+			err = finishErr
+		}
+	}()
+
+	collection, err := s.collectPostings(ctx, noopSchedulerEmit, func(string) bool { return true })
+	result = collection.result
+	if err != nil {
+		return result, err
+	}
+	if s.store.Dialect() == storage.DialectSQLite {
+		prof, ok, profileErr := s.loadProfile(ctx, 0)
+		if profileErr != nil || !ok {
+			return result, profileErr
+		}
+		result.Scored, err = s.analyzeUserCollection(
+			ctx, storage.ScrapeTriggerScheduled, noopSchedulerEmit,
+			0, prof, nil, nil, collection,
+		)
+		return result, err
+	}
+
+	userIDs, err := s.store.UserIDs(ctx)
+	if err != nil {
+		return result, err
+	}
+	warnings := 0
+	for _, userID := range userIDs {
+		prof, ok, profileErr := s.loadProfile(ctx, userID)
+		if profileErr != nil {
+			warnings++
+			continue
+		}
+		if !ok {
+			continue
+		}
+		runtime, runtimeErr := s.aiRuntimeForUser(ctx, userID)
+		if runtimeErr != nil {
+			log.Printf(
+				"jobcron: user %d scheduled AI runtime unavailable; using rule scoring",
+				userID,
+			)
+			warnings++
+			runtime = nil
+		}
+		budget := s.newAIBudget(ctx, userID, runtime)
+		scored, analysisErr := s.analyzeUserCollection(
+			ctx, storage.ScrapeTriggerScheduled, noopSchedulerEmit,
+			userID, prof, runtime, budget, collection,
+		)
+		result.Scored += scored
+		if analysisErr != nil {
+			warnings++
+			continue
+		}
+	}
+	if warnings > 0 {
+		summary = fmt.Sprintf("%d user analysis warning(s)", warnings)
+	}
+	return result, nil
 }
 
 func (s *Server) recordSkippedScheduledRun(ctx context.Context, reason string) {

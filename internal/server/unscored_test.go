@@ -99,7 +99,7 @@ func TestRescoreAllHealsUnscoredPosting(t *testing.T) {
 	}
 }
 
-func TestRescoreSoleOwnerUsesLegacySQLiteProfileWithoutAuthUser(t *testing.T) {
+func TestRescoreUsersUsesLegacySQLiteProfileWithoutAuthUser(t *testing.T) {
 	srv, st := newTestServer(t, &fakeScraper{})
 	ctx := context.Background()
 	profJSON, _ := profile.Marshal(profile.Profile{CareerYears: 0})
@@ -110,8 +110,8 @@ func TestRescoreSoleOwnerUsesLegacySQLiteProfileWithoutAuthUser(t *testing.T) {
 	p.FirstSeenAt, p.LastSeenAt = time.Now().UTC(), time.Now().UTC()
 	id := mustUpsert(t, st, p)
 
-	if _, err := srv.RescoreSoleOwner(ctx); err != nil {
-		t.Fatalf("RescoreSoleOwner: %v", err)
+	if _, err := srv.RescoreUsers(ctx); err != nil {
+		t.Fatalf("RescoreUsers: %v", err)
 	}
 	scores, err := st.ScoresByPostingID(ctx)
 	if err != nil || scores[id].PostingID != id {
@@ -119,7 +119,7 @@ func TestRescoreSoleOwnerUsesLegacySQLiteProfileWithoutAuthUser(t *testing.T) {
 	}
 }
 
-func TestRescoreSoleOwnerHealsWithRulesWhenAIRuntimeFails(t *testing.T) {
+func TestRescoreUsersHealsWithRulesWhenAIRuntimeFails(t *testing.T) {
 	tests := []struct {
 		name          string
 		provider      string
@@ -157,15 +157,15 @@ func TestRescoreSoleOwnerHealsWithRulesWhenAIRuntimeFails(t *testing.T) {
 			p.FirstSeenAt, p.LastSeenAt = time.Now().UTC(), time.Now().UTC()
 			postingID := mustUpsert(t, st, p)
 
-			count, err := srv.RescoreSoleOwner(ctx)
+			count, err := srv.RescoreUsers(ctx)
 			if err == nil || !strings.Contains(err.Error(), tt.wantErrorText) {
-				t.Fatalf("RescoreSoleOwner error = %v, want %q", err, tt.wantErrorText)
+				t.Fatalf("RescoreUsers error = %v, want %q", err, tt.wantErrorText)
 			}
 			if strings.Contains(err.Error(), plaintextKey) {
-				t.Fatalf("RescoreSoleOwner leaked plaintext credential: %v", err)
+				t.Fatalf("RescoreUsers leaked plaintext credential: %v", err)
 			}
 			if count != 1 {
-				t.Fatalf("RescoreSoleOwner count = %d, want 1 rule-scored posting", count)
+				t.Fatalf("RescoreUsers count = %d, want 1 rule-scored posting", count)
 			}
 			scores, scoreErr := st.ScoresByPostingID(ctx, userID)
 			if scoreErr != nil || scores[postingID].PostingID != postingID {
@@ -175,7 +175,7 @@ func TestRescoreSoleOwnerHealsWithRulesWhenAIRuntimeFails(t *testing.T) {
 	}
 }
 
-func TestRescoreSoleOwnerMergesCacheWithoutPaidCalls(t *testing.T) {
+func TestRescoreUsersMergesCacheWithoutPaidCalls(t *testing.T) {
 	srv, st := newPostgresTestServer(t, &fakeScraper{})
 	ctx := context.Background()
 	userID := insertAIRuntimeTestUser(t, st, "startup-cache-only@example.invalid")
@@ -190,15 +190,15 @@ func TestRescoreSoleOwnerMergesCacheWithoutPaidCalls(t *testing.T) {
 	p.FirstSeenAt, p.LastSeenAt = time.Now().UTC(), time.Now().UTC()
 	mustUpsert(t, st, p)
 
-	if count, err := srv.RescoreSoleOwner(ctx); err != nil || count != 1 {
-		t.Fatalf("RescoreSoleOwner count=%d err=%v", count, err)
+	if count, err := srv.RescoreUsers(ctx); err != nil || count != 1 {
+		t.Fatalf("RescoreUsers count=%d err=%v", count, err)
 	}
 	if provider.Calls != 0 || provider.ValidateDealbreakersCalls != 0 || provider.ScoreDeltaCalls != 0 {
 		t.Fatalf("startup made paid calls: extract=%d validation=%d stage2=%d", provider.Calls, provider.ValidateDealbreakersCalls, provider.ScoreDeltaCalls)
 	}
 }
 
-func TestRescoreSoleOwnerJoinsRuntimeAndRuleScoreFailures(t *testing.T) {
+func TestRescoreUsersJoinsRuntimeAndRuleScoreFailures(t *testing.T) {
 	srv, st := newPostgresTestServer(t, &fakeScraper{})
 	ctx := context.Background()
 	userID := insertAIRuntimeTestUser(t, st, "startup-joined-errors@example.invalid")
@@ -213,8 +213,36 @@ func TestRescoreSoleOwnerJoinsRuntimeAndRuleScoreFailures(t *testing.T) {
 		t.Fatalf("drop scores table: %v", err)
 	}
 
-	_, err := srv.RescoreSoleOwner(ctx)
+	_, err := srv.RescoreUsers(ctx)
 	if err == nil || !strings.Contains(err.Error(), "decrypt AI credential") || !strings.Contains(err.Error(), "save score") {
-		t.Fatalf("RescoreSoleOwner error = %v, want joined runtime and rule-score failures", err)
+		t.Fatalf("RescoreUsers error = %v, want joined runtime and rule-score failures", err)
+	}
+}
+
+func TestRescoreUsersProcessesEveryProfileAndSkipsMissingProfile(t *testing.T) {
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	ctx := context.Background()
+	firstUser := insertAIRuntimeTestUser(t, st, "startup-multi-a@example.invalid")
+	secondUser := insertAIRuntimeTestUser(t, st, "startup-multi-b@example.invalid")
+	missingProfileUser := insertAIRuntimeTestUser(t, st, "startup-multi-c@example.invalid")
+	saveAIRuntimeProfile(t, st, firstUser, profile.Profile{CareerYears: 0})
+	saveAIRuntimeProfile(t, st, secondUser, profile.Profile{CareerYears: 1})
+	p := listingPosting("startup-multi", "다중 사용자 복구 공고")
+	p.FirstSeenAt, p.LastSeenAt = time.Now().UTC(), time.Now().UTC()
+	mustUpsert(t, st, p)
+
+	count, err := srv.RescoreUsers(ctx)
+	if err != nil || count != 2 {
+		t.Fatalf("RescoreUsers count=%d err=%v, want two writes", count, err)
+	}
+	for _, userID := range []int64{firstUser, secondUser} {
+		scores, scoreErr := st.ScoresByPostingID(ctx, userID)
+		if scoreErr != nil || len(scores) != 1 {
+			t.Fatalf("user %d scores=%d err=%v, want one", userID, len(scores), scoreErr)
+		}
+	}
+	scores, scoreErr := st.ScoresByPostingID(ctx, missingProfileUser)
+	if scoreErr != nil || len(scores) != 0 {
+		t.Fatalf("missing-profile scores=%d err=%v, want zero", len(scores), scoreErr)
 	}
 }

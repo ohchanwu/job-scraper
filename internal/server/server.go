@@ -459,6 +459,12 @@ func newServer(store *storage.Store, localUserID int64, sources ...scraper.Scrap
 // ScrapeResult summarizes one scrape run across every active source.
 type ScrapeResult = storage.ScrapeResult
 
+type scrapeCollection struct {
+	result   ScrapeResult
+	detailed []scraper.Posting
+	now      time.Time
+}
+
 // scrapeAllKey is the singleflight key for a multi-source scrape run. We
 // hold one global lock for the whole pipeline rather than one per source —
 // the user clicks one button, sees one progress stream, and would be
@@ -512,108 +518,145 @@ func (s *Server) runScrapeForTrigger(ctx context.Context, trigger string, emit f
 	if err != nil {
 		return ScrapeResult{}, err
 	}
+	enabled := func(string) bool { return true }
+	if profileOK {
+		enabled = prof.SourceEnabled
+	}
+	collection, err := s.collectPostings(ctx, emit, enabled)
+	if err != nil {
+		return collection.result, err
+	}
+	if !profileOK {
+		return collection.result, nil
+	}
+	budget := s.newAIBudget(ctx, userID, runtime)
+	scored, err := s.analyzeUserCollection(
+		ctx, trigger, emit, userID, prof, runtime, budget, collection,
+	)
+	collection.result.Scored = scored
+	return collection.result, err
+}
 
+func (s *Server) collectPostings(
+	ctx context.Context,
+	emit func(event, data string),
+	enabled func(string) bool,
+) (scrapeCollection, error) {
 	var active []scraper.Scraper
 	for _, src := range s.sources {
-		if !profileOK || prof.SourceEnabled(src.Source()) {
+		if enabled(src.Source()) {
 			active = append(active, src)
 		}
 	}
 	if len(active) == 0 {
 		emit("status", "활성화된 공고 출처가 없어요 — 프로필 설정에서 켜주세요.")
-		return ScrapeResult{}, nil
+		return scrapeCollection{}, nil
 	}
-
-	// Set the expectation up front: the per-source clients pace at 1 req/s
-	// so a 50-posting first scrape takes ~a minute. Without this line a
-	// user staring at the progress counter might think the tool is hung.
 	emit("status", "천천히 가져올게요 — 출처 사이트에 부담을 주지 않으려고 1초에 하나씩 받아와요. ☕")
 
-	now := time.Now().UTC()
-	var res ScrapeResult
-	// The analyzed user's budget funds only Stage 1B and Stage 2. Global
-	// Stage 1A misses use the separately resolved sponsor budget.
-	freshAI := freshAIAllowedForTrigger(trigger, profileOK, prof, runtime)
-	budget := s.newAIBudget(ctx, userID, runtime)
-	stage1, stage1Err := s.resolveStage1Funding(ctx)
-	if stage1Err != nil {
-		log.Printf("jobcron: %v", stage1Err)
-	}
-	calls := &callCap{}
-	if runtime != nil {
-		calls.max = runtime.PerCallCap
-	}
-	if !freshAI {
-		budget = nil
+	collection := scrapeCollection{now: time.Now().UTC()}
+	var stage1 *stage1Funding
+	stage1Resolved := false
+	resolveStage1 := func() *stage1Funding {
+		if !stage1Resolved {
+			stage1Resolved = true
+			var err error
+			stage1, err = s.resolveStage1Funding(ctx)
+			if err != nil {
+				log.Printf("jobcron: %v", err)
+			}
+		}
+		return stage1
 	}
 	// succeeded tracks sources that completed without error this run; only
 	// they get their data swept. A source that failed cannot tell us what
 	// is stale (no fresh baseline this run), so we leave its existing rows
 	// untouched until the next successful scrape.
 	var succeeded []scraper.Scraper
-	var detailedPostings []scraper.Posting
 	for _, src := range active {
-		sub, detailed, err := s.runScrapeSource(ctx, src, now, stage1, emit)
+		sub, detailed, err := s.runScrapeSource(ctx, src, collection.now, resolveStage1, emit)
 		if err != nil {
 			// Per-source fault isolation: one source's failure must not
 			// abort the whole briefing. Surface the failure as a status
 			// line and move on; the user still gets a working briefing
 			// from every source that did succeed.
 			emit("status", fmt.Sprintf("[%s] 스크랩에 실패했어요 — 다른 출처를 계속할게요.", sourceLabel(src.Source())))
-			res.Failed++
+			collection.result.Failed++
 			continue
 		}
-		detailedPostings = append(detailedPostings, detailed...)
+		collection.detailed = append(collection.detailed, detailed...)
 		succeeded = append(succeeded, src)
-		res.Listed += sub.Listed
-		res.New += sub.New
-		res.Refreshed += sub.Refreshed
+		collection.result.Listed += sub.Listed
+		collection.result.New += sub.New
+		collection.result.Refreshed += sub.Refreshed
 	}
 
 	activeIDs := make([]string, 0, len(succeeded))
 	for _, src := range succeeded {
 		activeIDs = append(activeIDs, src.Source())
 	}
-	removed, err := s.store.SweepStalePostings(ctx, now, sweepStaleWindow, sweepOldWindow, activeIDs)
+	removed, err := s.store.SweepStalePostings(
+		ctx, collection.now, sweepStaleWindow, sweepOldWindow, activeIDs,
+	)
 	if err != nil {
-		return res, fmt.Errorf("server: sweep stale postings: %w", err)
+		return collection, fmt.Errorf("server: sweep stale postings: %w", err)
 	}
-	res.Removed = removed
+	collection.result.Removed = removed
 	if removed > 0 {
 		emit("status", fmt.Sprintf("오래된 공고 %d개를 정리했어요", removed))
 	}
 
 	duplicates, err := s.markCrossPortalDuplicates(ctx)
 	if err != nil {
-		return res, fmt.Errorf("server: dedup pass: %w", err)
+		return collection, fmt.Errorf("server: dedup pass: %w", err)
 	}
-	res.Duplicates = duplicates
+	collection.result.Duplicates = duplicates
 	if duplicates > 0 {
 		emit("status", fmt.Sprintf("다른 사이트에 똑같이 올라온 공고 %d개를 묶었어요", duplicates))
 	}
-	if freshAI && len(detailedPostings) > 0 {
+	if stage1 != nil && stage1.budget.isDegraded() {
+		emit("status", "일부 공고는 AI 분석 없이 일반 점수로 분석했어요.")
+	}
+	return collection, nil
+}
+
+func (s *Server) analyzeUserCollection(
+	ctx context.Context,
+	trigger string,
+	emit func(event, data string),
+	userID int64,
+	prof profile.Profile,
+	runtime *AIRuntime,
+	budget *aiBudget,
+	collection scrapeCollection,
+) (int, error) {
+	freshAI := freshAIAllowedForTrigger(trigger, true, prof, runtime)
+	if !freshAI {
+		budget = nil
+	}
+	calls := &callCap{}
+	if runtime != nil {
+		calls.max = runtime.PerCallCap
+	}
+	detailed := filterPostingsBySource(collection.detailed, prof.SourceEnabled)
+	if freshAI && len(detailed) > 0 {
 		emit("status", "제외 조건의 문맥을 확인하는 중...")
-		_, providerErr := s.validateDealbreakers(ctx, userID, detailedPostings, prof, runtime, budget, calls, emit)
+		_, providerErr := s.validateDealbreakers(
+			ctx, userID, detailed, prof, runtime, budget, calls, emit,
+		)
 		if providerErr != nil {
 			emit("status", providerFailureMessage(providerErr))
 		}
 	}
-
-	// Only the analyzed user can act on their profile limits. Keep sponsor
-	// identity private and avoid pointing them to settings that cannot restore
-	// sponsor-funded Stage 1.
 	if budget != nil && budget.isDegraded() {
 		emit("status", "오늘 AI 예산을 다 써서 일부는 일반 점수로 분석했어요 — 프로필 설정에서 한도를 바꿀 수 있어요.")
-	} else if stage1 != nil && stage1.budget.isDegraded() {
-		emit("status", "일부 공고는 AI 분석 없이 일반 점수로 분석했어요.")
 	}
 
 	emit("status", "공고에 점수를 매기는 중...")
 	scored, err := s.scoreAll(ctx, userID, runtime)
 	if err != nil {
-		return res, err
+		return scored, err
 	}
-	res.Scored = scored
 
 	// Auto-rate the fresh briefing with Stage-2 so new postings show their
 	// evidence-cited AI chip without a manual 재평가. Runs AFTER the offline
@@ -622,13 +665,15 @@ func (s *Server) runScrapeForTrigger(ctx context.Context, trigger string, emit f
 	// analyzed user's budget and runtime.PerCallCap counter; sponsor-funded
 	// Stage 1A remains separate.
 	if freshAI {
-		if vis, verr := s.visibleForRerate(ctx, "today", now, userID, runtime); verr == nil && len(vis) > 0 {
+		vis, verr := s.visibleForRerate(ctx, "today", collection.now, userID, runtime)
+		vis = filterPostingsBySource(vis, prof.SourceEnabled)
+		if verr == nil && len(vis) > 0 {
 			emit("status", "새 공고를 AI로 분석하는 중...")
 			rated, _, provErr := s.rateStage2(ctx, vis, prof, userID, runtime, budget, calls, emit)
 			if rated > 0 {
 				// Merge the fresh Stage-2 deltas into the rendered scores.
 				if rescored, rerr := s.scoreAll(ctx, userID, runtime); rerr == nil {
-					res.Scored = rescored
+					scored = rescored
 				}
 			}
 			if provErr != nil {
@@ -641,7 +686,20 @@ func (s *Server) runScrapeForTrigger(ctx context.Context, trigger string, emit f
 			}
 		}
 	}
-	return res, nil
+	return scored, nil
+}
+
+func filterPostingsBySource(
+	postings []scraper.Posting,
+	enabled func(string) bool,
+) []scraper.Posting {
+	filtered := make([]scraper.Posting, 0, len(postings))
+	for _, posting := range postings {
+		if enabled(posting.Source) {
+			filtered = append(filtered, posting)
+		}
+	}
+	return filtered
 }
 
 func freshAIAllowedForTrigger(trigger string, profileOK bool, prof profile.Profile, runtime *AIRuntime) bool {
@@ -768,7 +826,7 @@ func (s *Server) runScrapeSource(
 	ctx context.Context,
 	src scraper.Scraper,
 	now time.Time,
-	funding *stage1Funding,
+	resolveFunding func() *stage1Funding,
 	emit func(event, data string),
 ) (ScrapeResult, []scraper.Posting, error) {
 	label := sourceLabel(src.Source())
@@ -835,7 +893,7 @@ func (s *Server) runScrapeSource(
 		// Stage-1 AI extraction (cache-read, D2). Best-effort: any failure
 		// leaves no ai_extractions row and the posting is scored by the regex
 		// path exactly as v1.5 — the scrape never fails on an AI error.
-		s.extractStage1(ctx, id, detailed, now, funding)
+		s.extractStage1(ctx, id, detailed, now, resolveFunding)
 	}
 
 	// Edited-JD refresh (T7): re-fetch the detail of the stalest already-seen
@@ -861,7 +919,7 @@ func (s *Server) runScrapeSource(
 		detailedPostings = append(detailedPostings, detailed)
 		res.Refreshed++
 		emit("progress", fmt.Sprintf("[%s] 기존 공고 새로고침 %d/%d...", label, i+1, len(cands)))
-		s.extractStage1(ctx, c.id, detailed, now, funding)
+		s.extractStage1(ctx, c.id, detailed, now, resolveFunding)
 	}
 	return res, detailedPostings, nil
 }
@@ -875,7 +933,7 @@ func (s *Server) extractStage1(
 	id int64,
 	p scraper.Posting,
 	now time.Time,
-	funding *stage1Funding,
+	resolveFunding func() *stage1Funding,
 ) {
 	sent, contentHash, _ := ai.ModelInput(p)
 	// Cache hit (same content already extracted under this contract): reuse,
@@ -889,6 +947,7 @@ func (s *Server) extractStage1(
 	); err != nil || ok {
 		return
 	}
+	funding := resolveFunding()
 	if funding == nil ||
 		!funding.budget.canSpend() ||
 		!funding.budget.tryReserveCall() {
@@ -924,35 +983,43 @@ func (s *Server) loadProfile(ctx context.Context, userIDOpt ...int64) (profile.P
 }
 
 // RescoreAll re-scores every stored posting against the supplied user's current
-// profile. RescoreSoleOwner is the exact-owner startup entry point, resolving
-// that owner and runtime before delegating to scoreAll, so a posting left
-// unscored by an INTERRUPTED scrape is healed on the next boot rather than
-// rendering as a blank card. Fix 2A keeps CLIENT navigation from leaving the
-// unscored state; this covers PROCESS death — a crash / SIGKILL / OOM / deploy
-// restart in the window between UpsertPosting committing a new row and the
-// end-of-run scoreAll, which nothing else self-heals. It is the exported entry
-// point to scoreAll; it never calls the AI provider (merge-only, D10), so the
-// startup pass is a cheap cache-only re-score. No-op when no profile is saved.
+// profile. It never calls the AI provider, so startup recovery is cache-only.
 func (s *Server) RescoreAll(ctx context.Context, userID int64, runtime *AIRuntime) (int, error) {
 	return s.scoreAll(ctx, userID, runtime)
 }
 
-// RescoreSoleOwner heals cached scores at startup only when ownership is exact.
-// Zero users is a clean no-op; multiple users returns a stable operator error.
-func (s *Server) RescoreSoleOwner(ctx context.Context) (int, error) {
+// RescoreUsers heals cached scores for every profiled user at startup.
+func (s *Server) RescoreUsers(ctx context.Context) (int, error) {
 	if s.store.Dialect() == storage.DialectSQLite {
 		return s.scoreAll(ctx, 0, nil)
 	}
-	userID, ok, err := s.store.SoleOwnerUserID(ctx)
-	if err != nil || !ok {
+	userIDs, err := s.store.UserIDs(ctx)
+	if err != nil {
 		return 0, err
 	}
-	runtime, err := s.aiRuntimeForUser(ctx, userID)
-	if err != nil {
-		scored, scoreErr := s.scoreAll(ctx, userID, nil)
-		return scored, errors.Join(err, scoreErr)
+	var total int
+	var errs []error
+	for _, userID := range userIDs {
+		_, ok, profileErr := s.loadProfile(ctx, userID)
+		if profileErr != nil {
+			errs = append(errs, profileErr)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		runtime, runtimeErr := s.aiRuntimeForUser(ctx, userID)
+		if runtimeErr != nil {
+			errs = append(errs, runtimeErr)
+			runtime = nil
+		}
+		scored, scoreErr := s.scoreAll(ctx, userID, runtime)
+		total += scored
+		if scoreErr != nil {
+			errs = append(errs, scoreErr)
+		}
 	}
-	return s.scoreAll(ctx, userID, runtime)
+	return total, errors.Join(errs...)
 }
 
 // scoreAll scores every stored posting against the current profile and upserts
@@ -1037,6 +1104,7 @@ func (s *Server) scoreAll(ctx context.Context, userID int64, runtime *AIRuntime)
 			return 0, err
 		}
 	}
+	scored := 0
 	for _, p := range postings {
 		var ext *ai.Extraction
 		if e, ok := exts[p.ID]; ok {
@@ -1073,7 +1141,7 @@ func (s *Server) scoreAll(ctx context.Context, userID int64, runtime *AIRuntime)
 		result := scoring.Score(p, prof, ext, delta, validations)
 		breakdown, err := json.Marshal(result)
 		if err != nil {
-			return 0, fmt.Errorf("server: marshal score: %w", err)
+			return scored, fmt.Errorf("server: marshal score: %w", err)
 		}
 		sc := storage.Score{
 			PostingID:     p.ID,
@@ -1088,8 +1156,9 @@ func (s *Server) scoreAll(ctx context.Context, userID int64, runtime *AIRuntime)
 			err = s.store.UpsertScoreForUser(ctx, userID, sc)
 		}
 		if err != nil {
-			return 0, fmt.Errorf("server: save score: %w", err)
+			return scored, fmt.Errorf("server: save score: %w", err)
 		}
+		scored++
 	}
-	return len(postings), nil
+	return scored, nil
 }

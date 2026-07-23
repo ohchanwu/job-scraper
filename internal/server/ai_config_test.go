@@ -377,7 +377,13 @@ func TestBudgetLedgerPersistsAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	p := listingPosting("1", "백엔드 신입")
 	id := mustUpsert(t, st, p)
-	srv.extractStage1(ctx, id, p, time.Now().UTC(), testStage1Funding(srv, ctx, 1, runtime))
+	srv.extractStage1(
+		ctx,
+		id,
+		p,
+		time.Now().UTC(),
+		testStage1Resolver(testStage1Funding(srv, ctx, 1, runtime)),
+	)
 	day := time.Now().UTC().Format("2006-01-02")
 	in, out, _ := st.AIUsageForDay(ctx, 1, day)
 	if in != 100 || out != 20 {
