@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -59,22 +60,27 @@ func TestRerateSurfacesProviderError(t *testing.T) {
 }
 
 func TestProviderFailureMessageClassifies(t *testing.T) {
+	const privateMarker = "private-provider-output-marker"
 	cases := []struct {
 		err     error
 		wantSub string
 	}{
-		{&ai.APIError{Status: http.StatusUnauthorized}, "AI 키를 확인해주세요"},
-		{&ai.APIError{Status: http.StatusForbidden}, "AI 키를 확인해주세요"},
-		{&ai.APIError{Status: http.StatusBadRequest}, "선택한 모델이 이 제공자와 맞지 않아요"},
-		{&ai.APIError{Status: http.StatusNotFound}, "선택한 모델이 이 제공자와 맞지 않아요"},
-		{&ai.APIError{Status: http.StatusTooManyRequests, Body: `{"error":{"type":"insufficient_quota"}}`}, "결제"},
-		{&ai.APIError{Status: http.StatusTooManyRequests, Body: `{"error":{"type":"rate_limit_exceeded"}}`}, "잠시"},
-		{&ai.APIError{Status: http.StatusInternalServerError}, "(500)"},
-		{errors.New("dial tcp: i/o timeout"), "AI 분석에 실패했어요"},
+		{&ai.APIError{Status: http.StatusUnauthorized, Body: privateMarker}, "AI 키를 확인해주세요"},
+		{&ai.APIError{Status: http.StatusForbidden, Body: privateMarker}, "AI 키를 확인해주세요"},
+		{&ai.APIError{Status: http.StatusBadRequest, Body: privateMarker}, "선택한 모델이 이 제공자와 맞지 않아요"},
+		{&ai.APIError{Status: http.StatusNotFound, Body: privateMarker}, "선택한 모델이 이 제공자와 맞지 않아요"},
+		{&ai.APIError{Status: http.StatusTooManyRequests, Body: `{"error":{"type":"insufficient_quota","detail":"` + privateMarker + `"}}`}, "결제"},
+		{&ai.APIError{Status: http.StatusTooManyRequests, Body: `{"error":{"type":"rate_limit_exceeded","detail":"` + privateMarker + `"}}`}, "잠시"},
+		{&ai.APIError{Status: http.StatusInternalServerError, Body: privateMarker}, "(500)"},
+		{errors.New("malformed provider output: " + privateMarker), "AI 분석에 실패했어요"},
 	}
 	for _, tc := range cases {
-		if got := providerFailureMessage(tc.err); !strings.Contains(got, tc.wantSub) {
+		got := providerFailureMessage(tc.err)
+		if !strings.Contains(got, tc.wantSub) {
 			t.Errorf("providerFailureMessage(%v) = %q, want substring %q", tc.err, got, tc.wantSub)
+		}
+		if strings.Contains(got, privateMarker) {
+			t.Errorf("providerFailureMessage leaked provider output: %q", got)
 		}
 	}
 }
@@ -165,8 +171,61 @@ func TestProfileFormRendersModelDropdown(t *testing.T) {
 	if !strings.Contains(body, `<option value="claude-haiku-4-5-20251001"`) {
 		t.Fatalf("anthropic model options missing from the dropdown:\n%s", body)
 	}
+	for _, want := range []string{
+		`value="anthropic"`,
+		`Anthropic (Claude)`,
+		`value="openai"`,
+		`OpenAI`,
+		`value="gemini"`,
+		`Google Gemini`,
+		`"openai":["gpt-5.6-luna"]`,
+		`"gemini":["gemini-3.5-flash-lite"]`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("profile form missing server-owned provider option %q:\n%s", want, body)
+		}
+	}
 	if !strings.Contains(body, "window.aiModelOptions") {
 		t.Fatal("missing the client-side model-options data island")
+	}
+}
+
+func TestProfileSaveRejectsInvalidProviderModelSelection(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		model    string
+	}{
+		{name: "unknown provider", provider: "groq", model: ""},
+		{name: "anthropic with openai model", provider: "anthropic", model: "gpt-5.6-luna"},
+		{name: "openai with gemini model", provider: "openai", model: "gemini-3.5-flash-lite"},
+		{name: "model while AI off", provider: "", model: "claude-haiku-4-5-20251001"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, _ := newTestServer(t, &fakeScraper{})
+			seed, _ := profile.Marshal(profile.Profile{JobLikes: "unchanged"})
+			if _, _, err := srv.store.SaveProfile(context.Background(), seed); err != nil {
+				t.Fatalf("seed profile: %v", err)
+			}
+
+			form := url.Values{
+				"ai_provider": {tt.provider},
+				"ai_model":    {tt.model},
+				"job_likes":   {"must not persist"},
+			}
+			req := httptest.NewRequest(http.MethodPost, "/profile", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%q", rec.Code, rec.Body.String())
+			}
+			got, _, found, err := srv.store.Profile(context.Background())
+			if err != nil || !found || got != seed {
+				t.Fatalf("profile changed after rejected selection: found=%v err=%v got=%q want=%q", found, err, got, seed)
+			}
+		})
 	}
 }
 

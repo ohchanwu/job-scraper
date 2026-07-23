@@ -78,10 +78,11 @@ type Profile struct {
 	// AI settings (v2.0 BYOK). Non-secret app config: the active provider
 	// ("anthropic"; empty = AI off), the model id, and the rolling
 	// daily token cap (0 = DefaultDailyTokenCap). The API key itself lives in
-	// the 0600 ai_keys.json, NEVER here. These are deliberately NOT read by
-	// BuildStage2ProfileText, so changing the cap or model never churns the
-	// goal-keyed AI cache (a model change is partitioned by ai_version instead).
-	// omitempty keeps a pre-v2.0 / AI-off profile's canonical JSON unchanged.
+	// an encrypted per-user/provider PostgreSQL row, NEVER here. These are
+	// deliberately NOT read by BuildStage2ProfileText, so changing the cap or
+	// model never churns the goal-keyed AI cache (a model change is partitioned
+	// by ai_version instead). omitempty keeps a pre-v2.0 / AI-off profile's
+	// canonical JSON unchanged.
 	AIProvider      string `json:"ai_provider,omitempty"`
 	AIModel         string `json:"ai_model,omitempty"`
 	AIDailyTokenCap int    `json:"ai_daily_token_cap,omitempty"`

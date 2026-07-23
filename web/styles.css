@@ -1054,3 +1054,19 @@ form.login-form input {
 .source-toggles .field-hint,
 .ai-goals .field-hint { margin-bottom: 0.7rem; }
 .source-toggles .check { margin-top: 0.4rem; }
+.ai-key-delete {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem;
+  border: 1px solid var(--danger-border);
+  border-radius: 4px;
+  background: var(--danger-soft);
+}
+.ai-key-delete[hidden] { display: none; }
+.ai-key-delete .check-row { margin: 0; }
+@media (max-width: 639px) {
+  .ai-key-delete { align-items: stretch; flex-direction: column; }
+  .ai-key-delete .btn-danger { min-height: 44px; width: 100%; }
+}

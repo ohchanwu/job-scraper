@@ -1,15 +1,32 @@
-/* Provider-aware model dropdown. When the user changes the AI provider select,
-   repopulate the model select with that provider's models (plus a "기본값"
-   option that maps to the empty value → the server's per-provider default).
-   Toggling the provider to "없음" (off) empties the model list. The full
-   provider→models map is injected by the template as window.aiModelOptions.
-   (Anthropic is currently the only provider; the swap stays provider-aware so a
-   second provider would just slot back in.) */
+/* Keep provider-owned model, key hint, and saved-state controls in sync. */
 (function () {
   var options = window.aiModelOptions || {};
+  var providers = window.aiProviderOptions || [];
+  var saved = window.aiKeySavedByProvider || {};
   var provider = document.getElementById('ai-provider-select');
   var model = document.getElementById('ai-model-select');
+  var key = document.getElementById('ai-key-input');
+  var status = document.getElementById('ai-key-status');
+  var deletion = document.getElementById('ai-key-delete');
+  var deleteProvider = document.getElementById('ai-key-delete-provider');
+  var deleteConfirm = document.getElementById('ai-key-delete-confirm');
   if (!provider || !model) return;
+
+  function updateCredentialState() {
+    var info = providers.find(function (item) { return item.id === provider.value; });
+    var hasKey = !!saved[provider.value];
+    if (key) key.placeholder = hasKey ? '변경하려면 새 키 입력' : (info ? info.keyPlaceholder : '');
+    if (status) {
+      status.textContent = hasKey
+        ? '현재 •••• 저장됨 — 바꾸려면 새 키를 입력하세요. 비워두면 그대로 둬요.'
+        : (provider.value
+          ? '저장된 키가 없어 AI를 사용할 수 없어요. 새 키를 입력해주세요.'
+          : '제공자를 선택한 뒤 발급받은 키를 붙여넣으세요.');
+    }
+    if (deletion) deletion.hidden = !hasKey;
+    if (deleteProvider) deleteProvider.value = provider.value;
+    if (deleteConfirm) deleteConfirm.checked = false;
+  }
 
   provider.addEventListener('change', function () {
     var models = options[provider.value] || [];
@@ -26,9 +43,8 @@
       opt.textContent = id;
       model.appendChild(opt);
     });
-    // After a provider switch the previous model id is almost never valid for
-    // the new provider, so default to "기본값" (empty) — which the server resolves
-    // to the new provider's default model. The user can pick a specific one.
     model.value = '';
+    updateCredentialState();
   });
+  updateCredentialState();
 })();

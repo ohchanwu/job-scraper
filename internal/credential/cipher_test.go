@@ -17,7 +17,9 @@ func TestNormalizeProvider(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "trims and lowercases", input: " Anthropic ", want: "anthropic"},
-		{name: "allows future-safe characters", input: "Provider_2-Beta", want: "provider_2-beta"},
+		{name: "accepts openai", input: " OpenAI ", want: "openai"},
+		{name: "accepts gemini", input: " GEMINI ", want: "gemini"},
+		{name: "rejects unknown provider", input: "provider_2-beta", wantErr: true},
 		{name: "rejects empty", input: "  ", wantErr: true},
 		{name: "rejects punctuation", input: "anthropic.com", wantErr: true},
 		{name: "rejects spaces", input: "anthropic api", wantErr: true},

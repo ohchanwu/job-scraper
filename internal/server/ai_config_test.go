@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -196,8 +197,11 @@ func TestAIRuntimeForUserFallbacksAndSafeFailures(t *testing.T) {
 		userID := insertAIRuntimeTestUser(t, st, "runtime-provider@example.invalid")
 		cipher := newAIRuntimeTestCipher(t, 0x46)
 		srv.SetCredentialCipher(cipher)
-		saveAIRuntimeProfile(t, st, userID, profile.Profile{AIProvider: "synthetic-provider", AIModel: "synthetic-model"})
-		saveAIRuntimeCredential(t, st, cipher, userID, "synthetic-provider", "synthetic-provider-key")
+		saveAIRuntimeProfile(t, st, userID, profile.Profile{AIProvider: "openai", AIModel: ai.DefaultModel("openai")})
+		saveAIRuntimeCredential(t, st, cipher, userID, "openai", "synthetic-provider-key")
+		srv.newAIProvider = func(string, string, string, time.Duration) (ai.Provider, error) {
+			return nil, errors.New("synthetic provider construction failure")
+		}
 		if _, err := srv.aiRuntimeForUser(context.Background(), userID); err == nil || !strings.Contains(err.Error(), "construct AI provider") {
 			t.Fatalf("aiRuntimeForUser error = %v, want provider construction failure", err)
 		}

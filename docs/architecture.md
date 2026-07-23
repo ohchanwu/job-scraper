@@ -102,7 +102,8 @@ See the [demo deployment reference](../deploy/demo/README.md).
 - `internal/scoring` applies deterministic profile rules and merges cached AI facts and deltas.
 - `internal/ai` defines the provider contract, the Anthropic Messages adapter, one shared
   OpenAI-compatible Chat Completions adapter for OpenAI and Gemini, prompts, response parsing,
-  evidence gates, and AI version identity.
+  evidence gates, AI version identity, and the server-owned provider/model registry used by the
+  profile form.
 - `internal/storage` exposes one concrete repository and applies embedded schema migrations.
   PostgreSQL backs production and ordinary local modes. SQLite entry points exist only for the
   legacy importer, the tracked read-only demo, and compatibility tests.
@@ -256,10 +257,12 @@ limits bound paid usage; the usage ledger persists across restarts.
 
 ### Credential lifecycle
 
-The profile form sends a newly entered provider key to the server. The server encrypts it with
-AES-256-GCM before storing it in `user_ai_credentials`. Authenticated encryption binds the
-ciphertext to its user, provider, and envelope version, so moving a row to another identity causes
-decryption to fail.
+The profile form supports Anthropic, OpenAI, and Gemini and sends a newly entered provider key to
+the server. The server encrypts it with AES-256-GCM before storing one row per
+`(user_id, provider)` in `user_ai_credentials`. Authenticated encryption binds the ciphertext to
+its user, provider, and envelope version, so moving a row to another identity causes decryption to
+fail. Switching providers with a blank key preserves every saved row; explicit deletion removes
+only the authenticated user's selected-provider row and leaves the profile selection intact.
 
 The process decrypts a credential only while resolving that user's immutable AI runtime. The raw
 key is not returned to the browser or written to logs. Production receives the master key from

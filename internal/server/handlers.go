@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +32,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /hidden", s.handleHidden)
 	mux.HandleFunc("GET /profile", s.handleProfileForm)
 	mux.HandleFunc("POST /profile", s.handleProfileSave)
+	mux.HandleFunc("POST /profile/ai-key/delete", s.handleAIKeyDelete)
 	mux.HandleFunc("GET /account", s.handleAccount)
 	mux.HandleFunc("POST /account/password", s.handleAccountPassword)
 	mux.HandleFunc("POST /account/delete", s.handleAccountDelete)
@@ -437,11 +439,15 @@ type profileForm struct {
 	// AI settings (v2.0 BYOK). The API key value is NEVER placed here — only
 	// AIKeySaved (whether a key exists for the selected provider) crosses to the
 	// template, so the secret is never re-rendered (design §5).
-	AIProvider          string // "" | "anthropic"
+	AIProvider          string
+	AIProviders         []ai.ProviderInfo
+	AIProviderJSON      template.JS
 	AIModel             string
 	AIModels            []string    // selectable models for the CURRENT provider (server-side render)
 	AIModelOptionsJSON  template.JS // provider→[]model map, for the client-side dropdown swap
 	AIKeySaved          bool
+	AIKeySavedJSON      template.JS
+	AIKeyPlaceholder    string
 	AIDailyTokenCap     int // raw (0 = use default); the form input value
 	AIDailyCapEffective int // the cap actually in force, for the remaining line
 	AITokensUsedToday   int
@@ -494,15 +500,29 @@ func (s *Server) fillAIFormState(ctx context.Context, userID int64, form *profil
 	form.AIMonthlyUSDDefault = profile.DefaultAIMonthlyUSDCents
 	form.AIDailyUSDDefault = profile.DefaultAIDailyUSDCents
 	form.AIRunUSDDefault = profile.DefaultAIRunUSDCents
+	form.AIProviders = ai.Providers()
+	savedByProvider := make(map[string]bool, len(form.AIProviders))
+	for _, provider := range form.AIProviders {
+		if provider.ID == p.AIProvider {
+			form.AIKeyPlaceholder = provider.KeyPlaceholder
+		}
+		if userID > 0 {
+			_, savedByProvider[provider.ID], _ = s.store.UserAICredential(ctx, userID, provider.ID)
+		}
+	}
+	form.AIKeySaved = savedByProvider[p.AIProvider]
+	if b, err := json.Marshal(form.AIProviders); err == nil {
+		form.AIProviderJSON = template.JS(b)
+	}
+	if b, err := json.Marshal(savedByProvider); err == nil {
+		form.AIKeySavedJSON = template.JS(b)
+	}
 	// Provider-aware model dropdown: the current provider's models render
 	// server-side; the full map drives the client-side swap when the provider
 	// select changes (so a model id can't be paired with the wrong provider).
 	form.AIModels = ai.ModelsForProvider(p.AIProvider)
 	if b, err := json.Marshal(ai.ModelsByProvider()); err == nil {
 		form.AIModelOptionsJSON = template.JS(b)
-	}
-	if userID > 0 && p.AIProvider != "" {
-		_, form.AIKeySaved, _ = s.store.UserAICredential(ctx, userID, p.AIProvider)
 	}
 	in, out, err := s.store.AIUsageForDay(ctx, userID, time.Now().UTC().Format("2006-01-02"))
 	if err == nil {
@@ -576,6 +596,11 @@ func (s *Server) handleProfileSave(w http.ResponseWriter, r *http.Request) {
 	if runUSDCap == profile.DefaultAIRunUSDCents {
 		runUSDCap = 0
 	}
+	aiProvider, aiModel, ok := normalizeAISelection(r.FormValue("ai_provider"), r.FormValue("ai_model"))
+	if !ok {
+		http.Error(w, "AI 제공자와 모델 설정을 확인해주세요.", http.StatusBadRequest)
+		return
+	}
 	p := profile.Profile{
 		CareerYears:    atoi(r.FormValue("career_years")),
 		CareerWeight:   atoi(r.FormValue("career_weight")),
@@ -595,8 +620,8 @@ func (s *Server) handleProfileSave(w http.ResponseWriter, r *http.Request) {
 		ShortTermGoals:       strings.TrimSpace(r.FormValue("short_term_goals")),
 		LongTermGoals:        strings.TrimSpace(r.FormValue("long_term_goals")),
 		DisabledSources:      disabled,
-		AIProvider:           aiProviderValue(r.FormValue("ai_provider")),
-		AIModel:              strings.TrimSpace(r.FormValue("ai_model")),
+		AIProvider:           aiProvider,
+		AIModel:              aiModel,
 		AIDailyTokenCap:      dailyCap,
 		AIPerCallCap:         perCallCap,
 		ScheduledAIEnabled:   r.FormValue("scheduled_ai_enabled") != "",
@@ -666,16 +691,39 @@ func (s *Server) handleProfileSave(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/briefing", http.StatusSeeOther)
 }
 
-// aiProviderValue normalizes the provider select value: only the known provider
-// ids pass through; anything else (including the "없음/끄기" empty option) means
-// AI off.
-func aiProviderValue(v string) string {
-	switch strings.TrimSpace(v) {
-	case "anthropic":
-		return "anthropic"
-	default:
-		return ""
+func (s *Server) handleAIKeyDelete(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.stateUserID(r.Context(), r)
+	if err != nil || userID <= 0 {
+		writeAuthUnauthorized(w)
+		return
 	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "삭제 요청을 확인해주세요.", http.StatusBadRequest)
+		return
+	}
+	provider, err := credential.NormalizeProvider(r.FormValue("provider"))
+	if err != nil || r.FormValue("confirm") != "yes" {
+		http.Error(w, "삭제할 AI 키와 확인란을 확인해주세요.", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.DeleteUserAICredential(r.Context(), userID, provider); err != nil {
+		http.Error(w, "AI 키를 삭제하지 못했어요.", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/profile", http.StatusSeeOther)
+}
+
+func normalizeAISelection(providerValue, modelValue string) (string, string, bool) {
+	providerValue = strings.TrimSpace(providerValue)
+	modelValue = strings.TrimSpace(modelValue)
+	if providerValue == "" {
+		return "", "", modelValue == ""
+	}
+	provider, err := credential.NormalizeProvider(providerValue)
+	if err != nil || modelValue != "" && !slices.Contains(ai.ModelsForProvider(provider), modelValue) {
+		return "", "", false
+	}
+	return provider, modelValue, true
 }
 
 // toProfileForm converts a stored profile into the flat form view model.

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -135,9 +136,14 @@ func TestRescoreUsersHealsWithRulesWhenAIRuntimeFails(t *testing.T) {
 			wantErrorText: "decrypt AI credential",
 		},
 		{
-			name:          "provider construction",
-			provider:      "synthetic-provider",
-			configure:     func(_ *testing.T, srv *Server, cipher credential.Cipher) { srv.SetCredentialCipher(cipher) },
+			name:     "provider construction",
+			provider: "openai",
+			configure: func(_ *testing.T, srv *Server, cipher credential.Cipher) {
+				srv.SetCredentialCipher(cipher)
+				srv.newAIProvider = func(string, string, string, time.Duration) (ai.Provider, error) {
+					return nil, errors.New("synthetic provider construction failure")
+				}
+			},
 			wantErrorText: "construct AI provider",
 		},
 	}

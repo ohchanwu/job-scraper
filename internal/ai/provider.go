@@ -104,6 +104,13 @@ type Usage struct {
 	OutputTokens int
 }
 
+// ProviderInfo is one server-owned settings option.
+type ProviderInfo struct {
+	ID             string `json:"id"`
+	Label          string `json:"label"`
+	KeyPlaceholder string `json:"keyPlaceholder"`
+}
+
 // New constructs a live provider for the given name ("anthropic" | "openai" |
 // "gemini")
 // with the user's API key and chosen model. rateLimit is the minimum spacing
@@ -159,9 +166,15 @@ func ModelsByProvider() map[string][]string {
 	return out
 }
 
-// Providers lists the selectable provider ids for the settings UI, in display
+var providers = []ProviderInfo{
+	{ID: "anthropic", Label: "Anthropic (Claude)", KeyPlaceholder: "sk-ant-..."},
+	{ID: "openai", Label: "OpenAI", KeyPlaceholder: "sk-..."},
+	{ID: "gemini", Label: "Google Gemini", KeyPlaceholder: "AIza..."},
+}
+
+// Providers lists the selectable providers for the settings UI, in display
 // order.
-func Providers() []string { return []string{"anthropic", "openai", "gemini"} }
+func Providers() []ProviderInfo { return append([]ProviderInfo(nil), providers...) }
 
 // aiRequestSpacing is the self-imposed minimum spacing between live AI request
 // STARTS — the polite, backpressure-friendly pace the AI path has used since it

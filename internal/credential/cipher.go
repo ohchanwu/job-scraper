@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
 )
 
@@ -17,8 +16,6 @@ const (
 	// envelope format.
 	EncryptionVersionAES256GCM int16 = 1
 )
-
-var providerPattern = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
 // Cipher seals and opens provider credentials bound to one user and provider.
 type Cipher interface {
@@ -35,10 +32,12 @@ type AESGCMCipher struct {
 // keys and authenticated encryption metadata.
 func NormalizeProvider(provider string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(provider))
-	if !providerPattern.MatchString(normalized) {
+	switch normalized {
+	case "anthropic", "openai", "gemini":
+		return normalized, nil
+	default:
 		return "", errors.New("credential: invalid provider")
 	}
-	return normalized, nil
 }
 
 // NewAESGCMCipher constructs an AES-256-GCM credential cipher.

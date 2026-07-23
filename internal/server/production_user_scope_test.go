@@ -68,7 +68,7 @@ func TestProductionTwoAccountHTTPIsolationAndLifecycle(t *testing.T) {
 			"job_likes":     {goal},
 			"dealbreakers":  {dealbreaker},
 			"ai_provider":   {"anthropic"},
-			"ai_model":      {"test-model"},
+			"ai_model":      {"claude-haiku-4-5-20251001"},
 			"ai_key":        {key},
 			"source_jumpit": {"on"},
 		}
@@ -436,7 +436,7 @@ func TestProductionUserASaveLeavesAllUserBStateAndRuntimeUnchanged(t *testing.T)
 
 	form := url.Values{
 		"career_years": {"0"}, "min_score": {"0"}, "job_likes": {"goal-a-updated"},
-		"ai_provider": {"anthropic"}, "ai_model": {"model-a-updated"}, "ai_key": {"synthetic-key-a-updated"},
+		"ai_provider": {"anthropic"}, "ai_model": {"claude-sonnet-4-6"}, "ai_key": {"synthetic-key-a-updated"},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/profile", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1023,6 +1023,214 @@ func TestProductionProfileSaveEncryptsKeyAndBlankKeepsCredential(t *testing.T) {
 	}
 }
 
+func TestProductionProfileSaveReplacesOnlySelectedProvider(t *testing.T) {
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	srv.SetProductionMode(true)
+	userA, cookieA := createSessionUser(t, st, "replace-provider-a@example.invalid", "replace-provider-a-session")
+	userB, _ := createSessionUser(t, st, "replace-provider-b@example.invalid", "replace-provider-b-session")
+	cipher := newAIRuntimeTestCipher(t, 0x55)
+	srv.SetCredentialCipher(cipher)
+	srv.newAIProvider = func(provider, _, _ string, _ time.Duration) (ai.Provider, error) {
+		return &ai.StubProvider{NameVal: provider}, nil
+	}
+	providers := []string{"anthropic", "openai", "gemini"}
+	for _, provider := range providers {
+		saveAIRuntimeCredential(t, st, cipher, userA, provider, "original-a-"+provider)
+		saveAIRuntimeCredential(t, st, cipher, userB, provider, "original-b-"+provider)
+	}
+
+	postProfile := func(provider, key string) *httptest.ResponseRecorder {
+		t.Helper()
+		form := url.Values{
+			"ai_provider": {provider},
+			"ai_model":    {ai.DefaultModel(provider)},
+			"ai_key":      {key},
+			"min_score":   {"0"},
+		}
+		req := httptest.NewRequest(http.MethodPost, "/profile", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(cookieA)
+		addCSRFToRequest(req, srv, cookieA)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	for _, selected := range providers {
+		beforeA := make(map[string]storage.EncryptedAICredential, len(providers))
+		beforeB := make(map[string]storage.EncryptedAICredential, len(providers))
+		for _, provider := range providers {
+			beforeA[provider], _, _ = st.UserAICredential(context.Background(), userA, provider)
+			beforeB[provider], _, _ = st.UserAICredential(context.Background(), userB, provider)
+		}
+		replacement := "replacement-a-" + selected
+		if rec := postProfile(selected, replacement); rec.Code != http.StatusSeeOther {
+			t.Fatalf("replace %s status=%d body=%q", selected, rec.Code, rec.Body.String())
+		}
+		afterSelected, found, err := st.UserAICredential(context.Background(), userA, selected)
+		if err != nil || !found {
+			t.Fatalf("selected credential %s: found=%v err=%v", selected, found, err)
+		}
+		opened, err := cipher.Open(userA, selected, afterSelected.Ciphertext, afterSelected.Nonce, afterSelected.EncryptionVersion)
+		if err != nil || opened != replacement {
+			t.Fatalf("selected credential %s replacement matched=%v err=%v", selected, opened == replacement, err)
+		}
+		for _, provider := range providers {
+			gotA, _, _ := st.UserAICredential(context.Background(), userA, provider)
+			gotB, _, _ := st.UserAICredential(context.Background(), userB, provider)
+			if provider != selected && (!bytes.Equal(gotA.Ciphertext, beforeA[provider].Ciphertext) || !bytes.Equal(gotA.Nonce, beforeA[provider].Nonce)) {
+				t.Fatalf("replacing %s changed user A provider %s", selected, provider)
+			}
+			if !bytes.Equal(gotB.Ciphertext, beforeB[provider].Ciphertext) || !bytes.Equal(gotB.Nonce, beforeB[provider].Nonce) {
+				t.Fatalf("replacing user A %s changed user B provider %s", selected, provider)
+			}
+		}
+		if rec := postProfile(selected, ""); rec.Code != http.StatusSeeOther {
+			t.Fatalf("blank preserve %s status=%d body=%q", selected, rec.Code, rec.Body.String())
+		}
+		afterBlank, _, _ := st.UserAICredential(context.Background(), userA, selected)
+		if !bytes.Equal(afterBlank.Ciphertext, afterSelected.Ciphertext) || !bytes.Equal(afterBlank.Nonce, afterSelected.Nonce) {
+			t.Fatalf("blank key changed selected provider %s", selected)
+		}
+	}
+}
+
+func TestProductionAIKeyDeleteIsConfirmedAndUserScoped(t *testing.T) {
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	srv.SetProductionMode(true)
+	userA, cookieA := createSessionUser(t, st, "delete-key-a@example.invalid", "delete-key-a-session")
+	userB, _ := createSessionUser(t, st, "delete-key-b@example.invalid", "delete-key-b-session")
+	cipher := newAIRuntimeTestCipher(t, 0x57)
+	srv.SetCredentialCipher(cipher)
+	saveAIRuntimeProfile(t, st, userA, profile.Profile{AIProvider: "openai", AIModel: "gpt-5.6-luna"})
+	for _, provider := range []string{"anthropic", "openai", "gemini"} {
+		saveAIRuntimeCredential(t, st, cipher, userA, provider, "synthetic-a-"+provider)
+		saveAIRuntimeCredential(t, st, cipher, userB, provider, "synthetic-b-"+provider)
+	}
+
+	postDelete := func(provider, confirm string) *httptest.ResponseRecorder {
+		t.Helper()
+		form := url.Values{"provider": {provider}, "confirm": {confirm}}
+		req := httptest.NewRequest(http.MethodPost, "/profile/ai-key/delete", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(cookieA)
+		addCSRFToRequest(req, srv, cookieA)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	unauthForm := url.Values{"provider": {"openai"}, "confirm": {"yes"}}
+	unauthReq := httptest.NewRequest(http.MethodPost, "/profile/ai-key/delete", strings.NewReader(unauthForm.Encode()))
+	unauthReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	unauthRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(unauthRec, unauthReq)
+	if unauthRec.Code != http.StatusSeeOther || unauthRec.Header().Get("Location") != "/login" {
+		t.Fatalf("unauthenticated delete status=%d location=%q body=%q", unauthRec.Code, unauthRec.Header().Get("Location"), unauthRec.Body.String())
+	}
+	for _, confirm := range []string{"", "false"} {
+		if rec := postDelete("openai", confirm); rec.Code != http.StatusBadRequest {
+			t.Fatalf("confirmation %q status=%d body=%q", confirm, rec.Code, rec.Body.String())
+		}
+	}
+	if _, found, err := st.UserAICredential(context.Background(), userA, "openai"); err != nil || !found {
+		t.Fatalf("missing confirmation changed credential: found=%v err=%v", found, err)
+	}
+	if rec := postDelete("unknown", "yes"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid provider status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if rec := postDelete("openai", "yes"); rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/profile" {
+		t.Fatalf("confirmed delete status=%d location=%q body=%q", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	}
+	if _, found, err := st.UserAICredential(context.Background(), userA, "openai"); err != nil || found {
+		t.Fatalf("selected credential after delete: found=%v err=%v", found, err)
+	}
+	for _, tc := range []struct {
+		userID   int64
+		provider string
+	}{
+		{userA, "anthropic"},
+		{userA, "gemini"},
+		{userB, "anthropic"},
+		{userB, "openai"},
+		{userB, "gemini"},
+	} {
+		if _, found, err := st.UserAICredential(context.Background(), tc.userID, tc.provider); err != nil || !found {
+			t.Fatalf("unrelated credential user=%d provider=%s: found=%v err=%v", tc.userID, tc.provider, found, err)
+		}
+	}
+	profileJSON, _, found, err := st.ProfileForUser(context.Background(), userA)
+	if err != nil || !found {
+		t.Fatalf("profile after delete: found=%v err=%v", found, err)
+	}
+	gotProfile, err := profile.Unmarshal(profileJSON)
+	if err != nil || gotProfile.AIProvider != "openai" || gotProfile.AIModel != "gpt-5.6-luna" {
+		t.Fatalf("selection after delete = provider=%q model=%q err=%v", gotProfile.AIProvider, gotProfile.AIModel, err)
+	}
+	if rec := postDelete("openai", "yes"); rec.Code != http.StatusSeeOther {
+		t.Fatalf("missing-row delete status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestProductionProfileRendersCredentialStateWithoutSecrets(t *testing.T) {
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	srv.SetProductionMode(true)
+	userID, cookie := createSessionUser(t, st, "key-state@example.invalid", "key-state-session")
+	cipher := newAIRuntimeTestCipher(t, 0x58)
+	srv.SetCredentialCipher(cipher)
+	saveAIRuntimeProfile(t, st, userID, profile.Profile{AIProvider: "gemini", AIModel: "gemini-3.5-flash-lite"})
+	for _, provider := range []string{"anthropic", "openai", "gemini"} {
+		saveAIRuntimeCredential(t, st, cipher, userID, provider, "never-render-"+provider)
+	}
+
+	getProfile := func() string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/profile", nil)
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /profile status=%d body=%q", rec.Code, rec.Body.String())
+		}
+		return rec.Body.String()
+	}
+	body := getProfile()
+	for _, want := range []string{
+		`window.aiKeySavedByProvider = {"anthropic":true,"gemini":true,"openai":true};`,
+		`window.aiProviderOptions`,
+		`PostgreSQL에 저장하기 전에 암호화`,
+		`절대 화면에 다시 표시하지 않아요`,
+		`AI 키 삭제`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("profile missing credential UI %q:\n%s", want, body)
+		}
+	}
+	for _, secret := range []string{"never-render-anthropic", "never-render-openai", "never-render-gemini"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("profile rendered plaintext key marker %q", secret)
+		}
+	}
+
+	form := url.Values{"provider": {"gemini"}, "confirm": {"yes"}}
+	req := httptest.NewRequest(http.MethodPost, "/profile/ai-key/delete", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	addCSRFToRequest(req, srv, cookie)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("delete status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	body = getProfile()
+	if !strings.Contains(body, `window.aiKeySavedByProvider = {"anthropic":true,"gemini":false,"openai":true};`) {
+		t.Fatalf("deleted provider state not reflected:\n%s", body)
+	}
+	if !strings.Contains(body, "저장된 키가 없어 AI를 사용할 수 없어요") {
+		t.Fatalf("missing unavailable-without-key copy:\n%s", body)
+	}
+}
+
 func TestProductionProfileSaveEncryptionFailureChangesNothing(t *testing.T) {
 	srv, st := newPostgresTestServer(t, &fakeScraper{})
 	srv.SetProductionMode(true)
@@ -1101,7 +1309,7 @@ func TestProductionProfileDealbreakerChangeIsProviderFreeAndInvalidatesRerateSta
 
 	form := url.Values{
 		"ai_provider":  {"anthropic"},
-		"ai_model":     {"shared-model"},
+		"ai_model":     {"claude-haiku-4-5-20251001"},
 		"dealbreakers": {"리서치"},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/profile", strings.NewReader(form.Encode()))

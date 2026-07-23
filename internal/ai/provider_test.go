@@ -40,14 +40,14 @@ func TestHTTPProviderValidateDealbreakers(t *testing.T) {
 
 func TestModelsForProvider(t *testing.T) {
 	for _, prov := range Providers() {
-		models := ModelsForProvider(prov)
+		models := ModelsForProvider(prov.ID)
 		if len(models) == 0 {
-			t.Fatalf("ModelsForProvider(%q) is empty — the dropdown would offer nothing", prov)
+			t.Fatalf("ModelsForProvider(%q) is empty — the dropdown would offer nothing", prov.ID)
 		}
 		// The dropdown's first model must equal the provider's default, so the
 		// "기본값" (empty) choice and the first explicit option agree.
-		if models[0] != DefaultModel(prov) {
-			t.Errorf("ModelsForProvider(%q)[0] = %q, want the default %q first", prov, models[0], DefaultModel(prov))
+		if models[0] != DefaultModel(prov.ID) {
+			t.Errorf("ModelsForProvider(%q)[0] = %q, want the default %q first", prov.ID, models[0], DefaultModel(prov.ID))
 		}
 	}
 	if ModelsForProvider("groq") != nil {
@@ -79,9 +79,13 @@ func TestDefaultModelUsesFirstRegistryEntry(t *testing.T) {
 }
 
 func TestProviderRegistryIncludesOpenAIAndGemini(t *testing.T) {
-	wantProviders := []string{"anthropic", "openai", "gemini"}
+	wantProviders := []ProviderInfo{
+		{ID: "anthropic", Label: "Anthropic (Claude)", KeyPlaceholder: "sk-ant-..."},
+		{ID: "openai", Label: "OpenAI", KeyPlaceholder: "sk-..."},
+		{ID: "gemini", Label: "Google Gemini", KeyPlaceholder: "AIza..."},
+	}
 	if got := Providers(); !slices.Equal(got, wantProviders) {
-		t.Fatalf("Providers() = %q, want %q", got, wantProviders)
+		t.Fatalf("Providers() = %#v, want %#v", got, wantProviders)
 	}
 	wantModels := map[string][]string{
 		"openai": {"gpt-5.6-luna"},

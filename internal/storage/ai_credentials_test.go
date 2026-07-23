@@ -186,7 +186,7 @@ func TestDeleteUserAICredentialIsScopedAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := st.DeleteUserAICredential(ctx, userB, "future-provider"); err != nil {
+	if err := st.DeleteUserAICredential(ctx, userB, "openai"); err != nil {
 		t.Fatalf("delete missing user/provider: %v", err)
 	}
 	if _, found, err := st.UserAICredential(ctx, userA, "anthropic"); err != nil || !found {

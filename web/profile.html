@@ -139,10 +139,10 @@
         </label>
 
         <label>AI 제공자
-          <span class="field-hint">키는 이 기기에만 0600 권한 파일로 저장돼요. "없음"이면 일반 점수만 매겨요.</span>
+          <span class="field-hint">키는 PostgreSQL에 저장하기 전에 암호화하고, 절대 화면에 다시 표시하지 않아요. "없음"이면 일반 점수만 매겨요.</span>
           <select name="ai_provider" id="ai-provider-select">
             <option value=""{{if eq .AIProvider ""}} selected{{end}}>없음 (끄기)</option>
-            <option value="anthropic"{{if eq .AIProvider "anthropic"}} selected{{end}}>Anthropic (Claude)</option>
+            {{range .AIProviders}}<option value="{{.ID}}"{{if eq .ID $.AIProvider}} selected{{end}}>{{.Label}}</option>{{end}}
           </select>
         </label>
 
@@ -156,13 +156,24 @@
 
         <label>API 키
           {{if .AIKeySaved}}
-          <span class="field-hint">현재 <strong>•••• 저장됨</strong> — 바꾸려면 새 키를 입력하세요. 비워두면 그대로 둬요.</span>
+          <span class="field-hint" id="ai-key-status">현재 •••• 저장됨 — 바꾸려면 새 키를 입력하세요. 비워두면 그대로 둬요.</span>
+          {{else if .AIProvider}}
+          <span class="field-hint" id="ai-key-status">저장된 키가 없어 AI를 사용할 수 없어요. 새 키를 입력해주세요.</span>
           {{else}}
-          <span class="field-hint">제공자에서 발급받은 키를 붙여넣으세요.</span>
+          <span class="field-hint" id="ai-key-status">제공자를 선택한 뒤 발급받은 키를 붙여넣으세요.</span>
           {{end}}
-          <input type="password" name="ai_key" value="" autocomplete="off"
-                 placeholder="{{if .AIKeySaved}}변경하려면 새 키 입력{{else}}sk-...{{end}}">
+          <input type="password" name="ai_key" id="ai-key-input" value="" autocomplete="off"
+                 placeholder="{{if .AIKeySaved}}변경하려면 새 키 입력{{else}}{{.AIKeyPlaceholder}}{{end}}">
         </label>
+
+        <div class="ai-key-delete" id="ai-key-delete"{{if not .AIKeySaved}} hidden{{end}}>
+          <input type="hidden" name="provider" id="ai-key-delete-provider" value="{{.AIProvider}}">
+          <label class="check-row">
+            <input type="checkbox" name="confirm" id="ai-key-delete-confirm" value="yes">
+            <span>저장된 키를 삭제할게요</span>
+          </label>
+          <button type="submit" class="btn-danger" formaction="/profile/ai-key/delete" formmethod="post">AI 키 삭제</button>
+        </div>
 
         <label>일일 토큰 예산
           <span class="field-hint">하루에 쓸 AI 토큰 상한 (입력+출력). 비우면 기본 {{.AIDailyCapEffective}}.</span>
@@ -215,7 +226,11 @@
     </form>
   </div>
 
-  <script>window.aiModelOptions = {{.AIModelOptionsJSON}};</script>
+  <script>
+    window.aiModelOptions = {{.AIModelOptionsJSON}};
+    window.aiProviderOptions = {{.AIProviderJSON}};
+    window.aiKeySavedByProvider = {{.AIKeySavedJSON}};
+  </script>
   <script src="/static/theme.js"></script>
   <script src="/static/briefing-notification.js"></script>
   <script src="/static/not-interested.js"></script>
