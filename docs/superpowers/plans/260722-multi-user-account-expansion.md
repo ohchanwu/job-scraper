@@ -800,6 +800,9 @@ git commit -m "feat(ai): add OpenAI and Gemini providers"
 
 ### Task 11: Complete three-provider credential management and UI
 
+**Status:** Complete at reviewed tip `91f865b`; the fresh final rereview approved the cumulative
+three-commit range with no Critical, Important, or Minor findings.
+
 **Files:**
 
 - Modify: `internal/credential/cipher.go`
@@ -813,32 +816,32 @@ git commit -m "feat(ai): add OpenAI and Gemini providers"
 - Modify: `web/ai-model-select.js`
 - Modify: `web/styles.css`
 
-- [ ] **Step 1: Generalize provider validation and form data**
+- [x] **Step 1: Generalize provider validation and form data**
 
 Accept only `anthropic`, `openai`, and `gemini` after normalization. Replace hard-coded template
 options with the server-provided `ai.Providers()` list and display labels. Validate that the chosen
 model belongs to `ai.ModelsForProvider(provider)` before saving.
 
-- [ ] **Step 2: Preserve one encrypted key per user/provider**
+- [x] **Step 2: Preserve one encrypted key per user/provider**
 
 Test that switching providers with a blank key preserves each existing provider row, submitting a
 new key replaces only the selected row, and user A cannot read/change user B's three rows. Keep the
 envelope associated data `(userID, provider)` unchanged.
 
-- [ ] **Step 3: Add explicit key deletion**
+- [x] **Step 3: Add explicit key deletion**
 
 Register `POST /profile/ai-key/delete`. Require the selected provider plus an explicit confirmation
 field. Delete only the authenticated user's matching provider row. Leave the profile selection in
 place so the UI clearly shows “no key saved” and AI safely remains unavailable until
 replacement.
 
-- [ ] **Step 4: Fix hosted credential copy**
+- [x] **Step 4: Fix hosted credential copy**
 
 Replace the obsolete local `0600` file statement with accurate copy: keys are encrypted before
 storage in PostgreSQL and are never rendered back. Add provider-specific key placeholders only as
 hints; never validate secrets by prefix.
 
-- [ ] **Step 5: Verify provider switching and failures**
+- [x] **Step 5: Verify provider switching and failures**
 
 Cover 400/404 model mismatch, 401/403 invalid key, 429 quota/rate limiting, malformed provider
 output, blank-key preservation, replacement, deletion confirmation, and cross-user isolation.
@@ -851,7 +854,7 @@ go test ./internal/credential ./internal/profile ./internal/server \
 go test ./internal/credential ./internal/profile ./internal/server -count=1
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add internal/credential/cipher.go internal/credential/cipher_test.go \
