@@ -725,6 +725,9 @@ If no tracked fixes/tests were needed, do not create an empty commit.
 
 ### Task 10: Add one OpenAI-compatible HTTP adapter for OpenAI and Gemini
 
+**Status:** Corrected two-commit candidate `a2e5c67` passed final external exact-range rereview
+with no findings and was integrated locally as patch-equivalent commits `a62b6c3` and `c1b6560`.
+
 **Files:**
 
 - Create: `internal/ai/openai_compatible.go`
@@ -735,7 +738,7 @@ If no tracked fixes/tests were needed, do not create an empty commit.
 - Modify: `internal/ai/provider_test.go`
 - Modify: `internal/ai/integration_test.go`
 
-- [ ] **Step 1: Write failing offline contract tests**
+- [x] **Step 1: Write failing offline contract tests**
 
 For both providers, use `httptest.Server` and assert:
 
@@ -750,7 +753,7 @@ For both providers, use `httptest.Server` and assert:
 - bounded non-2xx `APIError`; and
 - pacing cancellation.
 
-- [ ] **Step 2: Implement the shared wire shape**
+- [x] **Step 2: Implement the shared wire shape**
 
 In `openai_compatible.go`, define the Chat Completions request/response structs and one constructor:
 
@@ -767,7 +770,7 @@ Register:
 Both use `Authorization: Bearer`. Keep all provider-specific JSON below `ai.Provider`. Do not add a
 generic provider framework beyond this one shared wire format.
 
-- [ ] **Step 3: Add the smallest current model registry**
+- [x] **Step 3: Add the smallest current model registry**
 
 At implementation time, re-check the official model pages before editing because identifiers are
 volatile. Pin one inexpensive default initially:
@@ -778,13 +781,13 @@ volatile. Pin one inexpensive default initially:
 Keep the existing Anthropic list. Add more models only when a real user choice is justified; one
 working default per new provider satisfies this milestone better than a stale catalog.
 
-- [ ] **Step 4: Keep live tests opt-in**
+- [x] **Step 4: Keep live tests opt-in**
 
 Extend the live contract test to run only when `JOBCRON_TEST_OPENAI_API_KEY` or
 `JOBCRON_TEST_GEMINI_API_KEY` is present. Assert structured extraction and non-zero usage without
 printing prompts, responses, or credentials. Ordinary `go test ./...` must make no paid calls.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```sh
 go test ./internal/ai -run 'OpenAI|Gemini|Provider|Models|HTTP' -count=1
