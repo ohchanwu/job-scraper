@@ -210,7 +210,7 @@ invalid model output, or exhausted AI budgets.
 
 Stage 1A extracts career range, new-grad eligibility, education, and separate career and education
 evidence from posting text. These facts describe the posting rather than a user, so the cache is
-global and keyed by posting content and `EligibilityVersion`. Invalid or unavailable extraction
+global and keyed by posting content and `ExtractionContractVersion`. Invalid or unavailable extraction
 falls back to source fields and deterministic parsing.
 
 ### Stage 1B: user-scoped dealbreaker context

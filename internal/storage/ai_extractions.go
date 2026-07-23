@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/ohchanwu/jobcron/internal/ai"
@@ -92,42 +94,77 @@ WHERE posting_id = ? AND content_hash = ? AND ai_version = ?`
 	return ext, true, nil
 }
 
-// AIExtractionsByPostingID returns, per posting id, the latest cached
-// extraction for the given ai_version (newest computed_at wins when a posting
-// has more than one content_hash row). One query for the whole corpus — the
-// scoring merge (scoreAll) calls it once and looks up by posting id, never
-// N+1. Postings with no extraction are simply absent from the map.
-func (s *Store) AIExtractionsByPostingID(ctx context.Context, aiVersion string) (map[int64]ai.Extraction, error) {
-	query := `
-SELECT posting_id, min_career, max_career, newcomer, education_enum, evidence
-FROM ai_extractions
-WHERE ai_version = ?
-ORDER BY posting_id, computed_at DESC`
-	if s.dialect == DialectPostgres {
-		query = `
-SELECT posting_id, min_career, max_career, newcomer, education_enum, career_evidence, education_evidence
-FROM ai_extractions
-WHERE ai_version = ?
-ORDER BY posting_id, computed_at DESC`
-	}
-	rows, err := s.db.QueryContext(ctx, s.query(query), aiVersion)
-	if err != nil {
-		return nil, fmt.Errorf("storage: query ai extractions: %w", err)
-	}
-	defer rows.Close()
+const aiExtractionBatchSize = 8_000
+
+type aiExtractionPair struct {
+	postingID   int64
+	contentHash string
+}
+
+// AIExtractionsByPostingID returns the extraction matching each requested
+// posting's current content hash and ai_version. Bounded exact-pair queries
+// keep scoreAll free of N+1 reads, driver parameter limits, and historical-row
+// materialization.
+func (s *Store) AIExtractionsByPostingID(
+	ctx context.Context, contentHashes map[int64]string, aiVersion string,
+) (map[int64]ai.Extraction, error) {
 	out := map[int64]ai.Extraction{}
-	for rows.Next() {
-		var pid int64
-		ext, err := scanExtractionWithID(rows, &pid, s.dialect == DialectPostgres)
-		if err != nil {
-			return nil, err
-		}
-		if _, seen := out[pid]; seen {
-			continue // ORDER BY computed_at DESC: first row per posting is the latest
-		}
-		out[pid] = ext
+	if len(contentHashes) == 0 {
+		return out, nil
 	}
-	return out, rows.Err()
+	pairs := make([]aiExtractionPair, 0, len(contentHashes))
+	for postingID, contentHash := range contentHashes {
+		pairs = append(pairs, aiExtractionPair{postingID: postingID, contentHash: contentHash})
+	}
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i].postingID < pairs[j].postingID })
+
+	for start := 0; start < len(pairs); start += aiExtractionBatchSize {
+		end := min(start+aiExtractionBatchSize, len(pairs))
+		batch := pairs[start:end]
+		values := make([]string, 0, len(batch))
+		args := make([]any, 0, len(batch)*2+1)
+		for _, pair := range batch {
+			values = append(values, "(CAST(? AS BIGINT), CAST(? AS TEXT))")
+			args = append(args, pair.postingID, pair.contentHash)
+		}
+		args = append(args, aiVersion)
+
+		query := `
+WITH requested(posting_id, content_hash) AS (VALUES ` + strings.Join(values, ",") + `)
+SELECT e.posting_id, e.min_career, e.max_career, e.newcomer, e.education_enum, e.evidence
+FROM ai_extractions e
+JOIN requested r ON r.posting_id = e.posting_id AND r.content_hash = e.content_hash
+WHERE e.ai_version = ?`
+		if s.dialect == DialectPostgres {
+			query = `
+WITH requested(posting_id, content_hash) AS (VALUES ` + strings.Join(values, ",") + `)
+SELECT e.posting_id, e.min_career, e.max_career, e.newcomer, e.education_enum, e.career_evidence, e.education_evidence
+FROM ai_extractions e
+JOIN requested r ON r.posting_id = e.posting_id AND r.content_hash = e.content_hash
+WHERE e.ai_version = ?`
+		}
+		rows, err := s.db.QueryContext(ctx, s.query(query), args...)
+		if err != nil {
+			return nil, fmt.Errorf("storage: query ai extractions: %w", err)
+		}
+		for rows.Next() {
+			var pid int64
+			ext, err := scanExtractionWithID(rows, &pid, s.dialect == DialectPostgres)
+			if err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			out[pid] = ext
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("storage: iterate ai extractions: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("storage: close ai extractions: %w", err)
+		}
+	}
+	return out, nil
 }
 
 func scanExtraction(row rowScanner, splitEvidence bool) (ai.Extraction, error) {
@@ -152,7 +189,7 @@ func scanExtraction(row rowScanner, splitEvidence bool) (ai.Extraction, error) {
 	return ext, nil
 }
 
-// scanExtractionWithID is scanExtraction for the batched query, which selects
+// scanExtractionWithID is scanExtraction for a batched query that selects
 // posting_id as the leading column.
 func scanExtractionWithID(rows *sql.Rows, pid *int64, splitEvidence bool) (ai.Extraction, error) {
 	var (

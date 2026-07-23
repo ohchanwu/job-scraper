@@ -280,7 +280,7 @@ func TestPostgresRuntimeStorageMethods(t *testing.T) {
 	if got, ok, err := st.AIExtraction(ctx, id, "content", "v1"); err != nil || !ok || got.MinCareer != ext.MinCareer {
 		t.Fatalf("AIExtraction min=%d ok=%v err=%v", got.MinCareer, ok, err)
 	}
-	if got, err := st.AIExtractionsByPostingID(ctx, "v1"); err != nil || got[id].MinCareer != ext.MinCareer {
+	if got, err := st.AIExtractionsByPostingID(ctx, map[int64]string{id: "content"}, "v1"); err != nil || got[id].MinCareer != ext.MinCareer {
 		t.Fatalf("AIExtractionsByPostingID min=%d err=%v", got[id].MinCareer, err)
 	}
 

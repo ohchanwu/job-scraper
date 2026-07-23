@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -117,7 +118,7 @@ func TestPostgresAIExtractionRoundTrip(t *testing.T) {
 	if err := st.UpsertAIExtraction(ctx, postingID, "content", "ai-v1", ext, time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("update extraction: %v", err)
 	}
-	batched, err := st.AIExtractionsByPostingID(ctx, "ai-v1")
+	batched, err := st.AIExtractionsByPostingID(ctx, map[int64]string{postingID: "content"}, "ai-v1")
 	if err != nil {
 		t.Fatalf("AIExtractionsByPostingID: %v", err)
 	}
@@ -133,8 +134,93 @@ func TestPostgresAIExtractionRoundTrip(t *testing.T) {
 	}
 }
 
-func TestAIExtractionsByPostingIDBatchedAndLatest(t *testing.T) {
+func TestAIExtractionsByPostingIDBatchedByExactContent(t *testing.T) {
+	testAIExtractionsByPostingIDBatchedByExactContent(t, newTestStore(t))
+}
+
+func TestPostgresAIExtractionsByPostingIDBatchedByExactContent(t *testing.T) {
+	st, _ := newPostgresTestStoreWithSchema(t)
+	testAIExtractionsByPostingIDBatchedByExactContent(t, st)
+}
+
+func TestAIExtractionsByPostingIDSQLiteBoundary(t *testing.T) {
 	st := newTestStore(t)
+	got, err := st.AIExtractionsByPostingID(
+		context.Background(), fakeContentHashes(16_383), "ver000000001",
+	)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("boundary read = %d rows, err=%v; want empty result", len(got), err)
+	}
+}
+
+func TestPostgresAIExtractionsByPostingIDBoundary(t *testing.T) {
+	st, _ := newPostgresTestStoreWithSchema(t)
+	got, err := st.AIExtractionsByPostingID(
+		context.Background(), fakeContentHashes(32_768), "ver000000001",
+	)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("boundary read = %d rows, err=%v; want empty result", len(got), err)
+	}
+}
+
+func TestAIExtractionsByPostingIDMultiChunkMerge(t *testing.T) {
+	testAIExtractionsByPostingIDMultiChunkMerge(t, newTestStore(t))
+}
+
+func TestPostgresAIExtractionsByPostingIDMultiChunkMerge(t *testing.T) {
+	st, _ := newPostgresTestStoreWithSchema(t)
+	testAIExtractionsByPostingIDMultiChunkMerge(t, st)
+}
+
+func testAIExtractionsByPostingIDMultiChunkMerge(t *testing.T, st *Store) {
+	t.Helper()
+	ctx := context.Background()
+	const ver = "ver000000001"
+	if aiExtractionBatchSize != 8_000 {
+		t.Fatalf("aiExtractionBatchSize = %d, want 8000", aiExtractionBatchSize)
+	}
+
+	first, _, _ := st.UpsertPosting(ctx, samplePosting())
+	secondPosting := samplePosting()
+	secondPosting.SourcePostingID = "multi-chunk-second"
+	second, _, _ := st.UpsertPosting(ctx, secondPosting)
+	const lastID int64 = 20_000
+	if _, err := st.db.ExecContext(
+		ctx, st.query("UPDATE postings SET id = ? WHERE id = ?"), lastID, second,
+	); err != nil {
+		t.Fatalf("move second posting: %v", err)
+	}
+
+	if err := st.UpsertAIExtraction(ctx, first, "first", ver, ai.Extraction{CareerEvidence: "first"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertAIExtraction(ctx, lastID, "last", ver, ai.Extraction{CareerEvidence: "last"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	requested := map[int64]string{first: "first", lastID: "last"}
+	for id := int64(1_000); len(requested) < aiExtractionBatchSize+1; id++ {
+		requested[id] = fmt.Sprintf("fake-%d", id)
+	}
+	got, err := st.AIExtractionsByPostingID(ctx, requested, ver)
+	if err != nil {
+		t.Fatalf("multi-chunk read: %v", err)
+	}
+	if len(got) != 2 || got[first].CareerEvidence != "first" || got[lastID].CareerEvidence != "last" {
+		t.Fatalf("multi-chunk result = %+v, want both real rows", got)
+	}
+}
+
+func fakeContentHashes(n int) map[int64]string {
+	hashes := make(map[int64]string, n)
+	for i := range n {
+		hashes[int64(i+1)] = fmt.Sprintf("fake-%d", i)
+	}
+	return hashes
+}
+
+func testAIExtractionsByPostingIDBatchedByExactContent(t *testing.T, st *Store) {
+	t.Helper()
 	ctx := context.Background()
 	const ver = "ver000000001"
 
@@ -145,9 +231,11 @@ func TestAIExtractionsByPostingIDBatchedAndLatest(t *testing.T) {
 	id2, _, _ := st.UpsertPosting(ctx, p2)
 
 	t0 := time.Date(2026, 6, 2, 9, 0, 0, 0, time.UTC)
-	// id1 has two content_hash rows under the same version; the newer wins.
-	if err := st.UpsertAIExtraction(ctx, id1, "old", ver, ai.Extraction{MinCareer: 5, EducationEnum: ai.EduBachelor, CareerEvidence: "old"}, t0); err != nil {
-		t.Fatal(err)
+	for i := range 10 {
+		hash := fmt.Sprintf("old-%d", i)
+		if err := st.UpsertAIExtraction(ctx, id1, hash, ver, ai.Extraction{MinCareer: i, EducationEnum: ai.EduBachelor, CareerEvidence: hash}, t0); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := st.UpsertAIExtraction(ctx, id1, "new", ver, ai.Extraction{MinCareer: 0, Newcomer: true, EducationEnum: ai.EduNone, CareerEvidence: "new"}, t0.Add(time.Hour)); err != nil {
 		t.Fatal(err)
@@ -155,12 +243,23 @@ func TestAIExtractionsByPostingIDBatchedAndLatest(t *testing.T) {
 	if err := st.UpsertAIExtraction(ctx, id2, "h", ver, ai.Extraction{MinCareer: 2, EducationEnum: ai.EduAssociate, CareerEvidence: "two"}, t0); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.UpsertAIExtraction(ctx, id1, "h", ver, ai.Extraction{MinCareer: 30, EducationEnum: ai.EduDoctorate, CareerEvidence: "cross-wrong"}, t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertAIExtraction(ctx, id2, "new", ver, ai.Extraction{MinCareer: 30, EducationEnum: ai.EduDoctorate, CareerEvidence: "cross-wrong"}, t0); err != nil {
+		t.Fatal(err)
+	}
 	// A row under a DIFFERENT version must not leak into this version's read.
 	if err := st.UpsertAIExtraction(ctx, id2, "h", "otherversion", ai.Extraction{MinCareer: 40, EducationEnum: ai.EduDoctorate, CareerEvidence: "wrong"}, t0); err != nil {
 		t.Fatal(err)
 	}
 
-	m, err := st.AIExtractionsByPostingID(ctx, ver)
+	empty, err := st.AIExtractionsByPostingID(ctx, nil, ver)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty AIExtractionsByPostingID = %+v, err=%v", empty, err)
+	}
+
+	m, err := st.AIExtractionsByPostingID(ctx, map[int64]string{id1: "new", id2: "h"}, ver)
 	if err != nil {
 		t.Fatalf("AIExtractionsByPostingID: %v", err)
 	}
@@ -168,10 +267,13 @@ func TestAIExtractionsByPostingIDBatchedAndLatest(t *testing.T) {
 		t.Fatalf("map has %d entries, want 2", len(m))
 	}
 	if m[id1].CareerEvidence != "new" || !m[id1].Newcomer {
-		t.Fatalf("id1 = %+v, want the newer (computed_at DESC) row", m[id1])
+		t.Fatalf("id1 = %+v, want only current content row", m[id1])
 	}
 	if m[id2].MinCareer != 2 || m[id2].EducationEnum != ai.EduAssociate {
 		t.Fatalf("id2 = %+v, want this-version row, not the otherversion one", m[id2])
+	}
+	if historical, ok, err := st.AIExtraction(ctx, id1, "old-0", ver); err != nil || !ok || historical.CareerEvidence != "old-0" {
+		t.Fatalf("historical row = %+v, ok=%v err=%v; want retained exact lookup", historical, ok, err)
 	}
 }
 

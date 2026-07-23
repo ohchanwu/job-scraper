@@ -138,7 +138,7 @@ func TestLiveStage1BContextualDealbreakers(t *testing.T) {
 			p = applies
 		}
 		_, contentHash, _ := ai.ModelInput(p)
-		if err := st.UpsertAIExtraction(ctx, seeded.id, contentHash, runtime.EligibilityVersion,
+		if err := st.UpsertAIExtraction(ctx, seeded.id, contentHash, ai.ExtractionContractVersion(),
 			ai.Extraction{Newcomer: true, EducationEnum: ai.EduNone}, now); err != nil {
 			t.Fatalf("seed Stage 1A cache: %T", err)
 		}

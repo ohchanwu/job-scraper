@@ -34,11 +34,19 @@ func saveSinipProfile(t *testing.T, srv *Server) {
 	}
 }
 
-// aiExtractionCount counts cached extractions under the server's ai_version
+// aiExtractionCount counts cached extractions under the global contract version
 // (one row per posting in these tests).
-func aiExtractionCount(t *testing.T, srv *Server, runtime *AIRuntime) int {
+func aiExtractionCount(t *testing.T, srv *Server) int {
 	t.Helper()
-	m, err := srv.store.AIExtractionsByPostingID(context.Background(), runtime.EligibilityVersion)
+	postings, err := srv.store.AllPostings(context.Background())
+	if err != nil {
+		t.Fatalf("list postings: %v", err)
+	}
+	contentHashes := make(map[int64]string, len(postings))
+	for _, p := range postings {
+		_, contentHashes[p.ID], _ = ai.ModelInput(p)
+	}
+	m, err := srv.store.AIExtractionsByPostingID(context.Background(), contentHashes, ai.ExtractionContractVersion())
 	if err != nil {
 		t.Fatalf("count ai_extractions: %v", err)
 	}
@@ -241,7 +249,7 @@ func TestScheduledScrapeSkipsFreshAIByDefault(t *testing.T) {
 	if stub.ScoreDeltaCalls != 0 {
 		t.Fatalf("ScoreDelta calls = %d, want 0 for scheduled AI default-off", stub.ScoreDeltaCalls)
 	}
-	if n := aiExtractionCount(t, srv, runtime); n != 0 {
+	if n := aiExtractionCount(t, srv); n != 0 {
 		t.Fatalf("ai_extractions rows = %d, want 0", n)
 	}
 	if n := countAIScores(t, srv, runtime); n != 0 {
@@ -371,7 +379,7 @@ func TestRunScrapeStubProviderExtractsNewPostings(t *testing.T) {
 	}
 
 	// One ai_extractions row per new posting, and exactly one Extract call each.
-	if n := aiExtractionCount(t, srv, runtime); n != 2 {
+	if n := aiExtractionCount(t, srv); n != 2 {
 		t.Errorf("ai_extractions rows = %d, want 2", n)
 	}
 	if stub.Calls != 2 {
@@ -381,7 +389,15 @@ func TestRunScrapeStubProviderExtractsNewPostings(t *testing.T) {
 		t.Errorf("FetchDetail calls = %d, want 2", len(f.detailCalls))
 	}
 	// The cached extraction is readable under the run's ai_version.
-	exts, err := st.AIExtractionsByPostingID(ctx, runtime.EligibilityVersion)
+	postings, err := st.AllPostings(ctx)
+	if err != nil {
+		t.Fatalf("AllPostings: %v", err)
+	}
+	contentHashes := make(map[int64]string, len(postings))
+	for _, p := range postings {
+		_, contentHashes[p.ID], _ = ai.ModelInput(p)
+	}
+	exts, err := st.AIExtractionsByPostingID(ctx, contentHashes, ai.ExtractionContractVersion())
 	if err != nil || len(exts) != 2 {
 		t.Fatalf("AIExtractionsByPostingID: got %d (err=%v), want 2", len(exts), err)
 	}
@@ -411,7 +427,7 @@ func TestRunScrapeProviderFailsScrapeContinues(t *testing.T) {
 	if res.New != 1 || res.Scored != 1 {
 		t.Errorf("ScrapeResult = %+v, want the posting still inserted + scored", res)
 	}
-	if n := aiExtractionCount(t, srv, runtime); n != 0 {
+	if n := aiExtractionCount(t, srv); n != 0 {
 		t.Errorf("ai_extractions rows = %d, want 0 (provider failed, no cache row)", n)
 	}
 	// Posting is present and scored via the regex path.
@@ -461,36 +477,159 @@ func TestRunScrapeAlreadySeenDoesNotExtract(t *testing.T) {
 	if stub.Calls != 0 {
 		t.Errorf("Extract called %d times for a known posting; want 0 (no steady-state token burn)", stub.Calls)
 	}
-	if n := aiExtractionCount(t, srv, runtime); n != 0 {
+	if n := aiExtractionCount(t, srv); n != 0 {
 		t.Errorf("ai_extractions rows = %d, want 0", n)
 	}
 }
 
-// TestExtractStage1CacheHitSkipsProvider exercises the cache-hit branch
-// directly: a pre-seeded extraction for the posting's content_hash means no
-// provider call.
-func TestExtractStage1CacheHitSkipsProvider(t *testing.T) {
+func TestExtractStage1CacheHitSurvivesProviderAndModelChange(t *testing.T) {
 	srv, st := newTestServer(t, &fakeScraper{})
-	stub := newcomerStub()
-	runtime := testAIRuntime(1, stub, "test-model")
 	ctx := context.Background()
-
 	p := listingPosting("1", "백엔드 신입")
 	p.Description = "서버 개발자를 찾습니다"
-	p.FirstSeenAt, p.LastSeenAt = time.Now().UTC(), time.Now().UTC()
-	id, _, err := st.UpsertPosting(ctx, p)
-	if err != nil {
-		t.Fatalf("UpsertPosting: %v", err)
-	}
-	_, contentHash, _ := ai.ModelInput(p)
-	seeded := ai.Extraction{MinCareer: 0, Newcomer: true, EducationEnum: ai.EduNone, CareerEvidence: "seeded"}
-	if err := st.UpsertAIExtraction(ctx, id, contentHash, runtime.EligibilityVersion, seeded, time.Now()); err != nil {
-		t.Fatalf("seed extraction: %v", err)
+	id := mustUpsert(t, st, p)
+	originalProvider := newcomerStub()
+	originalProvider.NameVal = "provider-a"
+	originalRuntime := testAIRuntime(1, originalProvider, "model-a")
+	srv.extractStage1(ctx, id, p, time.Now().UTC(), 1, originalRuntime, srv.newAIBudget(ctx, 1, originalRuntime))
+	if originalProvider.Calls != 1 {
+		t.Fatalf("initial Extract calls = %d, want cache population", originalProvider.Calls)
 	}
 
+	changedProvider := newcomerStub()
+	changedProvider.NameVal = "provider-b"
+	runtime := testAIRuntime(1, changedProvider, "model-b")
 	srv.extractStage1(ctx, id, p, time.Now().UTC(), 1, runtime, srv.newAIBudget(ctx, 1, runtime))
+
+	if changedProvider.Calls != 0 {
+		t.Fatalf("Extract called %d times after provider/model change; want global cache hit", changedProvider.Calls)
+	}
+}
+
+func TestExtractStage1CacheMissesWhenContentOrContractChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		seedVersion string
+		change      func(*scraper.Posting)
+	}{
+		{
+			name:        "posting content",
+			seedVersion: ai.ExtractionContractVersion(),
+			change: func(p *scraper.Posting) {
+				p.Description = "변경된 서버 공고"
+			},
+		},
+		{name: "extraction contract", seedVersion: "prior-contract-version"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, st := newTestServer(t, &fakeScraper{})
+			ctx := context.Background()
+			p := listingPosting("1", "백엔드 신입")
+			p.Description = "서버 개발자를 찾습니다"
+			id := mustUpsert(t, st, p)
+			_, oldHash, _ := ai.ModelInput(p)
+			seeded := ai.Extraction{Newcomer: true, EducationEnum: ai.EduNone}
+			if err := st.UpsertAIExtraction(ctx, id, oldHash, tc.seedVersion, seeded, time.Now()); err != nil {
+				t.Fatalf("seed extraction: %v", err)
+			}
+			if tc.change != nil {
+				tc.change(&p)
+			}
+
+			stub := newcomerStub()
+			runtime := testAIRuntime(1, stub, "model-b")
+			srv.extractStage1(ctx, id, p, time.Now().UTC(), 1, runtime, srv.newAIBudget(ctx, 1, runtime))
+
+			if stub.Calls != 1 {
+				t.Fatalf("Extract calls = %d, want cache miss", stub.Calls)
+			}
+			_, newHash, _ := ai.ModelInput(p)
+			if _, ok, err := st.AIExtraction(ctx, id, newHash, ai.ExtractionContractVersion()); err != nil || !ok {
+				t.Fatalf("current extraction cache row: ok=%v err=%v", ok, err)
+			}
+		})
+	}
+}
+
+func TestExtractStage1FailuresDoNotWriteCache(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "provider error", err: errors.New("provider down")},
+		{name: "malformed output", err: errors.New("ai: decode extraction response")},
+		{name: "validation failure", err: errors.New("ai: min_career out of range")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, st := newTestServer(t, &fakeScraper{})
+			ctx := context.Background()
+			p := listingPosting("1", "백엔드 신입")
+			id := mustUpsert(t, st, p)
+			stub := &ai.StubProvider{
+				NameVal: "stub",
+				ExtractFn: func(context.Context, string) (ai.Extraction, ai.Usage, error) {
+					return ai.Extraction{}, ai.Usage{}, tc.err
+				},
+			}
+			runtime := testAIRuntime(1, stub, "model")
+
+			srv.extractStage1(ctx, id, p, time.Now().UTC(), 1, runtime, srv.newAIBudget(ctx, 1, runtime))
+
+			if n := aiExtractionCount(t, srv); n != 0 {
+				t.Fatalf("ai_extractions rows = %d, want 0", n)
+			}
+		})
+	}
+}
+
+func TestExtractStage1DeterministicFallbackDoesNotWriteCache(t *testing.T) {
+	srv, st := newTestServer(t, &fakeScraper{})
+	p := listingPosting("1", "백엔드 신입")
+	id := mustUpsert(t, st, p)
+	stub := newcomerStub()
+	runtime := testAIRuntime(1, stub, "model")
+
+	srv.extractStage1(context.Background(), id, p, time.Now().UTC(), 1, runtime, nil)
+
 	if stub.Calls != 0 {
-		t.Errorf("Extract called %d times on a cache hit; want 0", stub.Calls)
+		t.Fatalf("Extract calls = %d, want deterministic fallback without provider", stub.Calls)
+	}
+	if n := aiExtractionCount(t, srv); n != 0 {
+		t.Fatalf("ai_extractions rows = %d, want 0", n)
+	}
+}
+
+func TestScoreAllIgnoresExtractionForPriorContentHash(t *testing.T) {
+	srv, st := newTestServer(t, &fakeScraper{})
+	ctx := context.Background()
+	p := listingPosting("1", "백엔드 신입")
+	p.Description = "기존 공고"
+	p.EducationName = ""
+	id := mustUpsert(t, st, p)
+	_, oldHash, _ := ai.ModelInput(p)
+	stale := ai.Extraction{Newcomer: true, EducationEnum: ai.EduBachelor}
+	if err := st.UpsertAIExtraction(ctx, id, oldHash, ai.ExtractionContractVersion(), stale, time.Now()); err != nil {
+		t.Fatalf("seed stale extraction: %v", err)
+	}
+	p.Description = "수정된 공고"
+	if err := st.RefreshPostingDetail(ctx, id, p, time.Now().UTC()); err != nil {
+		t.Fatalf("RefreshPostingDetail: %v", err)
+	}
+	saveProfileJSON(t, srv, profile.Profile{
+		CareerYears:  0,
+		MaxEducation: profile.EducationHighSchool,
+	})
+	runtime := testAIRuntime(1, newcomerStub(), "model")
+
+	if _, err := srv.scoreAll(ctx, 1, runtime); err != nil {
+		t.Fatalf("scoreAll: %v", err)
+	}
+	score, ok, err := st.ScoreByPostingID(ctx, id)
+	if err != nil || !ok {
+		t.Fatalf("ScoreByPostingID: ok=%v err=%v", ok, err)
+	}
+	if score.Total == -1 {
+		t.Fatal("score reused stale education extraction after posting content changed")
 	}
 }
 
@@ -516,7 +655,7 @@ func TestRunScrapePerRunBudgetHalts(t *testing.T) {
 	if stub.Calls != 1 {
 		t.Errorf("Extract calls = %d, want 1 (budget halts after the first)", stub.Calls)
 	}
-	if n := aiExtractionCount(t, srv, runtime); n != 1 {
+	if n := aiExtractionCount(t, srv); n != 1 {
 		t.Errorf("ai_extractions rows = %d, want 1", n)
 	}
 	var sawColdStart bool

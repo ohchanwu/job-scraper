@@ -7,9 +7,9 @@ import (
 )
 
 const (
-	EligibilityPromptVersion = "2"
-	DealbreakerPromptVersion = "1"
-	ScorePromptVersion       = "1"
+	extractionContractRevision = "1"
+	DealbreakerPromptVersion   = "1"
+	ScorePromptVersion         = "1"
 )
 
 func taskVersion(parts ...string) string {
@@ -17,8 +17,8 @@ func taskVersion(parts ...string) string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
-func EligibilityVersion(provider, model string) string {
-	return taskVersion(provider, model, "eligibility", EligibilityPromptVersion)
+func ExtractionContractVersion() string {
+	return taskVersion("extraction-contract", extractionContractRevision)
 }
 
 func DealbreakerVersion(provider, model string) string {

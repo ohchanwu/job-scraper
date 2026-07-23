@@ -91,7 +91,6 @@ func TestAIRuntimeForUserIsolatesEncryptedCredentials(t *testing.T) {
 		t.Fatal("distinct user credentials produced the same test fingerprint")
 	}
 	if runtimeA.UserID != userA ||
-		runtimeA.EligibilityVersion != ai.EligibilityVersion("anthropic", "model-a") ||
 		runtimeA.DealbreakerVersion != ai.DealbreakerVersion("anthropic", "model-a") ||
 		runtimeA.ScoreVersion != ai.ScoreVersion("anthropic", "model-a") ||
 		runtimeA.RunTokenCap != aiRunTokenCapForUSDCents(7) ||
@@ -100,7 +99,6 @@ func TestAIRuntimeForUserIsolatesEncryptedCredentials(t *testing.T) {
 		t.Fatalf("user A runtime metadata = %+v", runtimeA)
 	}
 	if runtimeB.UserID != userB ||
-		runtimeB.EligibilityVersion != ai.EligibilityVersion("anthropic", "model-b") ||
 		runtimeB.DealbreakerVersion != ai.DealbreakerVersion("anthropic", "model-b") ||
 		runtimeB.ScoreVersion != ai.ScoreVersion("anthropic", "model-b") ||
 		runtimeB.PerCallCap != 11 {
@@ -309,7 +307,7 @@ func TestDailyTokenCapHaltsAIRegexContinues(t *testing.T) {
 	if stub.Calls != 0 {
 		t.Errorf("Extract calls = %d, want 0 (daily cap already exhausted)", stub.Calls)
 	}
-	if n := aiExtractionCount(t, srv, runtime); n != 0 {
+	if n := aiExtractionCount(t, srv); n != 0 {
 		t.Errorf("ai_extractions rows = %d, want 0 (AI halted)", n)
 	}
 	// Regex scoring still ran: the posting is present and scored.

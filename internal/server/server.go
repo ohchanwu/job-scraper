@@ -145,7 +145,6 @@ type aiProviderFactory func(provider, key, model string, rateLimit time.Duration
 type AIRuntime struct {
 	UserID             int64
 	Provider           ai.Provider
-	EligibilityVersion string
 	DealbreakerVersion string
 	ScoreVersion       string
 	RunTokenCap        int
@@ -215,7 +214,6 @@ func (s *Server) aiRuntimeForUser(ctx context.Context, userID int64) (*AIRuntime
 	return &AIRuntime{
 		UserID:             userID,
 		Provider:           aiProvider,
-		EligibilityVersion: ai.EligibilityVersion(provider, model),
 		DealbreakerVersion: ai.DealbreakerVersion(provider, model),
 		ScoreVersion:       ai.ScoreVersion(provider, model),
 		RunTokenCap:        aiRunTokenCapForUSDCents(prof.EffectiveAIRunUSDCapCents()),
@@ -822,10 +820,10 @@ func (s *Server) extractStage1(ctx context.Context, id int64, p scraper.Posting,
 		return
 	}
 	sent, contentHash, _ := ai.ModelInput(p)
-	// Cache hit (same content already extracted under this ai_version): reuse,
+	// Cache hit (same content already extracted under this contract): reuse,
 	// no provider call. New postings always miss; this matters for the T7
 	// re-rate backfill and idempotent re-runs.
-	if _, ok, err := s.store.AIExtraction(ctx, id, contentHash, runtime.EligibilityVersion); err == nil && ok {
+	if _, ok, err := s.store.AIExtraction(ctx, id, contentHash, ai.ExtractionContractVersion()); err == nil && ok {
 		return
 	}
 	ext, usage, err := runtime.Provider.Extract(ctx, sent)
@@ -834,7 +832,7 @@ func (s *Server) extractStage1(ctx context.Context, id int64, p scraper.Posting,
 	}
 	budget.debit(ctx, usage)
 	// Best-effort cache write; a failure here just means a regex score this pass.
-	_ = s.store.UpsertAIExtraction(ctx, id, contentHash, runtime.EligibilityVersion, ext, now)
+	_ = s.store.UpsertAIExtraction(ctx, id, contentHash, ai.ExtractionContractVersion(), ext, now)
 }
 
 // loadProfile fetches the saved profile, returning ok=false when none has
@@ -913,6 +911,7 @@ func (s *Server) scoreAll(ctx context.Context, userID int64, runtime *AIRuntime)
 	// time, while a 재평가 may run Stage 1B followed by Stage 2.
 	var (
 		exts                   map[int64]ai.Extraction
+		contentHashes          map[int64]string
 		dealbreakerValidations map[int64]map[string]storage.AIDealbreakerValidation
 		freshDeltas            map[int64]ai.Delta // keyed by the CURRENT goal text (ai_input_hash) + current ai_version
 		latestDeltas           map[int64]ai.Delta // newest per posting under the current ai_version, any goal text — stale fallback for a goal edit
@@ -922,7 +921,11 @@ func (s *Server) scoreAll(ctx context.Context, userID int64, runtime *AIRuntime)
 		if userID <= 0 || runtime.UserID != userID {
 			return 0, fmt.Errorf("server: AI runtime user mismatch")
 		}
-		exts, err = s.store.AIExtractionsByPostingID(ctx, runtime.EligibilityVersion)
+		contentHashes = make(map[int64]string, len(postings))
+		for _, p := range postings {
+			_, contentHashes[p.ID], _ = ai.ModelInput(p)
+		}
+		exts, err = s.store.AIExtractionsByPostingID(ctx, contentHashes, ai.ExtractionContractVersion())
 		if err != nil {
 			return 0, err
 		}
@@ -987,7 +990,7 @@ func (s *Server) scoreAll(ctx context.Context, userID int64, runtime *AIRuntime)
 		}
 		var validations map[string]ai.DealbreakerValidation
 		if cached := dealbreakerValidations[p.ID]; len(cached) > 0 {
-			_, contentHash, _ := ai.ModelInput(p)
+			contentHash := contentHashes[p.ID]
 			validations = make(map[string]ai.DealbreakerValidation)
 			for _, candidate := range scoring.DealbreakerCandidates(p, prof) {
 				if row, ok := cached[contentHash+"\x00"+candidate.ID]; ok {

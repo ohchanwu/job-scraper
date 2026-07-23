@@ -41,7 +41,7 @@ func TestInternGuardEndToEnd(t *testing.T) {
 			t.Fatalf("UpsertPosting(%s): %v", srcID, err)
 		}
 		_, contentHash, _ := ai.ModelInput(p)
-		if err := st.UpsertAIExtraction(ctx, id, contentHash, runtime.EligibilityVersion, bad, now); err != nil {
+		if err := st.UpsertAIExtraction(ctx, id, contentHash, ai.ExtractionContractVersion(), bad, now); err != nil {
 			t.Fatalf("seed extraction(%s): %v", srcID, err)
 		}
 		return id
