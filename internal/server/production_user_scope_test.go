@@ -119,10 +119,11 @@ func TestProductionProfileSaveIsRejectedWhileScoringOperationRuns(t *testing.T) 
 	srv.SetProductionMode(true)
 	userID, cookie := createSessionUser(t, st, "profile-lock@example.invalid", "profile-lock-session")
 	saveAIRuntimeProfile(t, st, userID, profile.Profile{JobLikes: "unchanged goal"})
-	if !srv.flight.tryAcquire(scrapeAllKey) {
+	lease := srv.flight.tryAcquire(scrapeAllKey)
+	if lease == nil {
 		t.Fatal("failed to arrange in-flight scoring operation")
 	}
-	defer srv.flight.release(scrapeAllKey)
+	defer lease.release()
 
 	form := url.Values{"job_likes": {"must not persist"}}
 	req := httptest.NewRequest(http.MethodPost, "/profile", strings.NewReader(form.Encode()))

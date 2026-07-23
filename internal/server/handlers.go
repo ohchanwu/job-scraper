@@ -31,6 +31,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /hidden", s.handleHidden)
 	mux.HandleFunc("GET /profile", s.handleProfileForm)
 	mux.HandleFunc("POST /profile", s.handleProfileSave)
+	mux.HandleFunc("GET /account", s.handleAccount)
+	mux.HandleFunc("POST /account/password", s.handleAccountPassword)
+	mux.HandleFunc("POST /account/delete", s.handleAccountDelete)
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.handleLoginPost)
 	mux.HandleFunc("GET /signup", s.handleSignupForm)
@@ -51,7 +54,7 @@ func (s *Server) Handler() http.Handler {
 		http.FileServer(http.FS(web.FS))))
 	var handler http.Handler = mux
 	if s.productionMode && !s.demoMode {
-		handler = s.requireAuth(limitSignupBody(s.csrfProtect(handler)))
+		handler = s.requireAuth(limitAccountBody(limitSignupBody(s.csrfProtect(handler))))
 	}
 	if !s.demoMode {
 		return handler
@@ -142,11 +145,12 @@ func (s *Server) handleScrapeSSE(w http.ResponseWriter, r *http.Request) {
 		writeAuthUnauthorized(w)
 		return
 	}
-	if !s.flight.tryAcquire(scrapeAllKey) {
+	lease := s.flight.tryAcquire(scrapeAllKey)
+	if lease == nil {
 		http.Error(w, "이미 스크랩이 진행 중이에요. 잠시만 기다려 주세요.", http.StatusConflict)
 		return
 	}
-	defer s.flight.release(scrapeAllKey)
+	defer lease.release()
 	sw, err := newSSEWriter(w)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -520,11 +524,12 @@ func (s *Server) handleProfileSave(w http.ResponseWriter, r *http.Request) {
 	// Profile changes alter score inputs and AI runtime configuration. Serialize
 	// them with scrape/rerate so one operation cannot resolve an old runtime and
 	// finish scoring against a newly committed profile.
-	if !s.flight.tryAcquire(scrapeAllKey) {
+	lease := s.flight.tryAcquire(scrapeAllKey)
+	if lease == nil {
 		http.Error(w, "이미 작업이 진행 중이에요. 잠시만 기다려 주세요.", http.StatusConflict)
 		return
 	}
-	defer s.flight.release(scrapeAllKey)
+	defer lease.release()
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

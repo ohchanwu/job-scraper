@@ -245,11 +245,12 @@ func (s *Server) handleRerateSSE(w http.ResponseWriter, r *http.Request) {
 	// Acquire before resolving the runtime. Profile saves share this key, so the
 	// profile, credential, and immutable runtime stay one consistent snapshot for
 	// the complete detached operation.
-	if !s.flight.tryAcquire(scrapeAllKey) {
+	lease := s.flight.tryAcquire(scrapeAllKey)
+	if lease == nil {
 		http.Error(w, "이미 작업이 진행 중이에요. 잠시만 기다려 주세요.", http.StatusConflict)
 		return
 	}
-	defer s.flight.release(scrapeAllKey)
+	defer lease.release()
 	runtime, err := s.aiRuntimeForUser(r.Context(), userID)
 	if err != nil || runtime == nil {
 		// No provider configured — there is nothing to re-rate. The button is

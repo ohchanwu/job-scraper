@@ -60,7 +60,7 @@ func TestArchivePageUsesAllPostingsTerminology(t *testing.T) {
 		"<title>전체 공고 — 오늘의 채용 브리핑</title>",
 		"<h1>전체 공고</h1>",
 		`<link rel="canonical" href="/">`,
-		`<a href="/" class="active">전체 공고</a>`,
+		`<a href="/" class="active" aria-current="page">전체 공고</a>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/archive missing %q", want)

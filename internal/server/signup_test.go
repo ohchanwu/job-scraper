@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ohchanwu/jobcron/internal/auth"
 	"github.com/ohchanwu/jobcron/internal/storage"
@@ -257,18 +259,135 @@ END`); err != nil {
 	assertAccountCounts(t, st, 0, 0)
 }
 
+func TestSignupReleasesPasswordWorkBeforeSessionPersistence(t *testing.T) {
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	srv.SetProductionMode(true)
+	srv.SetSignupAccessCode(testSignupAccessCode)
+	srv.passwordWorkSlots = make(chan struct{}, 1)
+
+	hash, err := auth.HashPassword("login-password")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	if _, err := st.CreateOwnerUser(context.Background(), "owner@example.com", hash); err != nil {
+		t.Fatalf("CreateOwnerUser: %v", err)
+	}
+
+	tx, err := st.SQLDB().BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if _, err := tx.Exec(`LOCK TABLE sessions IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatalf("lock sessions: %v", err)
+	}
+
+	result := make(chan *httptest.ResponseRecorder, 1)
+	go func() { result <- postSignup(t, srv, validSignupForm(testSignupAccessCode)) }()
+	barrierReleased := false
+	signupFinished := false
+	defer func() {
+		if !barrierReleased {
+			_ = tx.Rollback()
+		}
+		if !signupFinished {
+			select {
+			case <-result:
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}()
+	if err := waitForSignupSessionLock(context.Background(), st, result); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(srv.passwordWorkSlots); got != 0 {
+		t.Fatalf("password-work slots held during signup persistence = %d, want 0", got)
+	}
+	if rec := postLogin(t, srv, "198.51.100.30:1234", "owner@example.com", "wrong-password"); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("concurrent login status = %d, want 401", rec.Code)
+	}
+	select {
+	case rec := <-result:
+		t.Fatalf("signup completed while session persistence was blocked: status=%d", rec.Code)
+	default:
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("release session barrier: %v", err)
+	}
+	barrierReleased = true
+	select {
+	case rec := <-result:
+		signupFinished = true
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("signup status = %d, want 303", rec.Code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("signup did not finish after session barrier released")
+	}
+	if got := len(srv.passwordWorkSlots); got != 0 {
+		t.Fatalf("password-work slots after signup = %d, want 0", got)
+	}
+}
+
+func waitForSignupSessionLock(
+	ctx context.Context,
+	st *storage.Store,
+	result <-chan *httptest.ResponseRecorder,
+) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(result) > 0 {
+			return fmt.Errorf("signup completed before session barrier")
+		}
+
+		var blocked bool
+		err := st.SQLDB().QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_stat_activity AS activity
+				JOIN pg_locks AS locks ON locks.pid = activity.pid
+				WHERE activity.pid <> pg_backend_pid()
+				  AND activity.datname = current_database()
+				  AND activity.state = 'active'
+				  AND activity.query LIKE '%INSERT INTO sessions%'
+				  AND locks.locktype = 'relation'
+				  AND locks.relation = to_regclass('sessions')
+				  AND NOT locks.granted
+			)`).Scan(&blocked)
+		if err != nil {
+			return err
+		}
+		if blocked {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return fmt.Errorf("timed out waiting for signup session lock")
+}
+
 func TestSignupBoundsConcurrentPasswordHashing(t *testing.T) {
 	srv, st := newTestServer(t, &fakeScraper{})
 	srv.SetProductionMode(true)
 	srv.SetSignupAccessCode(testSignupAccessCode)
-	for range cap(srv.signupHashSlots) {
-		srv.signupHashSlots <- struct{}{}
+	for range cap(srv.passwordWorkSlots) {
+		srv.passwordWorkSlots <- struct{}{}
 	}
 
 	if rec := postSignup(t, srv, validSignupForm(testSignupAccessCode)); rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("status = %d, want 429 while password hashing is saturated", rec.Code)
 	}
 	assertAccountCounts(t, st, 0, 0)
+}
+
+func TestPasswordWorkCapacityRejectsCancelledAcquisition(t *testing.T) {
+	srv, _ := newTestServer(t, &fakeScraper{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if srv.acquirePasswordWork(ctx) {
+		t.Fatal("password-work acquisition succeeded after cancellation")
+	}
+	if got := len(srv.passwordWorkSlots); got != 0 {
+		t.Fatalf("password-work slots in use = %d, want 0", got)
+	}
 }
 
 func TestSignupDuplicateUsesGenericFailureWithoutLoggingIdentity(t *testing.T) {

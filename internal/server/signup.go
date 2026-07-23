@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
@@ -15,7 +16,7 @@ const (
 	signupMaxFormBytes       int64 = 16 << 10
 	signupMaxEmailBytes            = 254
 	signupMaxAccessCodeBytes       = 256
-	signupHashConcurrency          = 2
+	passwordWorkConcurrency        = 2
 )
 
 type signupPage struct {
@@ -71,14 +72,12 @@ func (s *Server) handleSignupPost(w http.ResponseWriter, r *http.Request) {
 		s.renderSignupFailure(w, r)
 		return
 	}
-	select {
-	case s.signupHashSlots <- struct{}{}:
-		defer func() { <-s.signupHashSlots }()
-	default:
+	if !s.acquirePasswordWork(r.Context()) {
 		http.Error(w, "too many signup attempts", http.StatusTooManyRequests)
 		return
 	}
 	hash, err := auth.HashPassword(password)
+	s.releasePasswordWork()
 	if err != nil {
 		http.Error(w, "signup failed", http.StatusInternalServerError)
 		return
@@ -101,6 +100,20 @@ func (s *Server) handleSignupPost(w http.ResponseWriter, r *http.Request) {
 	s.signupLimiter.resetIP(ip)
 	http.Redirect(w, r, "/profile", http.StatusSeeOther)
 }
+
+func (s *Server) acquirePasswordWork(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	select {
+	case s.passwordWorkSlots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) releasePasswordWork() { <-s.passwordWorkSlots }
 
 func (s *Server) renderSignupFailure(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusUnprocessableEntity)

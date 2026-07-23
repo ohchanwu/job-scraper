@@ -72,11 +72,12 @@ func (s *Server) runScheduledScrape(ctx context.Context) {
 	// Serialize the complete owner/runtime snapshot with profile saves and all
 	// scrape/rerate work. Resolving before this lock could pair an old credential
 	// and budget configuration with a profile committed while waiting.
-	if !s.flight.tryAcquire(scrapeAllKey) {
+	lease := s.flight.tryAcquire(scrapeAllKey)
+	if lease == nil {
 		s.recordSkippedScheduledRun(ctx, "skipped: scrape already running")
 		return
 	}
-	defer s.flight.release(scrapeAllKey)
+	defer lease.release()
 	if s.store.Dialect() == storage.DialectSQLite {
 		_, _ = s.runScrapeWithHistory(ctx, storage.ScrapeTriggerScheduled, noopSchedulerEmit, 0, nil)
 		return

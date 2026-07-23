@@ -323,10 +323,11 @@ func TestRerateMutuallyExclusiveWithScrape(t *testing.T) {
 	srv, _, _ := seedRerate(t)
 
 	t.Run("re-rate is rejected while a scrape holds the lock", func(t *testing.T) {
-		if !srv.flight.tryAcquire(scrapeAllKey) {
+		lease := srv.flight.tryAcquire(scrapeAllKey)
+		if lease == nil {
 			t.Fatal("could not acquire the scrape lock for the test")
 		}
-		defer srv.flight.release(scrapeAllKey)
+		defer lease.release()
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/rerate?surface=today&entry=entry-token-00000001", nil))
 		if rec.Code != http.StatusConflict {
@@ -335,10 +336,11 @@ func TestRerateMutuallyExclusiveWithScrape(t *testing.T) {
 	})
 
 	t.Run("a scrape is rejected while a re-rate holds the lock", func(t *testing.T) {
-		if !srv.flight.tryAcquire(scrapeAllKey) {
+		lease := srv.flight.tryAcquire(scrapeAllKey)
+		if lease == nil {
 			t.Fatal("could not acquire the shared lock for the test")
 		}
-		defer srv.flight.release(scrapeAllKey)
+		defer lease.release()
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/scrape", nil))
 		if rec.Code != http.StatusConflict {

@@ -21,13 +21,15 @@ import (
 // fakeScraper is a test double for scraper.Scraper — it returns canned data
 // instead of hitting the live 점핏 API.
 type fakeScraper struct {
-	source       string
-	listing      []scraper.Posting
-	details      map[string]scraper.Posting
-	accessErr    error
-	accessPanic  string
-	listingPanic string
-	detailCalls  []string // SourcePostingIDs FetchDetail was called for
+	source         string
+	listing        []scraper.Posting
+	details        map[string]scraper.Posting
+	accessErr      error
+	accessPanic    string
+	listingPanic   string
+	detailCalls    []string // SourcePostingIDs FetchDetail was called for
+	listingStarted chan struct{}
+	listingRelease <-chan struct{}
 }
 
 func (f *fakeScraper) Source() string {
@@ -47,6 +49,16 @@ func (f *fakeScraper) CheckAccess(ctx context.Context) error {
 func (f *fakeScraper) FetchListing(ctx context.Context, limit int) ([]scraper.Posting, error) {
 	if f.listingPanic != "" {
 		panic(f.listingPanic)
+	}
+	if f.listingStarted != nil {
+		close(f.listingStarted)
+	}
+	if f.listingRelease != nil {
+		select {
+		case <-f.listingRelease:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	return f.listing, nil
 }
@@ -319,7 +331,18 @@ func TestApplicationPagesUseSharedPrimaryNav(t *testing.T) {
 		t.Fatalf("ReadFile(_nav.html): %v", err)
 	}
 	nav := string(shared)
-	for _, want := range []string{`{{define "primaryNav"}}`, `href="/briefing"`, `class="briefing-dot"`, `aria-label="새 데일리 브리핑 있음"`} {
+	for _, want := range []string{
+		`{{define "primaryNav"}}`,
+		`href="/briefing"`,
+		`class="briefing-dot"`,
+		`aria-label="새 데일리 브리핑 있음"`,
+		`eq .Active "briefing"}} aria-current="page"`,
+		`eq .Active "archive"}} class="active" aria-current="page"`,
+		`eq .Active "bookmarks"}} class="active" aria-current="page"`,
+		`eq .Active "hidden"}} class="active" aria-current="page"`,
+		`eq .Active "profile"}} class="active" aria-current="page"`,
+		`eq .Active "account"}} class="active" aria-current="page"`,
+	} {
 		if !strings.Contains(nav, want) {
 			t.Errorf("shared nav missing %q", want)
 		}
@@ -613,7 +636,8 @@ func TestHandleScrapeStreamsSSE(t *testing.T) {
 
 func TestHandleScrapeRejectsConcurrentScrape(t *testing.T) {
 	srv, _ := newTestServer(t, &fakeScraper{})
-	srv.flight.tryAcquire(scrapeAllKey) // a scrape is already in progress
+	lease := srv.flight.tryAcquire(scrapeAllKey) // a scrape is already in progress
+	defer lease.release()
 
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/scrape", nil))

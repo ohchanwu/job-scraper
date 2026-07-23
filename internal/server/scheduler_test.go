@@ -129,10 +129,11 @@ func TestStartSchedulerRecordsSkippedRunWhenScrapeLockBusy(t *testing.T) {
 	if _, err := st.CreateOwnerUser(context.Background(), "scheduler-busy@example.invalid", "synthetic-hash"); err != nil {
 		t.Fatalf("CreateOwnerUser: %v", err)
 	}
-	if !srv.flight.tryAcquire(scrapeAllKey) {
+	lease := srv.flight.tryAcquire(scrapeAllKey)
+	if lease == nil {
 		t.Fatal("failed to arrange busy scrape lock")
 	}
-	defer srv.flight.release(scrapeAllKey)
+	defer lease.release()
 
 	schedulerCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()

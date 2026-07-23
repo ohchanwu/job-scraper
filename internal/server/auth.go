@@ -122,7 +122,12 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		s.renderLoginFailure(w, r)
 		return
 	}
+	if !s.acquirePasswordWork(r.Context()) {
+		http.Error(w, "too many login attempts", http.StatusTooManyRequests)
+		return
+	}
 	matches, err := auth.VerifyPassword(user.PasswordHash, password)
+	s.releasePasswordWork()
 	if err != nil || !matches {
 		s.renderLoginFailure(w, r)
 		return

@@ -27,7 +27,9 @@ jobcron process
 
 The production process is intentionally small. There is no separate frontend server, worker
 queue, scheduler service, or AI service. Scrapes and rerates run inside the application process,
-and a process-local singleflight lock prevents overlapping operations.
+and a process-local singleflight lock prevents overlapping operations. Each bounded operation key
+retains a one-token gate: release hands ownership to one queued context-aware waiter, and fail-fast
+callers cannot barge ahead of that handoff.
 
 For user-facing behavior and local startup, start with the [project README](../README.md).
 
@@ -134,13 +136,30 @@ concurrent Argon2id hashing are bounded. Invalid codes, invalid account data, an
 addresses share generic failure wording; an unset code fails closed without creating a user or
 session.
 
+Authenticated users manage their account at `GET /account`. Password changes require the current
+password plus a policy-valid confirmed replacement. Login and account password verification plus
+signup and replacement hashing share bounded password-work capacity and finish before any database
+transaction. Password
+changes and self-deletion share dedicated account-mutation attempt windows: an absolute client-IP
+budget bounds all re-authentication work, while a client-IP-and-user failure budget resets after a
+correct current password. Either rejection returns the same generic `429` before taking password
+work capacity. The
+mutation proceeds only while the exact loaded password hash and unexpired submitting hashed session
+still belong to that user; the same transaction writes the new Argon2id hash and revokes every other
+session. Self-service deletion requires the current password and canonical email, then waits for the
+shared scrape/re-rate operation gate before applying the same expected-credential and
+unexpired-session guard. That ordering lets detached paid work finish its provider calls and usage
+debit before private rows are cascaded. Cancellation while waiting leaves the account unchanged. A
+stale guard returns the generic account-validation failure without mutation. The server then expires
+the browser session cookie and redirects to login.
+
 Every authenticated handler resolves a `userID` before accessing profiles, saved-job state,
 scores, AI usage, or credentials. Local mode supplies the fixed local owner's ID through the same
 server methods. This keeps storage calls user-scoped while the broader account rollout remains
 incomplete.
 
-Sponsor-funded onboarding, password recovery, self-service account deletion (operator deletion
-exists), organizations, and per-user schedules are not implemented. The
+Sponsor-funded onboarding, password recovery, organizations, and per-user schedules are not
+implemented. The
 [multi-user expansion follow-up](superpowers/specs/260715-multi-user-account-expansion.md) records
 that remaining product work.
 
@@ -265,12 +284,17 @@ application roles. The deployment-only owner bootstrap remains table-locked and 
 database that already contains an account.
 
 Login creates a session only if the user's password hash still equals the exact hash just verified,
-while holding the same PostgreSQL user-row lock used by password mutation. A concurrent password
-change or operator reset therefore cannot leave a session authenticated by the old password.
+while holding the same PostgreSQL user-row lock used by password mutation. A concurrent
+self-service password change or operator reset therefore cannot leave a session authenticated by
+the old password. PostgreSQL self-service mutations lock the matching user before the matching
+session; SQLite compatibility uses one conditional mutation statement. Both paths require the user
+ID, expected password hash, and submitting hashed session to remain unexpired at one
+transaction-time timestamp.
+Self-service changes preserve only the submitting session; operator resets revoke all sessions.
 
 Foreign keys remove dependent user state when its owner is deleted. Composite keys and repository
-methods include `user_id` wherever two accounts must not share state. The current owner-only UI is
-therefore a product limitation, not a storage shortcut.
+methods include `user_id` wherever two accounts must not share state. Account settings use these
+same exact-user boundaries for password changes and deletion.
 
 Legacy SQLite is not an ordinary writable runtime. The tracked read-only demo may open an uploaded
 snapshot through `--demo --db`; all other application startup paths use PostgreSQL.
@@ -278,9 +302,9 @@ snapshot through `--demo --db`; all other application startup paths use PostgreS
 preserved local data into an existing PostgreSQL owner. It inserts all postings before restoring
 their self-referencing canonical-duplicate links, so a link may safely point to a posting with a
 later ID.
-`cmd/jobcron-user` bootstraps the owner and resets or deletes exact accounts outside the public
-application surface. SQLite migrations remain embedded for importer compatibility, the read-only
-demo, and tests.
+`cmd/jobcron-user` bootstraps the owner and provides operator-side password reset or deletion when
+the user cannot sign in. SQLite migrations remain embedded for importer compatibility, the
+read-only demo, and tests.
 
 See the [hosted-first storage decision][hosted-first-storage] and the
 [local import procedure](../deploy/local/README.md#verified-sqlite-import).
