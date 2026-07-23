@@ -584,8 +584,8 @@ git commit -m "feat(ai): bill global stage1 misses to sponsor"
 
 ### Task 8: Split global collection from sequential per-user analysis
 
-**Status:** Implementation and correction are complete locally at `e638d5d`; fresh external
-exact-range review and integration remain pending.
+**Status:** Corrected candidate `e638d5d` passed fresh external exact-range review with no
+findings and was integrated locally as the patch-equivalent commit `8683bac`.
 
 **Files:**
 
