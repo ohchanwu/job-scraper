@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 )
 
@@ -51,6 +52,25 @@ func TestModelsForProvider(t *testing.T) {
 	}
 	if ModelsForProvider("groq") != nil {
 		t.Error("an unknown provider must return nil models")
+	}
+}
+
+func TestProviderRegistryIncludesOpenAIAndGemini(t *testing.T) {
+	wantProviders := []string{"anthropic", "openai", "gemini"}
+	if got := Providers(); !slices.Equal(got, wantProviders) {
+		t.Fatalf("Providers() = %q, want %q", got, wantProviders)
+	}
+	wantModels := map[string][]string{
+		"openai": {"gpt-5.6-luna"},
+		"gemini": {"gemini-3.5-flash-lite"},
+	}
+	for provider, want := range wantModels {
+		if got := ModelsForProvider(provider); !slices.Equal(got, want) {
+			t.Errorf("ModelsForProvider(%q) = %q, want %q", provider, got, want)
+		}
+		if got := DefaultModel(provider); got != want[0] {
+			t.Errorf("DefaultModel(%q) = %q, want %q", provider, got, want[0])
+		}
 	}
 }
 

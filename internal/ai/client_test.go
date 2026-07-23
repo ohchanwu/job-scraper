@@ -74,7 +74,7 @@ func TestCompleteNon200IsError(t *testing.T) {
 }
 
 func TestNewFactory(t *testing.T) {
-	for _, name := range []string{"anthropic"} {
+	for _, name := range []string{"anthropic", "openai", "gemini"} {
 		p, err := New(name, "sk", "model", 0)
 		if err != nil {
 			t.Fatalf("New(%q): %v", name, err)
@@ -83,11 +83,8 @@ func TestNewFactory(t *testing.T) {
 			t.Fatalf("New(%q).Name() = %q", name, p.Name())
 		}
 	}
-	// OpenAI was removed — it must now be an unknown provider, like any other.
-	for _, name := range []string{"openai", "groq"} {
-		if _, err := New(name, "sk", "model", 0); !errors.Is(err, ErrUnknownProvider) {
-			t.Fatalf("New(%q) err = %v, want ErrUnknownProvider", name, err)
-		}
+	if _, err := New("groq", "sk", "model", 0); !errors.Is(err, ErrUnknownProvider) {
+		t.Fatalf("New(unknown) err = %v, want ErrUnknownProvider", err)
 	}
 }
 

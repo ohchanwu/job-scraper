@@ -136,8 +136,9 @@ func truncateForError(b []byte) string {
 	return s
 }
 
-// specByName is the registry New switches on. Anthropic is the only supported
-// provider (OpenAI was removed; see git history for its spec).
+// specByName is the registry New switches on.
 var specByName = map[string]providerSpec{
 	anthropicSpec.name: anthropicSpec,
+	openaiSpec.name:    openaiSpec,
+	geminiSpec.name:    geminiSpec,
 }

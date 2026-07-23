@@ -104,7 +104,8 @@ type Usage struct {
 	OutputTokens int
 }
 
-// New constructs a live provider for the given name ("anthropic" | "openai")
+// New constructs a live provider for the given name ("anthropic" | "openai" |
+// "gemini")
 // with the user's API key and chosen model. rateLimit is the minimum spacing
 // between requests (pass 0 in tests to disable pacing). It returns
 // ErrUnknownProvider for any other name. The returned provider is pinned to
@@ -119,12 +120,11 @@ func New(providerName, apiKey, model string, rateLimit time.Duration) (Provider,
 
 // defaultModelByProvider is the model used when the user selects a provider but
 // leaves the model field blank. The default is the provider's small, cheap tier
-// — the extraction/scoring task is short, and BYOK users pay per token. The user
-// can override it in the profile form. (OpenAI was removed as a provider — its
-// low free-tier rate limit couldn't sustain the re-rate workload; see git history
-// for the implementation.)
+// — the extraction/scoring task is short, and BYOK users pay per token.
 var defaultModelByProvider = map[string]string{
 	"anthropic": "claude-haiku-4-5-20251001",
+	"openai":    "gpt-5.6-luna",
+	"gemini":    "gemini-3.5-flash-lite",
 }
 
 // DefaultModel returns the fallback model id for a provider, or "" for an
@@ -141,6 +141,8 @@ func DefaultModel(providerName string) string {
 // would 404.
 var modelsByProvider = map[string][]string{
 	"anthropic": {"claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-8"},
+	"openai":    {"gpt-5.6-luna"},
+	"gemini":    {"gemini-3.5-flash-lite"},
 }
 
 // ModelsForProvider returns the selectable model ids for a provider (default
@@ -163,8 +165,8 @@ func ModelsByProvider() map[string][]string {
 }
 
 // Providers lists the selectable provider ids for the settings UI, in display
-// order. Anthropic is the only supported provider (OpenAI was removed).
-func Providers() []string { return []string{"anthropic"} }
+// order.
+func Providers() []string { return []string{"anthropic", "openai", "gemini"} }
 
 // aiRequestSpacing is the self-imposed minimum spacing between live AI request
 // STARTS — the polite, backpressure-friendly pace the AI path has used since it
@@ -180,9 +182,8 @@ func Providers() []string { return []string{"anthropic"} }
 // overlaps the multi-second call latencies.
 const aiRequestSpacing = time.Second + (time.Second / 5) // 1.2s
 
-// SuggestedRateLimit returns the request-start spacing for a provider. With a
-// single supported provider the value is uniform (aiRequestSpacing), so the
-// provider name is accepted for API stability but not branched on.
+// SuggestedRateLimit returns the uniform request-start spacing for a provider.
+// The provider name is accepted for API stability but not branched on.
 func SuggestedRateLimit(providerName string) time.Duration {
 	return aiRequestSpacing
 }

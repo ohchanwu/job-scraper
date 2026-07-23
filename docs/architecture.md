@@ -7,7 +7,7 @@ Optional AI calls extract global eligibility facts, validate user-specific dealb
 context, and enrich score explanations. The deterministic scoring path remains complete when AI
 is disabled or unavailable.
 
-This document describes the implemented architecture as of 2026-07-23. Approved future work is
+This document describes the implemented architecture as of 2026-07-24. Approved future work is
 listed separately so it is not mistaken for current behavior.
 
 ## System at a glance
@@ -21,7 +21,7 @@ jobcron process
    |-- net/http routes -> embedded templates, CSS, and JavaScript
    |-- in-process daily scheduler
    |-- scraper adapters -> public job-board endpoints
-   |-- deterministic scoring -> optional Anthropic calls
+   |-- deterministic scoring -> optional Anthropic, OpenAI, or Gemini calls
    `-- storage repositories -> PostgreSQL
 ```
 
@@ -100,7 +100,8 @@ See the [demo deployment reference](../deploy/demo/README.md).
 - `internal/scraper` defines the normalized posting contract and shared robots, pacing, and
   experience helpers. Source subpackages implement individual job-board adapters.
 - `internal/scoring` applies deterministic profile rules and merges cached AI facts and deltas.
-- `internal/ai` defines the provider contract, Anthropic client, prompts, response parsing,
+- `internal/ai` defines the provider contract, the Anthropic Messages adapter, one shared
+  OpenAI-compatible Chat Completions adapter for OpenAI and Gemini, prompts, response parsing,
   evidence gates, and AI version identity.
 - `internal/storage` exposes one concrete repository and applies embedded schema migrations.
   PostgreSQL backs production and ordinary local modes. SQLite entry points exist only for the

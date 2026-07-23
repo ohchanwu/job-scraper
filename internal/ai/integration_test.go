@@ -16,6 +16,8 @@ import (
 // CI and never spend tokens without an explicit opt-in. Run one with:
 //
 //	JOBCRON_ANTHROPIC_KEY=sk-ant-... go test -tags integration -run Live ./internal/ai/
+//	JOBCRON_TEST_OPENAI_API_KEY=sk-... go test -tags integration -run LiveOpenAI ./internal/ai/
+//	JOBCRON_TEST_GEMINI_API_KEY=...    go test -tags integration -run LiveGemini ./internal/ai/
 //
 // They confirm the REAL request/response shape and JSON-mode parsing — the
 // external-surface check a stub cannot give: that the live model honors the
@@ -42,7 +44,7 @@ func liveProvider(t *testing.T, name, envKey, model string) Provider {
 	}
 	p, err := New(name, key, model, time.Second)
 	if err != nil {
-		t.Fatalf("New(%s): %v", name, err)
+		t.Fatalf("construct live %s provider", name)
 	}
 	return p
 }
@@ -58,18 +60,17 @@ func runLiveContract(t *testing.T, p Provider) {
 	// Stage 1 — extraction.
 	ext, usage, err := p.Extract(ctx, sent)
 	if err != nil {
-		t.Fatalf("Extract: %v", err)
+		t.Fatal("live extraction failed")
 	}
 	if !validEducationEnum[ext.EducationEnum] {
-		t.Errorf("education enum %q not in the allowed set", ext.EducationEnum)
+		t.Error("live extraction returned an education enum outside the allowed set")
 	}
 	if ext.MinCareer < 0 || ext.MinCareer > careerYearsMax {
-		t.Errorf("min_career %d out of range", ext.MinCareer)
+		t.Error("live extraction returned min_career outside the allowed range")
 	}
 	if usage.InputTokens == 0 {
 		t.Error("usage input_tokens = 0 — the provider's usage block was not parsed")
 	}
-	t.Logf("Extract: %+v (usage %+v)", ext, usage)
 
 	// Stage 2 — score delta + citation gate. The model may legitimately return
 	// zero items for this JD; what must hold is that the reply PARSES and every
@@ -77,7 +78,7 @@ func runLiveContract(t *testing.T, p Provider) {
 	profileText := "좋아하는 업무: 백엔드 서버 개발\n피하고 싶은 업무: 잦은 야근"
 	raw, usage2, err := p.ScoreDelta(ctx, sent, profileText)
 	if err != nil {
-		t.Fatalf("ScoreDelta: %v", err)
+		t.Fatal("live score delta failed")
 	}
 	if usage2.InputTokens == 0 {
 		t.Error("ScoreDelta usage input_tokens = 0")
@@ -85,12 +86,19 @@ func runLiveContract(t *testing.T, p Provider) {
 	delta := GateDelta(raw, sent, post.Description)
 	for _, it := range delta.Items {
 		if it.Kind == KindPresence && !tokenSubsequence(sent, it.Evidence) {
-			t.Errorf("a surviving presence item's quote is not in the sent text: %q", it.Evidence)
+			t.Error("a surviving presence item's evidence is not in the sent text")
 		}
 	}
-	t.Logf("ScoreDelta: %d raw → %d gated, net %d (usage %+v)", len(raw), len(delta.Items), delta.NetDelta, usage2)
 }
 
 func TestLiveAnthropic(t *testing.T) {
 	runLiveContract(t, liveProvider(t, "anthropic", "JOBCRON_ANTHROPIC_KEY", DefaultModel("anthropic")))
+}
+
+func TestLiveOpenAI(t *testing.T) {
+	runLiveContract(t, liveProvider(t, "openai", "JOBCRON_TEST_OPENAI_API_KEY", DefaultModel("openai")))
+}
+
+func TestLiveGemini(t *testing.T) {
+	runLiveContract(t, liveProvider(t, "gemini", "JOBCRON_TEST_GEMINI_API_KEY", DefaultModel("gemini")))
 }
