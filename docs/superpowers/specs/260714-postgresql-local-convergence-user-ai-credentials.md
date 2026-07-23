@@ -147,7 +147,7 @@ credentials`.
   so rotation can be added without changing credential ownership.
 - Secure deletion guarantees for an old SQLite or `ai_keys.json` file on SSDs.
 
-Deferred account-expansion requirements are recorded in
+The subsequent account expansion and remaining public-signup follow-up are recorded in
 [`260715-multi-user-account-expansion.md`](../archive/2026-07-22-multi-user-account-expansion/260715-multi-user-account-expansion.md).
 
 ## Target Architecture
