@@ -1231,6 +1231,35 @@ func TestProductionProfileRendersCredentialStateWithoutSecrets(t *testing.T) {
 	}
 }
 
+func TestProductionProfileCredentialLookupFailureReturnsSafe500(t *testing.T) {
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	srv.SetProductionMode(true)
+	userID, cookie := createSessionUser(t, st, "key-lookup-failure@example.invalid", "key-lookup-failure-session")
+	saveAIRuntimeProfile(t, st, userID, profile.Profile{AIProvider: "anthropic", AIModel: "claude-haiku-4-5-20251001"})
+
+	if _, err := st.SQLDB().ExecContext(context.Background(), `DROP TABLE user_ai_credentials`); err != nil {
+		t.Fatalf("force credential lookup failure: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/profile", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("GET /profile status=%d body=%q, want safe 500", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "AI 키 저장 상태를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.") {
+		t.Fatalf("GET /profile body=%q, want safe credential-state error", body)
+	}
+	for _, marker := range []string{"user_ai_credentials", "storage: read user AI credential"} {
+		if strings.Contains(body, marker) {
+			t.Fatalf("GET /profile leaked internal marker %q in body %q", marker, body)
+		}
+	}
+}
+
 func TestProductionProfileSaveEncryptionFailureChangesNothing(t *testing.T) {
 	srv, st := newPostgresTestServer(t, &fakeScraper{})
 	srv.SetProductionMode(true)

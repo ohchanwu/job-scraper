@@ -485,16 +485,19 @@ func (s *Server) handleProfileForm(w http.ResponseWriter, r *http.Request) {
 	form := toProfileForm(p)
 	form.ProfileRequired = r.URL.Query().Get("reason") == "profile-required"
 	form.Sources = s.sourceOptions(p.DisabledSources, !ok)
-	s.fillAIFormState(r.Context(), userID, &form, p)
+	if err := s.fillAIFormState(r.Context(), userID, &form, p); err != nil {
+		http.Error(w, "AI 키 저장 상태를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.", http.StatusInternalServerError)
+		return
+	}
 	s.renderWithRequest(w, r, "profile.html", form)
 }
 
 // fillAIFormState populates the AI section of the profile form: whether a key is
 // already saved for the selected provider (so the form shows "•••• 저장됨"
 // instead of an empty field), the effective daily cap, and today's usage /
-// remaining. Read failures degrade quietly to "no key / zero used" — the form
-// must still render.
-func (s *Server) fillAIFormState(ctx context.Context, userID int64, form *profileForm, p profile.Profile) {
+// remaining. Credential-state uncertainty is returned to the handler; usage
+// read failures still degrade quietly to zero used.
+func (s *Server) fillAIFormState(ctx context.Context, userID int64, form *profileForm, p profile.Profile) error {
 	form.AIDailyCapEffective = p.EffectiveAIDailyTokenCap()
 	form.AIPerCallCapEffect = p.EffectiveAIPerCallCap()
 	form.AIMonthlyUSDDefault = profile.DefaultAIMonthlyUSDCents
@@ -507,7 +510,11 @@ func (s *Server) fillAIFormState(ctx context.Context, userID int64, form *profil
 			form.AIKeyPlaceholder = provider.KeyPlaceholder
 		}
 		if userID > 0 {
-			_, savedByProvider[provider.ID], _ = s.store.UserAICredential(ctx, userID, provider.ID)
+			var err error
+			_, savedByProvider[provider.ID], err = s.store.UserAICredential(ctx, userID, provider.ID)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	form.AIKeySaved = savedByProvider[p.AIProvider]
@@ -531,6 +538,7 @@ func (s *Server) fillAIFormState(ctx context.Context, userID int64, form *profil
 	if rem := form.AIDailyCapEffective - form.AITokensUsedToday; rem > 0 {
 		form.AIRemainingToday = rem
 	}
+	return nil
 }
 
 // handleProfileSave parses the submitted form, stores the profile, re-scores
