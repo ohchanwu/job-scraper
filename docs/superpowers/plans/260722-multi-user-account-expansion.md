@@ -46,7 +46,9 @@ gstack `/browse` and `frontend-qa`.
   and memory. Use gstack `/browse`, never the user's default browser.
 - The new account pages contain no content images or video, so `media-load-fade` is intentionally
   not applicable. If implementation adds content media, stop and apply that skill from its file.
-- Commit after each task with the listed message. Never push.
+- Commit at meaningful, reviewable checkpoints. The message listed for each task is a suggested
+  checkpoint, not a one-commit limit. Use as many coherent commits as the work needs; squash only
+  temporary WIP or fixup noise, and review the exact base-to-tip range. Never push.
 
 ---
 
@@ -63,7 +65,7 @@ gstack `/browse` and `frontend-qa`.
 - Modify: `internal/storage/users_test.go`
 - Modify: `internal/storage/postgres_integration_test.go`
 
-- [ ] **Step 1: Write failing identity-policy tests**
+- [x] **Step 1: Write failing identity-policy tests**
 
 Add table-driven tests for:
 
@@ -97,7 +99,7 @@ go test ./internal/auth -run 'NormalizeEmail|ValidatePassword' -count=1
 
 Expected: FAIL because the new API does not exist.
 
-- [ ] **Step 2: Write failing PostgreSQL user tests**
+- [x] **Step 2: Write failing PostgreSQL user tests**
 
 Add tests proving:
 
@@ -129,7 +131,7 @@ go test ./internal/storage -run 'CreateUser|UserByEmail|UserByID|UserIDs|CreateO
 
 Expected: FAIL on missing methods and normalization behavior.
 
-- [ ] **Step 3: Add the canonical-email migration**
+- [x] **Step 3: Add the canonical-email migration**
 
 In migration `0018`:
 
@@ -140,7 +142,7 @@ In migration `0018`:
 Do not add a role column. The migration must fail rather than silently merge rows if a historical
 database contains two addresses that collapse to the same canonical value.
 
-- [ ] **Step 4: Implement the general storage methods**
+- [x] **Step 4: Implement the general storage methods**
 
 Normalize inside storage even when the HTTP/CLI caller already normalized. Map PostgreSQL unique
 violation `23505` for the users email constraint to `ErrEmailAlreadyExists` with
@@ -150,7 +152,7 @@ its insert helper with `CreateUser`.
 Remove the phantom `User.Role`, `ownerRole`, and `scanOwnerUser`; replace the scanner with
 `scanUser`. The product has no roles, so storage must not manufacture one.
 
-- [ ] **Step 5: Run narrow and package verification**
+- [x] **Step 5: Run narrow and package verification**
 
 ```sh
 go test ./internal/auth -count=1
@@ -160,7 +162,7 @@ go test ./internal/storage -count=1
 
 Expected: PASS, including the PostgreSQL migration and concurrency tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add internal/auth/identity.go internal/auth/identity_test.go \
@@ -181,7 +183,7 @@ git commit -m "feat(auth): add canonical multi-user accounts"
 - Modify: `cmd/jobcron-user/main_test.go`
 - Modify: `deploy/production/HUMAN_DEPLOY_GUIDE.md`
 
-- [ ] **Step 1: Write failing account-lifecycle storage tests**
+- [x] **Step 1: Write failing account-lifecycle storage tests**
 
 Cover these exact operations:
 
@@ -210,13 +212,13 @@ global `ai_extractions`, and `scrape_runs`.
 
 Run the targeted PostgreSQL tests. Expected: FAIL before implementation.
 
-- [ ] **Step 2: Implement each operation as one transaction**
+- [x] **Step 2: Implement each operation as one transaction**
 
 For password mutation, update the user row and revoke sessions in the same transaction. Callers
 pass only the SHA-256 session-token hash, never the raw bearer token. For deletion, rely on the
 already verified `ON DELETE CASCADE` foreign keys and delete only the exact `users.id` row.
 
-- [ ] **Step 3: Generalize the operator CLI**
+- [x] **Step 3: Generalize the operator CLI**
 
 Keep `create-owner` as the one-time first-account bootstrap. Change `reset-password` to target one
 normalized email regardless of user count and revoke all of that user's sessions. Add:
@@ -233,7 +235,7 @@ Use `JOBCRON_USER_PASSWORD` for `reset-password`; keep `JOBCRON_OWNER_PASSWORD` 
 password hashes or database URLs. Refuse deletion unless `--confirm-email` normalizes to exactly
 the selected address.
 
-- [ ] **Step 4: Test the real CLI contract**
+- [x] **Step 4: Test the real CLI contract**
 
 Test missing flags, mismatched confirmation, normalized selection, missing users, reset session
 revocation, exact deletion, and output that includes only the normalized email and user ID.
@@ -248,12 +250,12 @@ go test ./internal/storage ./cmd/jobcron-user -count=1
 
 Expected: PASS.
 
-- [ ] **Step 5: Update only the operator command examples**
+- [x] **Step 5: Update only the operator command examples**
 
 Document the generalized reset and delete commands with placeholders. State that reset revokes all
 sessions and deletion cascades private state. Do not add real tunneled URLs or account addresses.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add internal/storage/users.go internal/storage/sessions.go \
@@ -274,7 +276,7 @@ git commit -m "feat(accounts): add operator recovery and deletion"
 - Modify: `deploy/production/compose.yaml`
 - Modify: `deploy/production/compose_test.go`
 
-- [ ] **Step 1: Write failing configuration tests**
+- [x] **Step 1: Write failing configuration tests**
 
 Add fields:
 
@@ -294,7 +296,7 @@ Expected failing command:
 go test ./internal/config -run 'Signup|Sponsor|DailyScrape' -count=1
 ```
 
-- [ ] **Step 2: Write failing startup tests**
+- [x] **Step 2: Write failing startup tests**
 
 Prove:
 
@@ -306,7 +308,7 @@ Prove:
 Delete `SoleOwnerUserID` from `runtimeUserStore`. In `resolvePostgresRuntime`, branch on production
 before resolving a no-login local user.
 
-- [ ] **Step 3: Wire server configuration**
+- [x] **Step 3: Wire server configuration**
 
 Add immutable startup setters:
 
@@ -318,12 +320,12 @@ func (s *Server) SetStage1SponsorUserID(userID int64)
 Call both from `cmd/jobcron/main.go` before serving or starting the scheduler. Do not log either
 value. Preserve `NewForLocalUser` only for non-production no-login operation.
 
-- [ ] **Step 4: Pass the new variables through production Compose**
+- [x] **Step 4: Pass the new variables through production Compose**
 
 Add both variable names to the app service environment allowlist. Preserve unset values as unset;
 do not add defaults or sample secrets to tracked files. Extend the rendered Compose contract tests.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```sh
 go test ./internal/config ./cmd/jobcron ./deploy/production -count=1
@@ -348,13 +350,13 @@ git commit -m "feat(runtime): configure cohort signup and stage1 sponsor"
 - Modify: `web/login.html`
 - Modify: `web/styles.css`
 
-- [ ] **Step 1: Write failing public-route and closed-gate tests**
+- [x] **Step 1: Write failing public-route and closed-gate tests**
 
 Register `GET /signup` and `POST /signup` as public auth routes, while retaining CSRF protection on
 POST. Prove an unset access code renders a closed cohort notice and every POST creates neither a
 user nor a session. Prove an incorrect code does the same.
 
-- [ ] **Step 2: Write failing successful and invalid signup tests**
+- [x] **Step 2: Write failing successful and invalid signup tests**
 
 The form fields are `email`, `password`, `password_confirm`, and `access_code`. Test canonical
 email storage, server-side email syntax validation, the 15-character policy, confirmation
@@ -367,33 +369,33 @@ Extract the existing login token/cookie creation into one unexported helper and 
 func (s *Server) startSession(w http.ResponseWriter, ctx context.Context, userID int64) error
 ```
 
-- [ ] **Step 3: Reuse the current limiter for a separate signup budget**
+- [x] **Step 3: Reuse the current limiter for a separate signup budget**
 
 Add a second `*loginRateLimiter` instance rather than a new limiter abstraction. Key it by the
 trusted client-address helper plus normalized email. Keep login and signup counters independent so
 one flow cannot consume the other's allowance. Assert the sixth attempt inside the existing
 15-minute window returns `429` before Argon2id hashing.
 
-- [ ] **Step 4: Implement constant-time access-code comparison**
+- [x] **Step 4: Implement constant-time access-code comparison**
 
 Hash the configured and submitted strings with SHA-256, then compare the fixed-size digests with
 `subtle.ConstantTimeCompare`. Never place the code in a URL, log line, template data, database row,
 or error body.
 
-- [ ] **Step 5: Handle duplicates without account-existence wording**
+- [x] **Step 5: Handle duplicates without account-existence wording**
 
 On `ErrEmailAlreadyExists`, return the same generic signup failure status and body used for other
 unprocessable account-creation failures. Do not render “already registered,” the stored address,
 or any database error. Test the response body and logs. Successful creation still auto-logs in as
 required; the cohort gate is the current abuse boundary, not full public-signup anonymity.
 
-- [ ] **Step 6: Build the signup UI**
+- [x] **Step 6: Build the signup UI**
 
 Reuse the login page's visual language. State plainly that email ownership is not verified and
 forgotten-password recovery requires contacting the operator. Link login and signup in both
 directions. Keep the layout usable at 320 CSS pixels without adding a frontend dependency.
 
-- [ ] **Step 7: Verify and commit**
+- [x] **Step 7: Verify and commit**
 
 ```sh
 go test ./internal/server -run 'Signup|PublicAuth|RateLimit|Session' -count=1
@@ -415,33 +417,33 @@ git commit -m "feat(auth): add cohort self-service signup"
 - Modify: `web/_nav.html`
 - Modify: `web/styles.css`
 
-- [ ] **Step 1: Write failing password-change handler tests**
+- [x] **Step 1: Write failing password-change handler tests**
 
 Register `GET /account` and `POST /account/password`. Require the authenticated current password,
 new password, and confirmation. Test wrong-current-password, password-policy failure, mismatch,
 CSRF rejection, successful Argon2id replacement, preservation of the current session, revocation
 of other sessions, and no effect on another user.
 
-- [ ] **Step 2: Write failing account-deletion handler tests**
+- [x] **Step 2: Write failing account-deletion handler tests**
 
 Register `POST /account/delete`. Require the current password and a `confirm_email` value that
 normalizes to the signed-in user's email. Test wrong password, mismatched confirmation, CSRF,
 foreign-user isolation, cascade results, preserved global rows, expired browser cookie, and a
 `303 /login` redirect.
 
-- [ ] **Step 3: Implement the handlers without a service layer**
+- [x] **Step 3: Implement the handlers without a service layer**
 
 Keep orchestration in `account.go`: load the session user, verify the current Argon2id hash, call
 the transactional storage method, and rotate/expire cookies. There is no second consumer that
 justifies an account service abstraction.
 
-- [ ] **Step 4: Build the account UI**
+- [x] **Step 4: Build the account UI**
 
 Add an Account navigation link. Separate password change from a clearly labelled destructive
 section. Explain that deletion is permanent and removes saved state and stored provider keys.
 Require typing the account email; do not rely only on JavaScript confirmation.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```sh
 go test ./internal/server -run 'Account|PasswordChange|DeleteUser|SessionRevocation' -count=1
@@ -464,7 +466,7 @@ git commit -m "feat(accounts): add password change and self deletion"
 - Modify: `internal/server/ai_rerate_test.go`
 - Modify: `internal/server/live_dealbreakers_test.go`
 
-- [ ] **Step 1: Write failing cache-identity tests**
+- [x] **Step 1: Write failing cache-identity tests**
 
 Replace `EligibilityVersion(provider, model)` with:
 
@@ -478,20 +480,20 @@ or non-semantic prompt-copy versions. Tests must prove those changes do not part
 while an explicit contract-version bump does. Keep `DealbreakerVersion` and `ScoreVersion`
 provider/model-specific because those outputs are user-scoped judgments.
 
-- [ ] **Step 2: Remove the version from `AIRuntime`**
+- [x] **Step 2: Remove the version from `AIRuntime`**
 
 Delete `AIRuntime.EligibilityVersion`. Every global extraction lookup/upsert calls
 `ai.ExtractionContractVersion()` directly. Continue storing it in the existing `ai_version`
 column; do not add or rename a database column.
 
-- [ ] **Step 3: Lock cache behavior with tests**
+- [x] **Step 3: Lock cache behavior with tests**
 
 Prove the key is exactly `(posting_id, content_hash, extraction_contract_version)`: same content
 hits after provider, model, transport, response-setting, and non-semantic prompt-copy changes;
 changed content misses; contract-version change misses; and provider errors or malformed output
 write no row.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```sh
 go test ./internal/ai ./internal/server -run 'Version|Extraction|Cache' -count=1
@@ -514,7 +516,7 @@ git commit -m "refactor(ai): make stage1 cache globally reusable"
 - Modify: `internal/server/ai_rerate_test.go`
 - Modify: `internal/server/production_user_scope_test.go`
 
-- [ ] **Step 1: Write the payer matrix as failing tests**
+- [x] **Step 1: Write the payer matrix as failing tests**
 
 For scheduled scrapes, interactive scrapes, rerates, backfills, and retries, assert:
 
@@ -525,7 +527,7 @@ For scheduled scrapes, interactive scrapes, rerates, backfills, and retries, ass
   produce deterministic fallback without charging another user; and
 - Stage-1B/dealbreaker and Stage-2 calls still debit only the current analyzed user.
 
-- [ ] **Step 2: Add one cohesive funding value**
+- [x] **Step 2: Add one cohesive funding value**
 
 Use this internal shape instead of passing three loosely coupled arguments:
 
@@ -543,7 +545,7 @@ Resolve only `s.stage1SponsorUserID`, verify the user exists, construct that use
 create that user's budget. Never fall back to `firstUserID`, `SoleOwnerUserID`, or the triggering
 user.
 
-- [ ] **Step 3: Change `extractStage1` to accept sponsor funding**
+- [x] **Step 3: Change `extractStage1` to accept sponsor funding**
 
 Its order is:
 
@@ -557,19 +559,19 @@ Its order is:
 Checking the cache first ensures existing global facts remain usable when sponsorship is
 temporarily unavailable.
 
-- [ ] **Step 4: Separate rerate budgets**
+- [x] **Step 4: Separate rerate budgets**
 
 In `runRerate`, use sponsor funding only for the Stage-1 backfill loop. Create the signed-in user's
 existing budget and call cap separately for contextual validation and Stage-2. Do not combine the
 ledgers or allow sponsor exhaustion to disable user-funded Stage-1B/Stage-2.
 
-- [ ] **Step 5: Bound failure reporting**
+- [x] **Step 5: Bound failure reporting**
 
 Return or log a stable sponsor-unavailable category plus user ID, never the provider response body,
 key, email, or ciphertext. Limit persisted/logged summaries to the existing 500-character scrape
 history bound.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 ```sh
 go test ./internal/server -run 'Stage1Sponsor|Sponsor|Rerate.*Stage1|AIUsage' -count=1
@@ -582,6 +584,9 @@ git commit -m "feat(ai): bill global stage1 misses to sponsor"
 
 ### Task 8: Split global collection from sequential per-user analysis
 
+**Status:** Implementation and correction are complete locally at `e638d5d`; fresh external
+exact-range review and integration remain pending.
+
 **Files:**
 
 - Modify: `internal/server/server.go`
@@ -592,7 +597,7 @@ git commit -m "feat(ai): bill global stage1 misses to sponsor"
 - Modify: `cmd/jobcron/main.go`
 - Modify: `cmd/jobcron/main_test.go`
 
-- [ ] **Step 1: Write failing two-user scheduler tests**
+- [x] **Step 1: Write failing two-user scheduler tests**
 
 Seed two users plus one user with no profile. Assert one scheduled invocation:
 
@@ -605,7 +610,7 @@ Seed two users plus one user with no profile. Assert one scheduled invocation:
 - continues after one user's bad credential; and
 - records a bounded warning summary without marking a successful global fetch as failed.
 
-- [ ] **Step 2: Extract a global collection phase**
+- [x] **Step 2: Extract a global collection phase**
 
 Introduce one internal result value:
 
@@ -621,13 +626,13 @@ Move robots checks, listing/detail fetch, upsert, sponsor-funded Stage-1 extract
 cross-portal deduplication into `collectPostings`. Accept a source predicate: interactive scrapes
 use the signed-in profile's `SourceEnabled`; scheduled scrapes pass all registered sources.
 
-- [ ] **Step 3: Extract a user analysis phase**
+- [x] **Step 3: Extract a user analysis phase**
 
 Move contextual dealbreaker validation, deterministic `scoreAll`, visible-posting selection, and
 Stage-2 auto-rate into `analyzeUserCollection`. It receives one explicit `userID`, that user's
 runtime/budget, and the shared collection. It must not fetch a source or populate Stage-1.
 
-- [ ] **Step 4: Rebuild interactive and scheduled orchestration**
+- [x] **Step 4: Rebuild interactive and scheduled orchestration**
 
 Interactive scrape remains one user's flow: collect once, then analyze that user. Scheduled scrape
 collects all sources once, obtains `UserIDs`, and analyzes each profiled user sequentially while
@@ -643,7 +648,7 @@ func (s *Server) RescoreUsers(ctx context.Context) (int, error)
 Production startup loops all profiled users and performs cache-only/rule-based recovery. Local
 SQLite/no-login mode retains its single local-user behavior.
 
-- [ ] **Step 5: Verify the clock and direct workflow**
+- [x] **Step 5: Verify the clock and direct workflow**
 
 Keep scheduler clock tests deterministic and assert `05:00` KST. Invoke `runScheduledScrape`
 directly; never wait for wall-clock time in tests.
@@ -657,7 +662,7 @@ go test ./cmd/jobcron ./internal/server -count=1
 
 Expected: PASS with one global collection and sequential isolated analysis.
 
-- [ ] **Step 6: Commit Wave A runtime**
+- [x] **Step 6: Commit Wave A runtime**
 
 ```sh
 git add internal/server/server.go internal/server/scheduler.go \
