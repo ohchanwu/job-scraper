@@ -1172,6 +1172,34 @@ func TestProductionAIKeyDeleteIsConfirmedAndUserScoped(t *testing.T) {
 	}
 }
 
+func TestProductionAIKeyDeleteIsRejectedWhileScoringOperationRuns(t *testing.T) {
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	srv.SetProductionMode(true)
+	userID, cookie := createSessionUser(t, st, "delete-key-lock@example.invalid", "delete-key-lock-session")
+	cipher := newAIRuntimeTestCipher(t, 0x5a)
+	saveAIRuntimeCredential(t, st, cipher, userID, "anthropic", "synthetic-delete-lock-key")
+	lease := srv.flight.tryAcquire(scrapeAllKey)
+	if lease == nil {
+		t.Fatal("failed to arrange in-flight scoring operation")
+	}
+	defer lease.release()
+
+	form := url.Values{"provider": {"anthropic"}, "confirm": {"yes"}}
+	req := httptest.NewRequest(http.MethodPost, "/profile/ai-key/delete", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	addCSRFToRequest(req, srv, cookie)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Errorf("AI key delete status=%d body=%q, want 409", rec.Code, rec.Body.String())
+	}
+	if _, found, err := st.UserAICredential(context.Background(), userID, "anthropic"); err != nil || !found {
+		t.Errorf("AI key changed while scoring lock held: found=%v err=%v", found, err)
+	}
+}
+
 func TestProductionProfileRendersCredentialStateWithoutSecrets(t *testing.T) {
 	srv, st := newPostgresTestServer(t, &fakeScraper{})
 	srv.SetProductionMode(true)

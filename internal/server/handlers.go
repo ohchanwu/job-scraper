@@ -714,6 +714,12 @@ func (s *Server) handleAIKeyDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "삭제할 AI 키와 확인란을 확인해주세요.", http.StatusBadRequest)
 		return
 	}
+	lease := s.flight.tryAcquire(scrapeAllKey)
+	if lease == nil {
+		http.Error(w, "이미 작업이 진행 중이에요. 잠시만 기다려 주세요.", http.StatusConflict)
+		return
+	}
+	defer lease.release()
 	if err := s.store.DeleteUserAICredential(r.Context(), userID, provider); err != nil {
 		http.Error(w, "AI 키를 삭제하지 못했어요.", http.StatusInternalServerError)
 		return
