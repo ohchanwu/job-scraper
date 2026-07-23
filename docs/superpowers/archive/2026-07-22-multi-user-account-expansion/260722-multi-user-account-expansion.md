@@ -866,6 +866,10 @@ git commit -m "feat(profile): manage three BYOK providers"
 
 ### Task 12: Documentation, production interface, and final verification
 
+**Status:** Complete. Final reviewed implementation tip:
+`0d2a713e4eca92dd5cdf095e4695dc55f30829d8`; independently approved with no
+Critical, Important, or Minor findings.
+
 **Files:**
 
 - Modify: `README.md`
@@ -879,7 +883,7 @@ git commit -m "feat(profile): manage three BYOK providers"
 - Move on completion: `docs/superpowers/specs/260715-multi-user-account-expansion.md`
 - Move on completion: `docs/superpowers/plans/260722-multi-user-account-expansion.md`
 
-- [ ] **Step 1: Update durable architecture**
+- [x] **Step 1: Update durable architecture**
 
 Document:
 
@@ -893,7 +897,7 @@ Document:
 
 Remove owner-only and Anthropic-only claims that are no longer true.
 
-- [ ] **Step 2: Update the runtime-secret interface**
+- [x] **Step 2: Update the runtime-secret interface**
 
 Add placeholder-only documentation for `JOBCRON_SIGNUP_ACCESS_CODE` and
 `JOBCRON_STAGE1_SPONSOR_USER_ID`. Explain that the sponsor ID is billing assignment, not a role.
@@ -902,13 +906,13 @@ real ID/value.
 
 Do not add, replace, or recapture root README screenshots during this documentation pass.
 
-- [ ] **Step 3: Document cohort limitations**
+- [x] **Step 3: Document cohort limitations**
 
 State that the access-code cohort does not verify email ownership and has operator-assisted
 recovery. Link the spec's “Truly Public Signup Follow-Up”; do not imply public signup is
 complete.
 
-- [ ] **Step 4: Run the complete automated gate**
+- [x] **Step 4: Run the complete automated gate**
 
 ```sh
 go fmt ./...
@@ -922,7 +926,7 @@ go test -race ./internal/auth ./internal/ai ./internal/server ./internal/storage
 If provider test keys are present, run each opt-in live contract test individually and report the
 provider/model used. If absent, report “not run: credential unavailable”; do not invent success.
 
-- [ ] **Step 5: Run Tier C real-browser verification**
+- [x] **Step 5: Run Tier C real-browser verification**
 
 Start or reuse one disposable no-open production-auth preview. With at most two browser workers,
 walk every page at desktop and mobile widths, light and dark themes when available, and verify no
@@ -931,7 +935,7 @@ key deletion, scrape, rerate, bookmarks, hidden jobs, password change, logout, c
 isolation, and account deletion. Click real posting destinations and verify the destination content
 matches the source record rather than only checking HTTP status.
 
-- [ ] **Step 6: Review the complete public diff and scan secrets**
+- [x] **Step 6: Review the complete public diff and scan secrets**
 
 ```sh
 git diff --check
@@ -943,7 +947,7 @@ gitleaks git --redact --no-banner
 Expected: no whitespace errors, no unreviewed changes, and no real secrets/personal data. Manually
 review the complete diff even when Gitleaks passes.
 
-- [ ] **Step 7: Archive completed planning material and update the index**
+- [x] **Step 7: Archive completed planning material and update the index**
 
 Move the completed spec and this plan into:
 
@@ -955,7 +959,7 @@ Update `docs/superpowers/README.md` so neither remains under Active Work and bot
 Recently Archived. Preserve the public-signup follow-up in the archived spec; create a new active
 spec later only when that milestone is approved.
 
-- [ ] **Step 8: Commit documentation and lifecycle changes**
+- [x] **Step 8: Commit documentation and lifecycle changes**
 
 ```sh
 git add README.md README.ko.md docs/architecture.md deploy/production/README.md \
@@ -965,7 +969,7 @@ git add README.md README.ko.md docs/architecture.md deploy/production/README.md 
 git commit -m "docs: publish multi-user architecture and operations"
 ```
 
-- [ ] **Step 9: Verify final repository state**
+- [x] **Step 9: Verify final repository state**
 
 ```sh
 git status --short --branch
