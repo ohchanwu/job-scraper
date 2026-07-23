@@ -673,19 +673,22 @@ git commit -m "feat(scheduler): score all users from one daily scrape"
 
 ### Task 9: Verify Wave A end to end before provider expansion
 
+**Status:** Candidate `65b1b78` passed fresh external exact-range review with no findings and was
+integrated locally as the patch-equivalent commit `7cc5460`.
+
 **Files:**
 
 - Modify: `internal/server/production_user_scope_test.go`
 - Modify: `scripts/preview_interactive_test.go`
 - Modify as needed for defects found in Wave A only
 
-- [ ] **Step 1: Add the complete two-account HTTP isolation test**
+- [x] **Step 1: Add the complete two-account HTTP isolation test**
 
 Through real HTTP handlers and real PostgreSQL sessions, create two accounts and prove they cannot
 read or mutate one another's profile, bookmarks, hidden jobs, scores, AI usage, contextual
 validations, or credentials. Include password change and deletion.
 
-- [ ] **Step 2: Run Wave A automated verification**
+- [x] **Step 2: Run Wave A automated verification**
 
 ```sh
 go fmt ./...
@@ -698,7 +701,7 @@ go test -race ./internal/auth ./internal/server ./internal/storage -count=1
 
 Expected: all PASS. Stop and fix Wave A before starting providers.
 
-- [ ] **Step 3: Run a production-auth browser pass**
+- [x] **Step 3: Run a production-auth browser pass**
 
 Use a disposable PostgreSQL database and generated test-only session/encryption secrets. Start the
 app with `--no-open` on loopback. Use `frontend-qa` and gstack `/browse` with one browser worker to
@@ -706,7 +709,7 @@ walk signup, login, profile setup, password change, logout, second-account isola
 deletion at desktop and mobile widths. Verify no console errors and leave the preview available for
 human inspection until the implementation report is delivered.
 
-- [ ] **Step 4: Commit only fixes or added regression tests**
+- [x] **Step 4: Commit only fixes or added regression tests**
 
 ```sh
 git add internal/server/production_user_scope_test.go \
