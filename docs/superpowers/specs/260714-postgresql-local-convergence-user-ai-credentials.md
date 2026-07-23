@@ -37,7 +37,9 @@ gate pass. Then archive it with the completed Slice 5 plan and verification.
 
 ## Locked Product Decisions
 
-1. The current owner-only account UI remains. Public signup, account recovery,
+1. This slice retained the then-current owner-only account UI. That slice-local,
+   historical assumption was superseded by the multi-user account expansion.
+   Truly public signup, verified email ownership, self-service recovery,
    organizations, and team accounts are not added here.
 2. PostgreSQL storage must nevertheless be safe for multiple user rows. Two test
    users must not share credentials, AI scores, usage budgets, profiles, bookmarks,
@@ -136,8 +138,8 @@ credentials`.
 
 ## Non-Goals
 
-- Public signup, multiple owners, password recovery, social login, organizations,
-  roles, or an account-management UI.
+- Truly public signup, verified email ownership, self-service password recovery,
+  social login, organizations, or roles.
 - Billing users for AI usage or providing a shared Jobcron-funded AI key.
 - Supporting more than one credential for the same user and provider.
 - Synchronizing two independent self-hosted PostgreSQL installations.
@@ -146,7 +148,7 @@ credentials`.
 - Secure deletion guarantees for an old SQLite or `ai_keys.json` file on SSDs.
 
 Deferred account-expansion requirements are recorded in
-[`260715-multi-user-account-expansion.md`](260715-multi-user-account-expansion.md).
+[`260715-multi-user-account-expansion.md`](../archive/2026-07-22-multi-user-account-expansion/260715-multi-user-account-expansion.md).
 
 ## Target Architecture
 
@@ -325,9 +327,9 @@ It returns `nil, nil` when AI is off or no credential exists.
 One resolved runtime must be passed through a complete scrape or rerate operation;
 helpers must not repeatedly decrypt the credential. Authenticated manual scrape,
 rerate, profile save, page rendering, and rescore paths must pass their explicit
-`userID`. The existing owner-only scheduler resolves the sole owner at the start
-of its run. If zero or more than one owner exists, it skips paid AI and records an
-operator error rather than guessing. Multi-user scheduler fan-out is out of scope.
+`userID`. On PostgreSQL, the scheduler performs one global collection, then
+analyzes that collection sequentially for every profiled user in ascending
+user-ID order.
 
 Profile save must resolve the authenticated user before handling the key. It then:
 
@@ -781,7 +783,8 @@ Slice work:
 - `internal/server/rerate.go`
   - Pass the per-user runtime through rerate and cache operations.
 - `internal/server/scheduler.go`
-  - Resolve the sole owner explicitly and fail safely on ambiguous ownership.
+  - Collect globally once, then analyze sequentially for each profiled
+    PostgreSQL user in ascending user-ID order.
 - `cmd/jobcron-import/main.go`
   - Add an immutable snapshot, default dry-run, `--apply`, credential import,
     ledger, and post-commit verification.
