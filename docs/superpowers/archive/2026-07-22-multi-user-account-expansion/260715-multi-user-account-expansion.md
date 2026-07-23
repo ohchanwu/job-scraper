@@ -1,8 +1,8 @@
 # Multi-User Account Expansion
 
 - **Date:** 2026-07-15
-- **Last updated:** 2026-07-22
-- **Status:** Active; product decisions approved, implementation plan pending
+- **Last updated:** 2026-07-24
+- **Status:** Completed and archived; implementation shipped
 - **Depends on:**
   [`260714-postgresql-local-convergence-user-ai-credentials.md`](../../specs/260714-postgresql-local-convergence-user-ai-credentials.md)
 - **Related:**
@@ -19,13 +19,13 @@ The first users are the overseer's SSAFY classmates. They receive self-service
 account creation behind one shared cohort access code. Removing that gate and
 opening signup to the general public is a later security and operations milestone.
 
-## Current Repository Baseline
+## Approval-Time Pre-Implementation Baseline
 
-The PostgreSQL convergence dependency has completed its repository-owned work.
-The remaining dependency work is the external production rollout, not an
-application prerequisite for this milestone.
+At approval time, the PostgreSQL convergence dependency had completed its
+repository-owned work. The remaining dependency work was the external production
+rollout, not an application prerequisite for this milestone.
 
-The current repository already provides:
+The repository then already provided:
 
 - PostgreSQL as the only writable application database;
 - user-scoped profiles, saved-job state, AI scores, usage, and credentials;
@@ -36,10 +36,11 @@ The current repository already provides:
 - encrypted, per-user Anthropic credential storage; and
 - foreign-key cascades for private user-owned state.
 
-The database can safely hold multiple users, but two owner-era entry points still
-prevent the app from operating that way. The `jobcron-user create-owner` command
-refuses to create a second account, and the daily scheduler refuses to run when
-more than one user exists. This milestone removes both restrictions.
+The database could safely hold multiple users, but two owner-era entry points
+still prevented the app from operating that way. The `jobcron-user create-owner`
+command refused to create a second account, and the daily scheduler refused to
+run when more than one user existed. The completed milestone removed both
+restrictions.
 
 ## Locked Product Decisions
 
