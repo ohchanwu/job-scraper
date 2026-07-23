@@ -361,6 +361,9 @@ func TestPreviewPropagatesStrictPortToBootstrapAndServer(t *testing.T) {
 	if got := strings.Count(result.log, " strict-port=1 "); got != 2 {
 		t.Fatalf("strict-port propagation count = %d, want bootstrap and server:\n%s", got, result.log)
 	}
+	if got := strings.Count(result.log, " environment= scheduler=0 daily= "); got != 2 {
+		t.Fatalf("preview environment isolation count = %d, want bootstrap and server:\n%s", got, result.log)
+	}
 }
 
 func TestPreviewPortRaceFailsInsteadOfFallingBack(t *testing.T) {
@@ -796,7 +799,7 @@ done
 if [ -z "$out" ]; then
 	exit 2
 fi
-	printf '%s\n' '#!/bin/sh' 'printf " app start strict-port=%s \\n" "${JOBCRON_STRICT_PORT:-}" >>"$PREVIEW_FAKE_LOG"' 'if [ ! -e "$PREVIEW_FAKE_APP_COUNT" ]; then' '  : >"$PREVIEW_FAKE_APP_COUNT"' '  printf "%s\\n" "$PREVIEW_FAKE_BOOTSTRAP_OUTPUT" >&2' '  exit "$PREVIEW_FAKE_BOOTSTRAP_EXIT"' 'fi' 'if [ "$PREVIEW_FAKE_PORT_RACE" = "1" ]; then' '  "$PREVIEW_REAL_NC" -l 127.0.0.1 "$JOBCRON_PORT" >/dev/null 2>&1 &' '  occupier=$!' '  tries=0' '  until "$PREVIEW_REAL_NC" -z 127.0.0.1 "$JOBCRON_PORT" >/dev/null 2>&1; do tries=$((tries + 1)); if [ "$tries" -ge 50 ]; then kill "$occupier" 2>/dev/null || true; exit 97; fi; sleep 0.02; done' '  printf " requested-port-occupied \\n" >>"$PREVIEW_FAKE_LOG"' '  if [ "${JOBCRON_STRICT_PORT:-}" != "1" ]; then printf " fallback-port \\n" >>"$PREVIEW_FAKE_LOG"; kill "$occupier" 2>/dev/null || true; wait "$occupier" 2>/dev/null || true; exit 0; fi' '  kill "$occupier" 2>/dev/null || true' '  wait "$occupier" 2>/dev/null || true' '  exit 98' 'fi' 'exit "$PREVIEW_FAKE_SECOND_EXIT"' >"$out"
+	printf '%s\n' '#!/bin/sh' 'printf " app start strict-port=%s environment=%s scheduler=%s daily=%s \\n" "${JOBCRON_STRICT_PORT:-}" "${JOBCRON_ENV:-}" "${JOBCRON_SCHEDULER_ENABLED:-}" "${JOBCRON_DAILY_SCRAPE_TIME:-}" >>"$PREVIEW_FAKE_LOG"' 'if [ ! -e "$PREVIEW_FAKE_APP_COUNT" ]; then' '  : >"$PREVIEW_FAKE_APP_COUNT"' '  printf "%s\\n" "$PREVIEW_FAKE_BOOTSTRAP_OUTPUT" >&2' '  exit "$PREVIEW_FAKE_BOOTSTRAP_EXIT"' 'fi' 'if [ "$PREVIEW_FAKE_PORT_RACE" = "1" ]; then' '  "$PREVIEW_REAL_NC" -l 127.0.0.1 "$JOBCRON_PORT" >/dev/null 2>&1 &' '  occupier=$!' '  tries=0' '  until "$PREVIEW_REAL_NC" -z 127.0.0.1 "$JOBCRON_PORT" >/dev/null 2>&1; do tries=$((tries + 1)); if [ "$tries" -ge 50 ]; then kill "$occupier" 2>/dev/null || true; exit 97; fi; sleep 0.02; done' '  printf " requested-port-occupied \\n" >>"$PREVIEW_FAKE_LOG"' '  if [ "${JOBCRON_STRICT_PORT:-}" != "1" ]; then printf " fallback-port \\n" >>"$PREVIEW_FAKE_LOG"; kill "$occupier" 2>/dev/null || true; wait "$occupier" 2>/dev/null || true; exit 0; fi' '  kill "$occupier" 2>/dev/null || true' '  wait "$occupier" 2>/dev/null || true' '  exit 98' 'fi' 'exit "$PREVIEW_FAKE_SECOND_EXIT"' >"$out"
 chmod +x "$out"
 `)
 	writeFakeCommand(t, fakeBin, "mktemp", `#!/bin/sh
@@ -825,9 +828,14 @@ exec /usr/bin/mktemp "$@"
 	}
 	cmd := exec.Command("sh", "scripts/preview-interactive.sh", strconv.Itoa(port))
 	cmd.Dir = filepath.Clean(filepath.Join(".."))
-	cmd.Env = append(withoutEnv(os.Environ(), "DATABASE_URL", "JOBCRON_PREVIEW_KEEP"),
+	cmd.Env = append(withoutEnv(os.Environ(),
+		"DATABASE_URL", "JOBCRON_PREVIEW_KEEP", "JOBCRON_ENV",
+		"JOBCRON_SCHEDULER_ENABLED", "JOBCRON_DAILY_SCRAPE_TIME"),
 		"PATH="+fakeBin+":/usr/bin:/bin",
 		"TMPDIR="+root,
+		"JOBCRON_ENV=production",
+		"JOBCRON_SCHEDULER_ENABLED=1",
+		"JOBCRON_DAILY_SCRAPE_TIME=not-a-time",
 		"PREVIEW_FAKE_LOG="+logPath,
 		"PREVIEW_FAKE_SUFFIX="+cfg.suffix,
 		"PREVIEW_FAKE_OWNER="+owner,

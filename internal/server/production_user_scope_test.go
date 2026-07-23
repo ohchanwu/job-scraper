@@ -30,6 +30,263 @@ import (
 	"github.com/ohchanwu/jobcron/internal/storage"
 )
 
+func TestProductionTwoAccountHTTPIsolationAndLifecycle(t *testing.T) {
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	srv.SetProductionMode(true)
+	srv.SetSignupAccessCode(testSignupAccessCode)
+	cipher := newAIRuntimeTestCipher(t, 0x49)
+	srv.SetCredentialCipher(cipher)
+	srv.newAIProvider = func(provider, key, _ string, _ time.Duration) (ai.Provider, error) {
+		return &fingerprintProvider{name: provider, keyFingerprint: keyFingerprint(key)}, nil
+	}
+	ctx := context.Background()
+
+	signup := func(email string) (int64, *http.Cookie) {
+		t.Helper()
+		form := validSignupForm(testSignupAccessCode)
+		form.Set("email", email)
+		form.Set("password", accountCurrentPassword)
+		form.Set("password_confirm", accountCurrentPassword)
+		rec := postSignup(t, srv, form)
+		if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/profile" {
+			t.Fatalf("signup %s: status=%d location=%q body=%q", email, rec.Code, rec.Header().Get("Location"), rec.Body.String())
+		}
+		user, ok, err := st.UserByEmail(ctx, email)
+		if err != nil || !ok {
+			t.Fatalf("UserByEmail(%s): ok=%v err=%v", email, ok, err)
+		}
+		return user.ID, cookieNamed(t, rec, sessionCookieName)
+	}
+	userA, cookieA := signup("wave-a@example.invalid")
+	userB, cookieB := signup("wave-b@example.invalid")
+
+	postProfile := func(cookie *http.Cookie, goal, dealbreaker, key string) {
+		t.Helper()
+		form := url.Values{
+			"career_years":  {"0"},
+			"min_score":     {"0"},
+			"job_likes":     {goal},
+			"dealbreakers":  {dealbreaker},
+			"ai_provider":   {"anthropic"},
+			"ai_model":      {"test-model"},
+			"ai_key":        {key},
+			"source_jumpit": {"on"},
+		}
+		req := httptest.NewRequest(http.MethodPost, "/profile", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(cookie)
+		addCSRFToRequest(req, srv, cookie)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/briefing" {
+			t.Fatalf("profile save: status=%d location=%q body=%q", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+		}
+	}
+	postProfile(cookieA, "wave-a-profile-marker", "wave-a-dealbreaker", "synthetic-wave-a-key")
+	postProfile(cookieB, "wave-b-profile-marker", "wave-b-dealbreaker", "synthetic-wave-b-key")
+
+	assertPageContains(t, srv, cookieA, "/profile", "wave-a-profile-marker")
+	assertPageMissing(t, srv, cookieA, "/profile", "wave-b-profile-marker")
+	assertPageContains(t, srv, cookieB, "/profile", "wave-b-profile-marker")
+	assertPageMissing(t, srv, cookieB, "/profile", "wave-a-profile-marker")
+
+	scoreAID := mustUpsert(t, st, listingPosting("wave-a-score", "웨이브 A 전용 점수 공고"))
+	scoreBID := mustUpsert(t, st, listingPosting("wave-b-score", "웨이브 B 전용 점수 공고"))
+	sharedBookmarkID := mustUpsert(t, st, listingPosting("wave-shared-bookmark", "공유 북마크 공고"))
+	sharedHiddenID := mustUpsert(t, st, listingPosting("wave-shared-hidden", "공유 숨김 공고"))
+	sharedAI := listingPosting("wave-shared-ai", "공유 AI 공고")
+	sharedAI.Description = "wave-a-dealbreaker wave-b-dealbreaker"
+	sharedAI.ID = mustUpsert(t, st, sharedAI)
+	seedProductionScoredPosting(t, st, scoreAID, userA)
+	seedProductionScoredPosting(t, st, scoreBID, userB)
+	seedProductionScoredPosting(t, st, sharedBookmarkID, userA, userB)
+	seedProductionScoredPosting(t, st, sharedHiddenID, userA, userB)
+	seedProductionScoredPosting(t, st, sharedAI.ID, userA, userB)
+
+	assertPageContains(t, srv, cookieA, "/", "웨이브 A 전용 점수 공고")
+	assertPageMissing(t, srv, cookieA, "/", "웨이브 B 전용 점수 공고")
+	assertPageContains(t, srv, cookieB, "/", "웨이브 B 전용 점수 공고")
+	assertPageMissing(t, srv, cookieB, "/", "웨이브 A 전용 점수 공고")
+
+	if err := st.AddBookmark(ctx, userB, sharedBookmarkID); err != nil {
+		t.Fatalf("seed user B bookmark: %v", err)
+	}
+	if err := st.AddNotInterested(ctx, userB, sharedHiddenID, time.Now().UTC()); err != nil {
+		t.Fatalf("seed user B hidden posting: %v", err)
+	}
+	mutate := func(method, path string, cookie *http.Cookie) {
+		t.Helper()
+		req := httptest.NewRequest(method, path, nil)
+		req.AddCookie(cookie)
+		addCSRFToRequest(req, srv, cookie)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s %s: status=%d body=%q", method, path, rec.Code, rec.Body.String())
+		}
+	}
+	bookmarkPath := fmt.Sprintf("/api/bookmark/%d", sharedBookmarkID)
+	mutate(http.MethodPut, bookmarkPath, cookieA)
+	mutate(http.MethodDelete, bookmarkPath, cookieA)
+	assertBookmarkedForUser(t, st, userA, sharedBookmarkID, false)
+	assertBookmarkedForUser(t, st, userB, sharedBookmarkID, true)
+	mutate(http.MethodPut, bookmarkPath, cookieA)
+	assertPageContains(t, srv, cookieA, "/bookmarks", "공유 북마크 공고")
+	assertPageContains(t, srv, cookieB, "/bookmarks", "공유 북마크 공고")
+
+	hiddenPath := fmt.Sprintf("/api/not-interested/%d", sharedHiddenID)
+	mutate(http.MethodPut, hiddenPath, cookieA)
+	mutate(http.MethodDelete, hiddenPath, cookieA)
+	assertHiddenForUser(t, st, userA, sharedHiddenID, false)
+	assertHiddenForUser(t, st, userB, sharedHiddenID, true)
+	mutate(http.MethodPut, hiddenPath, cookieA)
+	assertPageContains(t, srv, cookieA, "/hidden", "공유 숨김 공고")
+	assertPageContains(t, srv, cookieB, "/hidden", "공유 숨김 공고")
+
+	now := time.Now().UTC()
+	for _, seeded := range []struct {
+		userID      int64
+		inputHash   string
+		version     string
+		signal      string
+		delta       int
+		keywordHash string
+		evidence    string
+		usageIn     int
+		usageOut    int
+	}{
+		{userA, "wave-a-input", "wave-a-version", "wave-a-ai-marker", 7, "wave-a-keyword", "wave-a-validation", 11, 3},
+		{userB, "wave-b-input", "wave-b-version", "wave-b-ai-marker", -4, "wave-b-keyword", "wave-b-validation", 22, 5},
+	} {
+		if err := st.UpsertAIScore(ctx, seeded.userID, sharedAI.ID, seeded.inputHash, seeded.version, ai.Delta{
+			Items:    []ai.DeltaItem{{Signal: seeded.signal, Delta: seeded.delta}},
+			NetDelta: seeded.delta,
+		}, now); err != nil {
+			t.Fatalf("seed AI score for user %d: %v", seeded.userID, err)
+		}
+		_, contentHash, _ := ai.ModelInput(sharedAI)
+		if err := st.UpsertAIDealbreakerValidation(ctx, seeded.userID, sharedAI.ID, contentHash, "shared-validation-version", seeded.keywordHash, ai.DealbreakerValidation{
+			CandidateID: seeded.keywordHash,
+			Verdict:     ai.DealbreakerApplies,
+			Evidence:    seeded.evidence,
+		}, now); err != nil {
+			t.Fatalf("seed contextual validation for user %d: %v", seeded.userID, err)
+		}
+		if err := st.AddAIUsage(ctx, seeded.userID, now.Format("2006-01-02"), seeded.usageIn, seeded.usageOut); err != nil {
+			t.Fatalf("seed AI usage for user %d: %v", seeded.userID, err)
+		}
+	}
+
+	if _, ok, err := st.AIScore(ctx, userA, sharedAI.ID, "wave-b-input", "wave-b-version"); err != nil || ok {
+		t.Fatalf("user A read user B AI score: ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := st.AIScore(ctx, userB, sharedAI.ID, "wave-a-input", "wave-a-version"); err != nil || ok {
+		t.Fatalf("user B read user A AI score: ok=%v err=%v", ok, err)
+	}
+	validationsA, err := st.AIDealbreakerValidationsByPostingID(ctx, userA, "shared-validation-version")
+	if err != nil || len(validationsA[sharedAI.ID]) != 1 {
+		t.Fatalf("user A contextual validations=%v err=%v", validationsA, err)
+	}
+	validationsB, err := st.AIDealbreakerValidationsByPostingID(ctx, userB, "shared-validation-version")
+	if err != nil || len(validationsB[sharedAI.ID]) != 1 {
+		t.Fatalf("user B contextual validations=%v err=%v", validationsB, err)
+	}
+	if reflect.DeepEqual(validationsA, validationsB) {
+		t.Fatal("two users read the same contextual validation state")
+	}
+	usageAIn, usageAOut, err := st.AIUsageForDay(ctx, userA, now.Format("2006-01-02"))
+	if err != nil || usageAIn != 11 || usageAOut != 3 {
+		t.Fatalf("user A AI usage=(%d,%d) err=%v, want (11,3)", usageAIn, usageAOut, err)
+	}
+	usageBIn, usageBOut, err := st.AIUsageForDay(ctx, userB, now.Format("2006-01-02"))
+	if err != nil || usageBIn != 22 || usageBOut != 5 {
+		t.Fatalf("user B AI usage=(%d,%d) err=%v, want (22,5)", usageBIn, usageBOut, err)
+	}
+
+	profileBBefore, hashBBefore, _, _ := st.ProfileForUser(ctx, userB)
+	credentialBBefore, ok, err := st.UserAICredential(ctx, userB, "anthropic")
+	if err != nil || !ok {
+		t.Fatalf("UserAICredential B before: ok=%v err=%v", ok, err)
+	}
+	scoresBBefore, err := st.ScoresByPostingID(ctx, userB)
+	if err != nil {
+		t.Fatalf("ScoresByPostingID B before: %v", err)
+	}
+	postProfile(cookieA, "wave-a-profile-updated", "wave-a-dealbreaker", "synthetic-wave-a-key-updated")
+
+	profileBAfter, hashBAfter, _, _ := st.ProfileForUser(ctx, userB)
+	credentialBAfter, ok, err := st.UserAICredential(ctx, userB, "anthropic")
+	if err != nil || !ok {
+		t.Fatalf("UserAICredential B after: ok=%v err=%v", ok, err)
+	}
+	scoresBAfter, err := st.ScoresByPostingID(ctx, userB)
+	if err != nil {
+		t.Fatalf("ScoresByPostingID B after: %v", err)
+	}
+	usageBAfterIn, usageBAfterOut, err := st.AIUsageForDay(ctx, userB, now.Format("2006-01-02"))
+	if err != nil {
+		t.Fatalf("AIUsageForDay B after: %v", err)
+	}
+	if profileBAfter != profileBBefore || hashBAfter != hashBBefore ||
+		!reflect.DeepEqual(credentialBAfter, credentialBBefore) ||
+		!reflect.DeepEqual(scoresBAfter, scoresBBefore) ||
+		usageBAfterIn != usageBIn || usageBAfterOut != usageBOut {
+		t.Fatal("user A profile mutation changed user B state")
+	}
+	runtimeA, err := srv.aiRuntimeForUser(ctx, userA)
+	if err != nil {
+		t.Fatalf("aiRuntimeForUser A: %v", err)
+	}
+	runtimeB, err := srv.aiRuntimeForUser(ctx, userB)
+	if err != nil {
+		t.Fatalf("aiRuntimeForUser B: %v", err)
+	}
+	if runtimeA.Provider.(*fingerprintProvider).keyFingerprint == runtimeB.Provider.(*fingerprintProvider).keyFingerprint {
+		t.Fatal("two users resolved the same credential")
+	}
+
+	passwordRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(passwordRec, accountFormRequest(t, srv, "/account/password", cookieA.Value,
+		passwordChangeForm(accountCurrentPassword, accountNewPassword, accountNewPassword)))
+	if passwordRec.Code != http.StatusSeeOther || passwordRec.Header().Get("Location") != "/account" {
+		t.Fatalf("password change: status=%d location=%q body=%q", passwordRec.Code, passwordRec.Header().Get("Location"), passwordRec.Body.String())
+	}
+	assertAccountPassword(t, st, userA, accountNewPassword, true)
+	assertAccountPassword(t, st, userB, accountCurrentPassword, true)
+	assertAccountSessionValid(t, st, cookieB.Value, true)
+
+	deleteRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(deleteRec, accountFormRequest(t, srv, "/account/delete", cookieA.Value,
+		accountDeleteForm(accountNewPassword, "wave-a@example.invalid")))
+	if deleteRec.Code != http.StatusSeeOther || deleteRec.Header().Get("Location") != "/login" {
+		t.Fatalf("account delete: status=%d location=%q body=%q", deleteRec.Code, deleteRec.Header().Get("Location"), deleteRec.Body.String())
+	}
+	assertAccountUserExists(t, st, userA, false)
+	assertAccountUserExists(t, st, userB, true)
+	assertAccountSessionValid(t, st, cookieB.Value, true)
+	usageBAfterDeleteIn, usageBAfterDeleteOut, err := st.AIUsageForDay(ctx, userB, now.Format("2006-01-02"))
+	if err != nil || usageBAfterDeleteIn != 22 || usageBAfterDeleteOut != 5 {
+		t.Fatalf("user B AI usage after user A deletion=(%d,%d) err=%v, want (22,5)",
+			usageBAfterDeleteIn, usageBAfterDeleteOut, err)
+	}
+
+	for _, table := range []string{
+		"sessions", "profiles", "bookmarks", "not_interested", "scores",
+		"ai_scores", "ai_usage", "ai_dealbreaker_validations", "user_ai_credentials",
+	} {
+		var rowsA, rowsB int
+		if err := st.SQLDB().QueryRowContext(ctx, "SELECT count(*) FROM "+table+" WHERE user_id = $1", userA).Scan(&rowsA); err != nil {
+			t.Fatalf("count user A %s: %v", table, err)
+		}
+		if err := st.SQLDB().QueryRowContext(ctx, "SELECT count(*) FROM "+table+" WHERE user_id = $1", userB).Scan(&rowsB); err != nil {
+			t.Fatalf("count user B %s: %v", table, err)
+		}
+		if rowsA != 0 || rowsB == 0 {
+			t.Fatalf("%s rows after user A deletion: A=%d B=%d", table, rowsA, rowsB)
+		}
+	}
+}
+
 func TestProductionBookmarksUseSessionOwnerState(t *testing.T) {
 	srv, st := newPostgresTestServer(t, &fakeScraper{})
 	srv.SetProductionMode(true)
