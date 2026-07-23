@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -153,9 +154,39 @@ type AIRuntime struct {
 	PerCallCap         int
 }
 
+type stage1Funding struct {
+	userID  int64
+	runtime *AIRuntime
+	budget  *aiBudget
+}
+
 // SetCredentialCipher installs the process-level credential envelope cipher.
 // The cipher is immutable and must be configured before any AI operation.
 func (s *Server) SetCredentialCipher(c credential.Cipher) { s.credentialCipher = c }
+
+func (s *Server) resolveStage1Funding(ctx context.Context) (*stage1Funding, error) {
+	userID := s.stage1SponsorUserID
+	if userID <= 0 {
+		return nil, errors.New("server: stage1 sponsor unavailable: not configured")
+	}
+	if _, ok, err := s.store.UserByID(ctx, userID); err != nil {
+		return nil, fmt.Errorf("server: stage1 sponsor unavailable: lookup failed (user_id=%d)", userID)
+	} else if !ok {
+		return nil, fmt.Errorf("server: stage1 sponsor unavailable: unknown user (user_id=%d)", userID)
+	}
+	runtime, err := s.aiRuntimeForUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("server: stage1 sponsor unavailable: runtime failed (user_id=%d)", userID)
+	}
+	if runtime == nil {
+		return nil, fmt.Errorf("server: stage1 sponsor unavailable: AI not configured (user_id=%d)", userID)
+	}
+	return &stage1Funding{
+		userID:  userID,
+		runtime: runtime,
+		budget:  s.newAIBudget(ctx, userID, runtime),
+	}, nil
+}
 
 func (s *Server) aiRuntimeForUser(ctx context.Context, userID int64) (*AIRuntime, error) {
 	if userID <= 0 {
@@ -500,10 +531,14 @@ func (s *Server) runScrapeForTrigger(ctx context.Context, trigger string, emit f
 
 	now := time.Now().UTC()
 	var res ScrapeResult
-	// One AI token budget for the whole run (persists across sources). nil
-	// when AI is off, so no per-posting budget bookkeeping happens at all.
+	// The analyzed user's budget funds only Stage 1B and Stage 2. Global
+	// Stage 1A misses use the separately resolved sponsor budget.
 	freshAI := freshAIAllowedForTrigger(trigger, profileOK, prof, runtime)
 	budget := s.newAIBudget(ctx, userID, runtime)
+	stage1, stage1Err := s.resolveStage1Funding(ctx)
+	if stage1Err != nil {
+		log.Printf("jobcron: %v", stage1Err)
+	}
 	calls := &callCap{}
 	if runtime != nil {
 		calls.max = runtime.PerCallCap
@@ -518,7 +553,7 @@ func (s *Server) runScrapeForTrigger(ctx context.Context, trigger string, emit f
 	var succeeded []scraper.Scraper
 	var detailedPostings []scraper.Posting
 	for _, src := range active {
-		sub, detailed, err := s.runScrapeSource(ctx, src, now, userID, runtime, budget, emit)
+		sub, detailed, err := s.runScrapeSource(ctx, src, now, stage1, emit)
 		if err != nil {
 			// Per-source fault isolation: one source's failure must not
 			// abort the whole briefing. Surface the failure as a status
@@ -564,11 +599,13 @@ func (s *Server) runScrapeForTrigger(ctx context.Context, trigger string, emit f
 		}
 	}
 
-	// Cold-start banner (D6): if the per-run AI budget ran out mid-scrape during
-	// Stage-1 extraction, some postings were scored by regex instead of AI. A
-	// mixed briefing is fine — surface it calmly, never as a failure.
+	// Only the analyzed user can act on their profile limits. Keep sponsor
+	// identity private and avoid pointing them to settings that cannot restore
+	// sponsor-funded Stage 1.
 	if budget != nil && budget.isDegraded() {
 		emit("status", "오늘 AI 예산을 다 써서 일부는 일반 점수로 분석했어요 — 프로필 설정에서 한도를 바꿀 수 있어요.")
+	} else if stage1 != nil && stage1.budget.isDegraded() {
+		emit("status", "일부 공고는 AI 분석 없이 일반 점수로 분석했어요.")
 	}
 
 	emit("status", "공고에 점수를 매기는 중...")
@@ -581,9 +618,9 @@ func (s *Server) runScrapeForTrigger(ctx context.Context, trigger string, emit f
 	// Auto-rate the fresh briefing with Stage-2 so new postings show their
 	// evidence-cited AI chip without a manual 재평가. Runs AFTER the offline
 	// scoreAll (so "visible" reflects real scores), over the today surface only,
-	// through the same worker pool as 재평가. Stage 1A, Stage 1B, and Stage 2
-	// share this scrape's token budget; Stage 1B and Stage 2 also share the
-	// runtime.PerCallCap counter so contextual validation cannot bypass it.
+	// through the same worker pool as 재평가. Stage 1B and Stage 2 share the
+	// analyzed user's budget and runtime.PerCallCap counter; sponsor-funded
+	// Stage 1A remains separate.
 	if freshAI {
 		if vis, verr := s.visibleForRerate(ctx, "today", now, userID, runtime); verr == nil && len(vis) > 0 {
 			emit("status", "새 공고를 AI로 분석하는 중...")
@@ -642,7 +679,9 @@ type aiBudget struct {
 	// before an in-flight call debits can collectively exceed the cap by at
 	// most (pool size) calls — acceptable for a soft token ceiling.
 	mu       sync.Mutex
-	runSpent int  // input+output debited this run
+	runSpent int // input+output debited this run
+	calls    int
+	callCap  int
 	degraded bool // true once either cap was hit mid-run
 }
 
@@ -675,6 +714,7 @@ func (s *Server) newAIBudget(ctx context.Context, userID int64, runtime *AIRunti
 		monthlyCap:     runtime.MonthlyTokenCap,
 		dailyAtStart:   in + out,
 		monthlyAtStart: monthIn + monthOut,
+		callCap:        runtime.PerCallCap,
 	}
 }
 
@@ -689,6 +729,17 @@ func (b *aiBudget) canSpend() bool {
 		b.degraded = true
 		return false
 	}
+	return true
+}
+
+func (b *aiBudget) tryReserveCall() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.calls >= b.callCap {
+		b.degraded = true
+		return false
+	}
+	b.calls++
 	return true
 }
 
@@ -714,7 +765,11 @@ func (b *aiBudget) isDegraded() bool {
 // runScrapeSource scrapes one source, emitting source-prefixed status events
 // so the user can tell which source is currently active in the stream.
 func (s *Server) runScrapeSource(
-	ctx context.Context, src scraper.Scraper, now time.Time, userID int64, runtime *AIRuntime, budget *aiBudget, emit func(event, data string),
+	ctx context.Context,
+	src scraper.Scraper,
+	now time.Time,
+	funding *stage1Funding,
+	emit func(event, data string),
 ) (ScrapeResult, []scraper.Posting, error) {
 	label := sourceLabel(src.Source())
 	emit("status", fmt.Sprintf("[%s] robots.txt 확인 중...", label))
@@ -780,7 +835,7 @@ func (s *Server) runScrapeSource(
 		// Stage-1 AI extraction (cache-read, D2). Best-effort: any failure
 		// leaves no ai_extractions row and the posting is scored by the regex
 		// path exactly as v1.5 — the scrape never fails on an AI error.
-		s.extractStage1(ctx, id, detailed, now, userID, runtime, budget)
+		s.extractStage1(ctx, id, detailed, now, funding)
 	}
 
 	// Edited-JD refresh (T7): re-fetch the detail of the stalest already-seen
@@ -806,31 +861,45 @@ func (s *Server) runScrapeSource(
 		detailedPostings = append(detailedPostings, detailed)
 		res.Refreshed++
 		emit("progress", fmt.Sprintf("[%s] 기존 공고 새로고침 %d/%d...", label, i+1, len(cands)))
-		s.extractStage1(ctx, c.id, detailed, now, userID, runtime, budget)
+		s.extractStage1(ctx, c.id, detailed, now, funding)
 	}
 	return res, detailedPostings, nil
 }
 
-// extractStage1 runs and caches the Stage-1 AI extraction for one new posting,
-// if AI is enabled and the per-run budget has headroom. It writes only the
+// extractStage1 reuses the global Stage-1 cache before requiring sponsor
+// funding. On a miss it calls and debits only the sponsor. It writes only the
 // ai_extractions cache row — the postings columns stay a faithful source
-// mirror (D2). Every failure path is silent (regex fallback at score time).
-func (s *Server) extractStage1(ctx context.Context, id int64, p scraper.Posting, now time.Time, userID int64, runtime *AIRuntime, budget *aiBudget) {
-	if runtime == nil || runtime.UserID != userID || budget == nil || !budget.canSpend() {
-		return
-	}
+// mirror (D2). Every failure path falls back to deterministic scoring.
+func (s *Server) extractStage1(
+	ctx context.Context,
+	id int64,
+	p scraper.Posting,
+	now time.Time,
+	funding *stage1Funding,
+) {
 	sent, contentHash, _ := ai.ModelInput(p)
 	// Cache hit (same content already extracted under this contract): reuse,
 	// no provider call. New postings always miss; this matters for the T7
 	// re-rate backfill and idempotent re-runs.
-	if _, ok, err := s.store.AIExtraction(ctx, id, contentHash, ai.ExtractionContractVersion()); err == nil && ok {
+	if _, ok, err := s.store.AIExtraction(
+		ctx,
+		id,
+		contentHash,
+		ai.ExtractionContractVersion(),
+	); err != nil || ok {
 		return
 	}
-	ext, usage, err := runtime.Provider.Extract(ctx, sent)
+	if funding == nil ||
+		!funding.budget.canSpend() ||
+		!funding.budget.tryReserveCall() {
+		return
+	}
+	ext, usage, err := funding.runtime.Provider.Extract(ctx, sent)
+	funding.budget.debit(ctx, usage)
 	if err != nil {
+		log.Printf("jobcron: stage1 sponsor provider unavailable (user_id=%d)", funding.userID)
 		return // timeout / 5xx / malformed JSON / out-of-range → regex fallback
 	}
-	budget.debit(ctx, usage)
 	// Best-effort cache write; a failure here just means a regex score this pass.
 	_ = s.store.UpsertAIExtraction(ctx, id, contentHash, ai.ExtractionContractVersion(), ext, now)
 }
@@ -904,11 +973,10 @@ func (s *Server) scoreAll(ctx context.Context, userID int64, runtime *AIRuntime)
 	if err != nil {
 		return 0, err
 	}
-	// Batch-load the Stage-1 extractions and Stage-2 deltas once (no N+1) when
-	// AI is enabled; scoreCareer/educationDealbreaker prefer the extractions,
-	// and the deltas merge as the "AI 분석" line item. This is merge-only — D10:
-	// scoreAll NEVER calls the provider; paid Stage 1A/1B work runs at scrape
-	// time, while a 재평가 may run Stage 1B followed by Stage 2.
+	// Batch-load global Stage-1 extractions once for every user. Stage-1B
+	// validations and Stage-2 deltas remain gated by the analyzed user's
+	// runtime and user-scoped cache. This is merge-only — scoreAll never calls
+	// a provider.
 	var (
 		exts                   map[int64]ai.Extraction
 		contentHashes          map[int64]string
@@ -917,17 +985,21 @@ func (s *Server) scoreAll(ctx context.Context, userID int64, runtime *AIRuntime)
 		latestDeltas           map[int64]ai.Delta // newest per posting under the current ai_version, any goal text — stale fallback for a goal edit
 		anyVerDeltas           map[int64]ai.Delta // newest per posting across ANY ai_version — stale fallback for a provider/model switch
 	)
+	contentHashes = make(map[int64]string, len(postings))
+	for _, p := range postings {
+		_, contentHashes[p.ID], _ = ai.ModelInput(p)
+	}
+	exts, err = s.store.AIExtractionsByPostingID(
+		ctx,
+		contentHashes,
+		ai.ExtractionContractVersion(),
+	)
+	if err != nil {
+		return 0, err
+	}
 	if runtime != nil {
 		if userID <= 0 || runtime.UserID != userID {
 			return 0, fmt.Errorf("server: AI runtime user mismatch")
-		}
-		contentHashes = make(map[int64]string, len(postings))
-		for _, p := range postings {
-			_, contentHashes[p.ID], _ = ai.ModelInput(p)
-		}
-		exts, err = s.store.AIExtractionsByPostingID(ctx, contentHashes, ai.ExtractionContractVersion())
-		if err != nil {
-			return 0, err
 		}
 		if s.store.Dialect() == storage.DialectPostgres {
 			dealbreakerValidations, err = s.store.AIDealbreakerValidationsByPostingID(ctx, userID, runtime.DealbreakerVersion)

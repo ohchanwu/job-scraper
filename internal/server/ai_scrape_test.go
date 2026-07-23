@@ -53,6 +53,14 @@ func aiExtractionCount(t *testing.T, srv *Server) int {
 	return len(m)
 }
 
+func testStage1Funding(srv *Server, ctx context.Context, userID int64, runtime *AIRuntime) *stage1Funding {
+	return &stage1Funding{
+		userID:  userID,
+		runtime: runtime,
+		budget:  srv.newAIBudget(ctx, userID, runtime),
+	}
+}
+
 // TestRunScrapeAutoRatesFreshBriefingWithStage2 proves the fix: a scrape now
 // runs Stage-2 over the fresh briefing, so new postings carry their evidence-
 // cited AI delta WITHOUT a manual 재평가 press.
@@ -99,16 +107,20 @@ func TestRunScrapeOrdersDealbreakerValidationBeforeStage2(t *testing.T) {
 	srv, st := newPostgresTestServer(t, f)
 	ctx := context.Background()
 	userID := insertAIRuntimeTestUser(t, st, "dealbreaker-order@example.invalid")
+	sponsorID := insertAIRuntimeTestUser(t, st, "dealbreaker-order-sponsor@example.invalid")
 	zero := 0
 	prof := profile.Profile{CareerYears: 0, MinScore: &zero, Dealbreakers: []string{"리서치"}, JobLikes: "서버 개발"}
 	saveAIRuntimeProfile(t, st, userID, prof)
 	var order []string
-	provider := &ai.StubProvider{
-		NameVal: "stub",
+	sponsor := &ai.StubProvider{
+		NameVal: "anthropic",
 		ExtractFn: func(context.Context, string) (ai.Extraction, ai.Usage, error) {
 			order = append(order, "stage1a")
 			return ai.Extraction{Newcomer: true, EducationEnum: ai.EduNone}, ai.Usage{InputTokens: 1}, nil
 		},
+	}
+	provider := &ai.StubProvider{
+		NameVal: "anthropic",
 		ValidateDealbreakersFn: func(_ context.Context, _ string, candidates []ai.DealbreakerCandidate) ([]ai.DealbreakerValidation, ai.Usage, error) {
 			order = append(order, "stage1b")
 			return []ai.DealbreakerValidation{{CandidateID: candidates[0].ID, Verdict: ai.DealbreakerNotApplicable, Evidence: "리서치 아님"}}, ai.Usage{InputTokens: 2}, nil
@@ -126,6 +138,28 @@ func TestRunScrapeOrdersDealbreakerValidationBeforeStage2(t *testing.T) {
 			return []ai.RawDeltaItem{{Signal: "서버", Kind: ai.KindPresence, Delta: 1, Quote: "서버 개발"}}, ai.Usage{InputTokens: 3}, nil
 		},
 	}
+	cipher := newAIRuntimeTestCipher(t, 0x59)
+	srv.SetCredentialCipher(cipher)
+	saveAIRuntimeProfile(t, st, sponsorID, profile.Profile{
+		CareerYears: 0,
+		AIProvider:  "anthropic",
+		AIModel:     "sponsor-model",
+	})
+	saveAIRuntimeCredential(
+		t,
+		st,
+		cipher,
+		sponsorID,
+		"anthropic",
+		stage1SponsorFixture,
+	)
+	srv.newAIProvider = func(_ string, key string, _ string, _ time.Duration) (ai.Provider, error) {
+		if key != stage1SponsorFixture {
+			return nil, errors.New("unexpected synthetic credential")
+		}
+		return sponsor, nil
+	}
+	srv.stage1SponsorUserID = sponsorID
 	runtime := testAIRuntime(userID, provider, "shared-model")
 	if _, err := srv.runScrape(ctx, noopEmit, userID, runtime); err != nil {
 		t.Fatalf("runScrape: %v", err)
@@ -133,6 +167,8 @@ func TestRunScrapeOrdersDealbreakerValidationBeforeStage2(t *testing.T) {
 	if got := strings.Join(order, " -> "); got != "stage1a -> stage1b -> stage2" {
 		t.Fatalf("paid flow order = %q", got)
 	}
+	assertStage1Usage(t, st, sponsorID, 1)
+	assertStage1Usage(t, st, userID, 5)
 }
 
 func TestRunScrapeDealbreakerCacheHitSpendsNothing(t *testing.T) {
@@ -302,12 +338,8 @@ func TestRunUSDCapHaltsManualScrapeExtractionAfterFirstCall(t *testing.T) {
 			"2": listingPosting("2", "서버 신입"),
 		},
 	}
-	srv, st := newTestServer(t, f)
+	srv, _ := newTestServer(t, f)
 	ctx := context.Background()
-	pj, _ := profile.Marshal(profile.Profile{CareerYears: 0, AIRunUSDCapCents: 1})
-	if _, _, err := st.SaveProfile(ctx, pj); err != nil {
-		t.Fatalf("SaveProfile: %v", err)
-	}
 	stub := &ai.StubProvider{
 		NameVal: "stub",
 		ExtractFn: func(ctx context.Context, modelText string) (ai.Extraction, ai.Usage, error) {
@@ -319,48 +351,21 @@ func TestRunUSDCapHaltsManualScrapeExtractionAfterFirstCall(t *testing.T) {
 	runtime := testAIRuntime(1, stub, "test-model")
 	runtime.RunTokenCap = aiRunTokenCapForUSDCents(1)
 
-	if _, err := srv.runScrape(ctx, noopEmit, 1, runtime); err != nil {
-		t.Fatalf("runScrape: %v", err)
+	if _, _, err := srv.runScrapeSource(
+		ctx,
+		f,
+		time.Now().UTC(),
+		testStage1Funding(srv, ctx, 1, runtime),
+		noopEmit,
+	); err != nil {
+		t.Fatalf("runScrapeSource: %v", err)
 	}
 	if stub.Calls != 1 {
 		t.Fatalf("Extract calls = %d, want 1 because the run USD cap stops the second posting", stub.Calls)
 	}
 }
 
-func TestRunUSDCapHaltsOptInScheduledScrapeExtractionAfterFirstCall(t *testing.T) {
-	f := &fakeScraper{
-		listing: []scraper.Posting{listingPosting("1", "백엔드 신입"), listingPosting("2", "서버 신입")},
-		details: map[string]scraper.Posting{
-			"1": listingPosting("1", "백엔드 신입"),
-			"2": listingPosting("2", "서버 신입"),
-		},
-	}
-	srv, st := newTestServer(t, f)
-	ctx := context.Background()
-	pj, _ := profile.Marshal(profile.Profile{CareerYears: 0, ScheduledAIEnabled: true, AIRunUSDCapCents: 1})
-	if _, _, err := st.SaveProfile(ctx, pj); err != nil {
-		t.Fatalf("SaveProfile: %v", err)
-	}
-	stub := &ai.StubProvider{
-		NameVal: "stub",
-		ExtractFn: func(ctx context.Context, modelText string) (ai.Extraction, ai.Usage, error) {
-			zero := 0
-			return ai.Extraction{MinCareer: 0, MaxCareer: &zero, Newcomer: true, EducationEnum: ai.EduNone, CareerEvidence: "신입"},
-				ai.Usage{InputTokens: aiRunTokenCapForUSDCents(1) + 1}, nil
-		},
-	}
-	runtime := testAIRuntime(1, stub, "test-model")
-	runtime.RunTokenCap = aiRunTokenCapForUSDCents(1)
-
-	if _, err := srv.runScrapeForTrigger(ctx, storage.ScrapeTriggerScheduled, noopEmit, 1, runtime); err != nil {
-		t.Fatalf("scheduled runScrape: %v", err)
-	}
-	if stub.Calls != 1 {
-		t.Fatalf("Extract calls = %d, want 1 because the run USD cap stops the second scheduled posting", stub.Calls)
-	}
-}
-
-func TestRunScrapeStubProviderExtractsNewPostings(t *testing.T) {
+func TestRunScrapeSourceSponsorExtractsNewPostings(t *testing.T) {
 	f := &fakeScraper{
 		listing: []scraper.Posting{listingPosting("1", "백엔드 신입"), listingPosting("2", "AI 신입")},
 		details: map[string]scraper.Posting{
@@ -371,11 +376,16 @@ func TestRunScrapeStubProviderExtractsNewPostings(t *testing.T) {
 	srv, st := newTestServer(t, f)
 	stub := newcomerStub()
 	runtime := testAIRuntime(1, stub, "test-model")
-	saveSinipProfile(t, srv)
 	ctx := context.Background()
 
-	if _, err := srv.runScrape(ctx, noopEmit, 1, runtime); err != nil {
-		t.Fatalf("runScrape: %v", err)
+	if _, _, err := srv.runScrapeSource(
+		ctx,
+		f,
+		time.Now().UTC(),
+		testStage1Funding(srv, ctx, 1, runtime),
+		noopEmit,
+	); err != nil {
+		t.Fatalf("runScrapeSource: %v", err)
 	}
 
 	// One ai_extractions row per new posting, and exactly one Extract call each.
@@ -408,7 +418,7 @@ func TestRunScrapeStubProviderExtractsNewPostings(t *testing.T) {
 	}
 }
 
-func TestRunScrapeProviderFailsScrapeContinues(t *testing.T) {
+func TestRunScrapeSourceProviderFailsAndRegexScoringContinues(t *testing.T) {
 	f := &fakeScraper{
 		listing: []scraper.Posting{listingPosting("1", "신입 공고")},
 		details: map[string]scraper.Posting{"1": listingPosting("1", "신입 공고")},
@@ -420,9 +430,19 @@ func TestRunScrapeProviderFailsScrapeContinues(t *testing.T) {
 	saveSinipProfile(t, srv)
 	ctx := context.Background()
 
-	res, err := srv.runScrape(ctx, noopEmit, 1, runtime)
+	res, _, err := srv.runScrapeSource(
+		ctx,
+		f,
+		time.Now().UTC(),
+		testStage1Funding(srv, ctx, 1, runtime),
+		noopEmit,
+	)
 	if err != nil {
-		t.Fatalf("runScrape must not fail when the provider errors: %v", err)
+		t.Fatalf("runScrapeSource must not fail when the provider errors: %v", err)
+	}
+	res.Scored, err = srv.scoreAll(ctx, 1, runtime)
+	if err != nil {
+		t.Fatalf("scoreAll: %v", err)
 	}
 	if res.New != 1 || res.Scored != 1 {
 		t.Errorf("ScrapeResult = %+v, want the posting still inserted + scored", res)
@@ -468,8 +488,14 @@ func TestRunScrapeAlreadySeenDoesNotExtract(t *testing.T) {
 		t.Fatalf("seed posting: %v", err)
 	}
 
-	if _, err := srv.runScrape(ctx, noopEmit, 1, runtime); err != nil {
-		t.Fatalf("runScrape: %v", err)
+	if _, _, err := srv.runScrapeSource(
+		ctx,
+		f,
+		time.Now().UTC(),
+		testStage1Funding(srv, ctx, 1, runtime),
+		noopEmit,
+	); err != nil {
+		t.Fatalf("runScrapeSource: %v", err)
 	}
 	if len(f.detailCalls) != 0 {
 		t.Errorf("FetchDetail called %v for a known posting; want none", f.detailCalls)
@@ -491,7 +517,7 @@ func TestExtractStage1CacheHitSurvivesProviderAndModelChange(t *testing.T) {
 	originalProvider := newcomerStub()
 	originalProvider.NameVal = "provider-a"
 	originalRuntime := testAIRuntime(1, originalProvider, "model-a")
-	srv.extractStage1(ctx, id, p, time.Now().UTC(), 1, originalRuntime, srv.newAIBudget(ctx, 1, originalRuntime))
+	srv.extractStage1(ctx, id, p, time.Now().UTC(), testStage1Funding(srv, ctx, 1, originalRuntime))
 	if originalProvider.Calls != 1 {
 		t.Fatalf("initial Extract calls = %d, want cache population", originalProvider.Calls)
 	}
@@ -499,7 +525,7 @@ func TestExtractStage1CacheHitSurvivesProviderAndModelChange(t *testing.T) {
 	changedProvider := newcomerStub()
 	changedProvider.NameVal = "provider-b"
 	runtime := testAIRuntime(1, changedProvider, "model-b")
-	srv.extractStage1(ctx, id, p, time.Now().UTC(), 1, runtime, srv.newAIBudget(ctx, 1, runtime))
+	srv.extractStage1(ctx, id, p, time.Now().UTC(), testStage1Funding(srv, ctx, 1, runtime))
 
 	if changedProvider.Calls != 0 {
 		t.Fatalf("Extract called %d times after provider/model change; want global cache hit", changedProvider.Calls)
@@ -538,7 +564,7 @@ func TestExtractStage1CacheMissesWhenContentOrContractChanges(t *testing.T) {
 
 			stub := newcomerStub()
 			runtime := testAIRuntime(1, stub, "model-b")
-			srv.extractStage1(ctx, id, p, time.Now().UTC(), 1, runtime, srv.newAIBudget(ctx, 1, runtime))
+			srv.extractStage1(ctx, id, p, time.Now().UTC(), testStage1Funding(srv, ctx, 1, runtime))
 
 			if stub.Calls != 1 {
 				t.Fatalf("Extract calls = %d, want cache miss", stub.Calls)
@@ -573,7 +599,7 @@ func TestExtractStage1FailuresDoNotWriteCache(t *testing.T) {
 			}
 			runtime := testAIRuntime(1, stub, "model")
 
-			srv.extractStage1(ctx, id, p, time.Now().UTC(), 1, runtime, srv.newAIBudget(ctx, 1, runtime))
+			srv.extractStage1(ctx, id, p, time.Now().UTC(), testStage1Funding(srv, ctx, 1, runtime))
 
 			if n := aiExtractionCount(t, srv); n != 0 {
 				t.Fatalf("ai_extractions rows = %d, want 0", n)
@@ -586,17 +612,53 @@ func TestExtractStage1DeterministicFallbackDoesNotWriteCache(t *testing.T) {
 	srv, st := newTestServer(t, &fakeScraper{})
 	p := listingPosting("1", "백엔드 신입")
 	id := mustUpsert(t, st, p)
-	stub := newcomerStub()
-	runtime := testAIRuntime(1, stub, "model")
 
-	srv.extractStage1(context.Background(), id, p, time.Now().UTC(), 1, runtime, nil)
+	srv.extractStage1(context.Background(), id, p, time.Now().UTC(), nil)
 
-	if stub.Calls != 0 {
-		t.Fatalf("Extract calls = %d, want deterministic fallback without provider", stub.Calls)
-	}
 	if n := aiExtractionCount(t, srv); n != 0 {
 		t.Fatalf("ai_extractions rows = %d, want 0", n)
 	}
+}
+
+func TestExtractStage1CacheReadErrorDoesNotCallProvider(t *testing.T) {
+	srv, st := newTestServer(t, &fakeScraper{})
+	ctx := context.Background()
+	p := listingPosting("1", "백엔드 신입")
+	id := mustUpsert(t, st, p)
+	stub := newcomerStub()
+	runtime := testAIRuntime(1, stub, "model")
+	funding := testStage1Funding(srv, ctx, 1, runtime)
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	srv.extractStage1(ctx, id, p, time.Now().UTC(), funding)
+
+	if stub.Calls != 0 {
+		t.Fatalf("Extract calls = %d, want 0 after cache read error", stub.Calls)
+	}
+}
+
+func TestStage1SponsorCoreFundingSQLite(t *testing.T) {
+	srv, st := newTestServer(t, &fakeScraper{})
+	ctx := context.Background()
+	p := listingPosting("1", "백엔드 신입")
+	id := mustUpsert(t, st, p)
+	sponsor := newcomerStub()
+	sponsorRuntime := testAIRuntime(1, sponsor, "sponsor-model")
+
+	srv.extractStage1(
+		ctx,
+		id,
+		p,
+		time.Now().UTC(),
+		testStage1Funding(srv, ctx, 1, sponsorRuntime),
+	)
+
+	if sponsor.Calls != 1 {
+		t.Fatalf("sponsor provider calls = %d, want 1", sponsor.Calls)
+	}
+	assertStage1Usage(t, st, 1, 120)
 }
 
 func TestScoreAllIgnoresExtractionForPriorContentHash(t *testing.T) {
@@ -646,11 +708,16 @@ func TestRunScrapePerRunBudgetHalts(t *testing.T) {
 	runtime.RunTokenCap = 5 // tiny: the first call exhausts it
 	saveSinipProfile(t, srv)
 
-	var events []string
-	emit := func(ev, data string) { events = append(events, ev+"\x00"+data) }
-
-	if _, err := srv.runScrape(context.Background(), emit, 1, runtime); err != nil {
-		t.Fatalf("runScrape: %v", err)
+	ctx := context.Background()
+	funding := testStage1Funding(srv, ctx, 1, runtime)
+	if _, _, err := srv.runScrapeSource(
+		ctx,
+		f,
+		time.Now().UTC(),
+		funding,
+		noopEmit,
+	); err != nil {
+		t.Fatalf("runScrapeSource: %v", err)
 	}
 	if stub.Calls != 1 {
 		t.Errorf("Extract calls = %d, want 1 (budget halts after the first)", stub.Calls)
@@ -658,14 +725,8 @@ func TestRunScrapePerRunBudgetHalts(t *testing.T) {
 	if n := aiExtractionCount(t, srv); n != 1 {
 		t.Errorf("ai_extractions rows = %d, want 1", n)
 	}
-	var sawColdStart bool
-	for _, e := range events {
-		if strings.HasPrefix(e, "status\x00") && strings.Contains(e, "AI 예산") {
-			sawColdStart = true
-		}
-	}
-	if !sawColdStart {
-		t.Errorf("expected a calm cold-start status when the budget halted; events=%v", events)
+	if !funding.budget.isDegraded() {
+		t.Error("sponsor budget was not marked degraded after halting")
 	}
 }
 
@@ -687,8 +748,17 @@ func TestRunScrapeEndToEndScoreCorrection(t *testing.T) {
 	saveSinipProfile(t, srv) // 신입 (CareerYears 0)
 	ctx := context.Background()
 
-	if _, err := srv.runScrape(ctx, noopEmit, 1, runtime); err != nil {
-		t.Fatalf("runScrape: %v", err)
+	if _, _, err := srv.runScrapeSource(
+		ctx,
+		f,
+		time.Now().UTC(),
+		testStage1Funding(srv, ctx, 1, runtime),
+		noopEmit,
+	); err != nil {
+		t.Fatalf("runScrapeSource: %v", err)
+	}
+	if _, err := srv.scoreAll(ctx, 1, runtime); err != nil {
+		t.Fatalf("scoreAll: %v", err)
 	}
 	scores, err := st.ScoresByPostingID(ctx)
 	if err != nil || len(scores) != 1 {

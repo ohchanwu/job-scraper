@@ -374,12 +374,10 @@ func TestBudgetLedgerPersistsAcrossRestart(t *testing.T) {
 	}
 	srv, st := newTestServer(t, f)
 	runtime := testAIRuntime(1, newcomerStub(), "test-model") // each Extract spends 120 tokens
-	saveSinipProfile(t, srv)
 	ctx := context.Background()
-
-	if _, err := srv.runScrape(ctx, noopEmit, 1, runtime); err != nil {
-		t.Fatalf("runScrape: %v", err)
-	}
+	p := listingPosting("1", "백엔드 신입")
+	id := mustUpsert(t, st, p)
+	srv.extractStage1(ctx, id, p, time.Now().UTC(), testStage1Funding(srv, ctx, 1, runtime))
 	day := time.Now().UTC().Format("2006-01-02")
 	in, out, _ := st.AIUsageForDay(ctx, 1, day)
 	if in != 100 || out != 20 {

@@ -470,6 +470,13 @@ func TestProductionProfileSaveRedirectsAfterPostCommitAIRescoreFailure(t *testin
 	if _, err := st.SQLDB().Exec(`DROP TABLE ai_extractions`); err != nil {
 		t.Fatalf("drop AI extraction cache: %v", err)
 	}
+	runtime, err := srv.aiRuntimeForUser(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("resolve AI runtime: %v", err)
+	}
+	if _, err := srv.scoreAll(context.Background(), userID, runtime); err == nil {
+		t.Fatal("scoreAll succeeded with missing ai_extractions table")
+	}
 
 	form := url.Values{"career_years": {"0"}, "job_likes": {"new rescore goal"}, "ai_provider": {"anthropic"}}
 	req := httptest.NewRequest(http.MethodPost, "/profile", strings.NewReader(form.Encode()))
@@ -486,8 +493,11 @@ func TestProductionProfileSaveRedirectsAfterPostCommitAIRescoreFailure(t *testin
 		t.Fatalf("committed profile ok=%v err=%v", ok, err)
 	}
 	scores, err := st.ScoresByPostingID(context.Background(), userID)
-	if err != nil || scores[postingID].ProfileHash != gotHash {
-		t.Fatalf("rescore fallback score = %+v err=%v, want profile hash %s", scores[postingID], err, gotHash)
+	if err != nil {
+		t.Fatalf("scores after rescore storage failure: %v", err)
+	}
+	if _, ok := scores[postingID]; ok {
+		t.Fatalf("score unexpectedly written after ai_extractions storage failure; profile hash %s", gotHash)
 	}
 }
 

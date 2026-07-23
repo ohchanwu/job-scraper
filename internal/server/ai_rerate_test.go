@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -122,6 +123,10 @@ func TestRunRerateValidatesExcludedPostingBeforeStage2(t *testing.T) {
 	if provider.ValidateDealbreakersCalls != 1 || provider.ScoreDeltaCalls != 1 || summary.Visible != 1 || summary.Analyzed != 1 {
 		t.Fatalf("summary=%+v validation=%d stage2=%d", summary, provider.ValidateDealbreakersCalls, provider.ScoreDeltaCalls)
 	}
+	if provider.Calls != 0 {
+		t.Fatalf("analyzed-user Stage 1A calls = %d, want 0 without sponsor funding", provider.Calls)
+	}
+	assertStage1Usage(t, st, userID, 5)
 	after, ok, err := st.ScoreByPostingIDForUser(ctx, userID, postingID)
 	if err != nil || !ok || after.Total == -1 {
 		t.Fatalf("posting did not re-enter Today: score=%+v ok=%v err=%v", after, ok, err)
@@ -132,6 +137,7 @@ func TestRunRerateBackfillsStage1DespiteCurrentStage2Cache(t *testing.T) {
 	srv, st := newPostgresTestServer(t, &fakeScraper{})
 	ctx := context.Background()
 	userID := insertAIRuntimeTestUser(t, st, "rerate-stage1-order@example.invalid")
+	sponsorID := insertAIRuntimeTestUser(t, st, "rerate-stage1-sponsor@example.invalid")
 	zero := 0
 	prof := profile.Profile{
 		CareerYears:  0,
@@ -147,15 +153,40 @@ func TestRunRerateBackfillsStage1DespiteCurrentStage2Cache(t *testing.T) {
 	p.FirstSeenAt, p.LastSeenAt = now, now
 	postingID := mustUpsert(t, st, p)
 	provider := &ai.StubProvider{
-		NameVal: "stub",
-		ExtractFn: func(context.Context, string) (ai.Extraction, ai.Usage, error) {
-			return ai.Extraction{Newcomer: true, EducationEnum: ai.EduNone}, ai.Usage{InputTokens: 2}, nil
-		},
+		NameVal: "anthropic",
 		ScoreDeltaFn: func(context.Context, string, string) ([]ai.RawDeltaItem, ai.Usage, error) {
 			return nil, ai.Usage{InputTokens: 3}, nil
 		},
 	}
+	sponsor := &ai.StubProvider{
+		NameVal: "anthropic",
+		ExtractFn: func(context.Context, string) (ai.Extraction, ai.Usage, error) {
+			return ai.Extraction{Newcomer: true, EducationEnum: ai.EduNone}, ai.Usage{InputTokens: 2}, nil
+		},
+	}
 	runtime := testAIRuntime(userID, provider, "shared-model")
+	cipher := newAIRuntimeTestCipher(t, 0x58)
+	srv.SetCredentialCipher(cipher)
+	saveAIRuntimeProfile(t, st, sponsorID, profile.Profile{
+		CareerYears: 0,
+		AIProvider:  "anthropic",
+		AIModel:     "sponsor-model",
+	})
+	saveAIRuntimeCredential(
+		t,
+		st,
+		cipher,
+		sponsorID,
+		"anthropic",
+		stage1SponsorFixture,
+	)
+	srv.newAIProvider = func(_ string, key string, _ string, _ time.Duration) (ai.Provider, error) {
+		if key != stage1SponsorFixture {
+			return nil, errors.New("unexpected synthetic credential")
+		}
+		return sponsor, nil
+	}
+	srv.stage1SponsorUserID = sponsorID
 	if err := st.UpsertAIScore(ctx, userID, postingID, profile.AIInputHash(prof), runtime.ScoreVersion, ai.Delta{}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -171,13 +202,115 @@ func TestRunRerateBackfillsStage1DespiteCurrentStage2Cache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runRerate: %v", err)
 	}
-	if provider.Calls != 1 || provider.ScoreDeltaCalls != 0 || summary.Visible != 1 || summary.Analyzed != 1 {
-		t.Fatalf("summary=%+v stage1=%d stage2=%d, want Stage 1A despite a free Stage 2 hit", summary, provider.Calls, provider.ScoreDeltaCalls)
+	if sponsor.Calls != 1 || provider.Calls != 0 || provider.ScoreDeltaCalls != 0 ||
+		summary.Visible != 1 || summary.Analyzed != 1 {
+		t.Fatalf(
+			"summary=%+v sponsor_stage1=%d user_stage1=%d stage2=%d",
+			summary,
+			sponsor.Calls,
+			provider.Calls,
+			provider.ScoreDeltaCalls,
+		)
 	}
+	assertStage1Usage(t, st, sponsorID, 2)
+	assertStage1Usage(t, st, userID, 0)
 	after, ok, err := st.ScoreByPostingIDForUser(ctx, userID, postingID)
 	if err != nil || !ok || after.Total == -1 {
 		t.Fatalf("Stage 1 extraction did not restore posting before Stage 2: score=%+v ok=%v err=%v", after, ok, err)
 	}
+}
+
+func TestRunRerateSponsorExhaustionPreservesUserFundedStages(t *testing.T) {
+	srv, st, sponsorID, userID, sponsor, provider := newStage1SponsorTestServer(
+		t,
+		&fakeScraper{},
+	)
+	ctx := context.Background()
+	zero := 0
+	saveAIRuntimeProfile(t, st, userID, profile.Profile{
+		CareerYears: 0,
+		MinScore:    &zero,
+		Dealbreakers: []string{
+			"리서치",
+		},
+		JobLikes:   "서버 개발",
+		AIProvider: "anthropic",
+		AIModel:    "trigger-model",
+	})
+	saveAIRuntimeProfile(t, st, sponsorID, profile.Profile{
+		CareerYears:     0,
+		AIProvider:      "anthropic",
+		AIModel:         "sponsor-model",
+		AIDailyTokenCap: 1,
+	})
+	day := time.Now().UTC().Format("2006-01-02")
+	if err := st.AddAIUsage(ctx, sponsorID, day, 1, 0); err != nil {
+		t.Fatalf("seed sponsor usage: %v", err)
+	}
+	provider.ValidateDealbreakersFn = func(
+		_ context.Context,
+		_ string,
+		candidates []ai.DealbreakerCandidate,
+	) ([]ai.DealbreakerValidation, ai.Usage, error) {
+		return []ai.DealbreakerValidation{{
+			CandidateID: candidates[0].ID,
+			Verdict:     ai.DealbreakerNotApplicable,
+			Evidence:    "리서치 아님",
+		}}, ai.Usage{InputTokens: 2}, nil
+	}
+	provider.ScoreDeltaFn = func(context.Context, string, string) (
+		[]ai.RawDeltaItem,
+		ai.Usage,
+		error,
+	) {
+		return []ai.RawDeltaItem{{
+			Signal: "서버",
+			Kind:   ai.KindPresence,
+			Delta:  1,
+			Quote:  "서버 개발",
+		}}, ai.Usage{InputTokens: 3}, nil
+	}
+	p := listingPosting("sponsor-exhausted", "신입 리서치 개발자")
+	p.Description = "리서치 아님. 서버 개발자를 찾습니다"
+	p.Newcomer = true
+	p.FirstSeenAt, p.LastSeenAt = time.Now().UTC(), time.Now().UTC()
+	mustUpsert(t, st, p)
+	runtime, err := srv.aiRuntimeForUser(ctx, userID)
+	if err != nil || runtime == nil {
+		t.Fatalf("aiRuntimeForUser = runtime:%v err:%v", runtime, err)
+	}
+	if _, err := srv.scoreAll(ctx, userID, runtime); err != nil {
+		t.Fatalf("initial scoreAll: %v", err)
+	}
+
+	var statuses []string
+	emit := func(event, data string) {
+		if event == "status" {
+			statuses = append(statuses, data)
+		}
+	}
+	if _, err := srv.runRerate(ctx, "today", emit, userID, runtime); err != nil {
+		t.Fatalf("runRerate: %v", err)
+	}
+	status := strings.Join(statuses, "\n")
+	if !strings.Contains(status, "AI 분석 없이 일반 점수로 다시 분석") {
+		t.Errorf("status = %q, want generic deterministic-fallback guidance", status)
+	}
+	if strings.Contains(status, "프로필 설정") || strings.Contains(status, "스폰서") {
+		t.Errorf("status = %q, want no analyzed-user remediation or sponsor identity", status)
+	}
+	if sponsor.Calls != 0 || provider.Calls != 0 {
+		t.Fatalf("Stage 1A calls sponsor=%d analyzed_user=%d, want 0/0", sponsor.Calls, provider.Calls)
+	}
+	if provider.ValidateDealbreakersCalls != 1 || provider.ScoreDeltaCalls != 1 {
+		t.Fatalf(
+			"user-funded calls Stage1B=%d Stage2=%d, want 1/1",
+			provider.ValidateDealbreakersCalls,
+			provider.ScoreDeltaCalls,
+		)
+	}
+	assertStage1Usage(t, st, sponsorID, 1)
+	assertStage1Usage(t, st, userID, 5)
 }
 
 func TestRunRerateReconnectReusesCache(t *testing.T) {

@@ -52,7 +52,7 @@ whether demo mode comes from the environment or the command line.
 sponsor ID must be a positive base-10 integer. Startup loads both settings and wires them into the
 server, while the production Compose file passes them through without defaults. The access code
 opens cohort signup; leaving it unset keeps the signup page visible but closes account creation.
-Sponsor-funded AI work remains part of later scheduler tasks.
+Global Stage 1A cache misses use only the configured sponsor's provider and usage ledger.
 
 The daily scheduler is enabled by configuration and runs inside the application process at
 `JOBCRON_DAILY_SCRAPE_TIME` in Asia/Seoul (`05:00` by default). The current scheduled scrape
@@ -211,7 +211,9 @@ invalid model output, or exhausted AI budgets.
 Stage 1A extracts career range, new-grad eligibility, education, and separate career and education
 evidence from posting text. These facts describe the posting rather than a user, so the cache is
 global and keyed by posting content and `ExtractionContractVersion`. Invalid or unavailable extraction
-falls back to source fields and deterministic parsing.
+falls back to source fields and deterministic parsing. Cache hits require no sponsor. Cache misses
+use only the configured sponsor's runtime, token budget, call cap, and `ai_usage`; an unavailable or
+exhausted sponsor never falls through to the triggering or analyzed user's credentials.
 
 ### Stage 1B: user-scoped dealbreaker context
 

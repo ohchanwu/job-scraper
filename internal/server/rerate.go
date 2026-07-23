@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -370,6 +371,10 @@ func (s *Server) runRerate(ctx context.Context, surface string, emit func(event,
 		return summary, err
 	}
 	budget := s.newAIBudget(ctx, userID, runtime)
+	stage1, stage1Err := s.resolveStage1Funding(ctx)
+	if stage1Err != nil {
+		log.Printf("jobcron: %v", stage1Err)
+	}
 	calls := &callCap{max: runtime.PerCallCap}
 	now := time.Now()
 	candidates, err := s.candidatePostingsForRerate(ctx, surface, now, userID, runtime)
@@ -382,7 +387,7 @@ func (s *Server) runRerate(ctx context.Context, surface string, emit func(event,
 	// and Stage 2 have independent cache identities, so only extractStage1's own
 	// exact eligibility/content cache check can make this call free.
 	for _, p := range candidates {
-		s.extractStage1(ctx, p.ID, p, now, userID, runtime, budget)
+		s.extractStage1(ctx, p.ID, p, now, stage1)
 	}
 	if validationCalls, validationErr := s.validateDealbreakers(ctx, userID, candidates, prof, runtime, budget, calls, emit); validationErr != nil {
 		summary.ProviderCalls += validationCalls
@@ -409,6 +414,8 @@ func (s *Server) runRerate(ctx context.Context, surface string, emit func(event,
 	summary.ProviderCalls += stage2Calls
 	if budget != nil && budget.isDegraded() {
 		emit("status", "오늘 AI 예산을 다 써서 일부는 다시 분석하지 못했어요 — 프로필 설정에서 한도를 바꿀 수 있어요.")
+	} else if stage1 != nil && stage1.budget.isDegraded() {
+		emit("status", "일부 공고는 AI 분석 없이 일반 점수로 다시 분석했어요.")
 	}
 	if provErr != nil && summary.Analyzed > 0 {
 		// Partial: some rows rated, some hit a provider error. Note it before the
