@@ -113,11 +113,11 @@ Only `ModelInput` applies `maxModelTextRunes`.
 
 ### Steps
 
-- [ ] Add failing `internal/ai/extract_test.go` cases proving:
+- [x] Add failing `internal/ai/extract_test.go` cases proving:
   - `DealbreakerModelInput` returns NFC-normalized text beyond rune 12,000;
   - `ModelInput` remains truncated at the existing limit;
   - both functions return the same full-text content hash.
-- [ ] Run:
+- [x] Run:
 
   ```bash
   go test ./internal/ai -run 'Test.*DealbreakerModelInput' -count=1
@@ -126,7 +126,7 @@ Only `ModelInput` applies `maxModelTextRunes`.
   Expected: compile or assertion failure because the new function does not
   exist.
 
-- [ ] Add failing table tests in `internal/scoring/match_test.go` for:
+- [x] Add failing table tests in `internal/scoring/match_test.go` for:
   - the detection gate rejecting a tag-only phrase absent from the combined
     title, company, and description;
   - a matched structured welfare tag represented in the description producing
@@ -142,7 +142,7 @@ Only `ModelInput` applies `maxModelTextRunes`.
     `tokenmatch.Contains`;
   - Korean normalization and particle behavior remaining unchanged;
   - multiple matches preserving profile order and the existing candidate ID.
-- [ ] Run:
+- [x] Run:
 
   ```bash
   go test ./internal/scoring -run 'TestDealbreakerCandidates|TestCanonicalDealbreakerMatch' -count=1
@@ -150,12 +150,12 @@ Only `ModelInput` applies `maxModelTextRunes`.
 
   Expected: failures because candidates do not yet carry `Match`.
 
-- [ ] Add failing profile-save tests in `internal/server/server_test.go`:
+- [x] Add failing profile-save tests in `internal/server/server_test.go`:
   - a 240-rune dealbreaker line saves successfully;
   - a 241-rune line returns HTTP 400 with concise Korean guidance;
   - rejection leaves the previously saved profile unchanged;
   - Unicode length is counted in runes, not UTF-8 bytes.
-- [ ] Run:
+- [x] Run:
 
   ```bash
   go test ./internal/server -run 'TestHandleProfileSave.*Dealbreaker' -count=1
@@ -163,10 +163,10 @@ Only `ModelInput` applies `maxModelTextRunes`.
 
   Expected: the overlong value is currently accepted.
 
-- [ ] Implement `DealbreakerModelInput` with one small shared helper for the
+- [x] Implement `DealbreakerModelInput` with one small shared helper for the
   full-text hash. Do not alter `rawModelText`, `maxModelTextRunes`, or existing
   Stage 1A/Stage 2 callers.
-- [ ] Implement canonical match selection in `internal/scoring/match.go`:
+- [x] Implement canonical match selection in `internal/scoring/match.go`:
   1. Run the old combined-text gate first.
   2. Consider a structured tag only when its `Name` matches the phrase and the
      complete tag name matches within `p.Description` under
@@ -178,10 +178,10 @@ Only `ModelInput` applies `maxModelTextRunes`.
      value over 240 runes. For `combined_fields`, excerpt the old combined
      string around the cross-field occurrence.
   6. Keep the excerpt helper private to `scoring`.
-- [ ] Validate `parseLines(r.FormValue("dealbreakers"))` before constructing or
+- [x] Validate `parseLines(r.FormValue("dealbreakers"))` before constructing or
   saving the profile. Reject any line over 240 runes; do not partially save,
   truncate, or invoke scoring.
-- [ ] Run:
+- [x] Run:
 
   ```bash
   go test ./internal/ai ./internal/scoring ./internal/server -count=1
@@ -190,8 +190,8 @@ Only `ModelInput` applies `maxModelTextRunes`.
   Expected: all Task 1 tests pass and existing matching/profile tests remain
   green.
 
-- [ ] Review the cumulative diff for detection broadening and input mutation.
-- [ ] Commit:
+- [x] Review the cumulative diff for detection broadening and input mutation.
+- [x] Commit:
 
   ```bash
   git add internal/ai/provider.go internal/ai/extract.go internal/ai/extract_test.go \
@@ -255,13 +255,13 @@ type dealbreakerCheckWire struct {
 
 ### Steps
 
-- [ ] Replace the old evidence-copy tests with failing table tests covering all
+- [x] Replace the old evidence-copy tests with failing table tests covering all
   valid verdict/reason pairs:
   - `applies`: `requirement`, `responsibility`, `expected_condition`;
   - `not_applicable`: `benefit_or_eligibility`, `explicitly_negated`,
     `incidental_or_metadata`;
   - `uncertain`: `insufficient_context` with empty reason evidence.
-- [ ] Add failing parser tests proving:
+- [x] Add failing parser tests proving:
   - `not_applicable` with empty reason evidence is valid;
   - optional reason evidence may omit the candidate phrase;
   - ungrounded or over-240-rune reason evidence is discarded while an otherwise
@@ -277,14 +277,14 @@ type dealbreakerCheckWire struct {
     phrase-bearing) makes that candidate unresolved;
   - a phrase-bearing reason quote that contradicts its verdict no longer acts
     as semantic proof.
-- [ ] Add prompt tests asserting:
+- [x] Add prompt tests asserting:
   - candidates are serialized with their server-owned `match`;
   - the verdict/reason matrix appears in the system prompt;
   - “any occurrence applies” and “all occurrences must be non-applicable” are
     explicit;
   - posting text and candidates remain untrusted user-message data;
   - the benefit/eligibility example allows empty or non-keyword reason evidence.
-- [ ] Run:
+- [x] Run:
 
   ```bash
   go test ./internal/ai -run 'TestParseDealbreaker|TestDealbreakerPrompt' -count=1
@@ -293,22 +293,22 @@ type dealbreakerCheckWire struct {
   Expected: compile and assertion failures against the version-1 types and
   prompt.
 
-- [ ] Rewrite `dealbreakerSystemPrompt`, `buildDealbreakerUser`, and
+- [x] Rewrite `dealbreakerSystemPrompt`, `buildDealbreakerUser`, and
   `parseDealbreakerValidations` to enforce the approved ownership split.
   Validate the server match before the model row. Trim and NFC-normalize optional
   reason evidence before the exact-substring check.
-- [ ] Keep independent row acceptance. Do not use `DisallowUnknownFields`;
+- [x] Keep independent row acceptance. Do not use `DisallowUnknownFields`;
   provider-echoed match fields should be inert data, not an operation failure.
-- [ ] Change only:
+- [x] Change only:
 
   ```go
   DealbreakerPromptVersion = "2"
   ```
 
-- [ ] Update Anthropic and OpenAI-compatible adapter fixtures to emit the new
+- [x] Update Anthropic and OpenAI-compatible adapter fixtures to emit the new
   schema. The adapters should need no production branching because they share
   the provider-independent parser.
-- [ ] Run:
+- [x] Run:
 
   ```bash
   go test ./internal/ai -count=1
@@ -316,9 +316,9 @@ type dealbreakerCheckWire struct {
 
   Expected: all AI contract, injection, adapter, and version tests pass.
 
-- [ ] Review the prompt for hidden posting instructions, ambiguous reason
+- [x] Review the prompt for hidden posting instructions, ambiguous reason
   mappings, and accidental Stage 1A/Stage 2 version changes.
-- [ ] Commit:
+- [x] Commit:
 
   ```bash
   git add internal/ai
@@ -370,7 +370,7 @@ func (s *Store) UpsertAIDealbreakerValidation(
 
 ### Steps
 
-- [ ] Add failing storage tests for:
+- [x] Add failing storage tests for:
   - insert/read round-trip of `Match`, `ReasonCode`, and `ReasonEvidence`;
   - upsert replacing all version-2 fields;
   - malformed `match_json` failing closed on read;
@@ -378,7 +378,7 @@ func (s *Store) UpsertAIDealbreakerValidation(
   - user isolation and the exact map key
     `content_hash + "\x00" + keyword_hash`;
   - one batch query behavior remaining unchanged.
-- [ ] Run:
+- [x] Run:
 
   ```bash
   test -n "${JOBCRON_TEST_POSTGRES_URL:-}" &&
@@ -387,7 +387,7 @@ func (s *Store) UpsertAIDealbreakerValidation(
 
   Expected: compile failures until the new fields and signature exist.
 
-- [ ] Add a migration integration test that creates a database through
+- [x] Add a migration integration test that creates a database through
   migration `0018`, seeds a version-1 row with legacy `evidence`, applies
   `0019`, and proves:
   - migration version 19 is recorded;
@@ -396,7 +396,7 @@ func (s *Store) UpsertAIDealbreakerValidation(
   - the `evidence` column no longer exists;
   - a version-2 row can coexist under the unchanged primary key dimensions;
   - the version-1 row cannot satisfy a version-2 storage lookup.
-- [ ] Run:
+- [x] Run:
 
   ```bash
   test -n "${JOBCRON_TEST_POSTGRES_URL:-}" &&
@@ -406,7 +406,7 @@ func (s *Store) UpsertAIDealbreakerValidation(
 
   Expected: failure because migration `0019` does not exist.
 
-- [ ] Create migration `0019` with separate PostgreSQL statements:
+- [x] Create migration `0019` with separate PostgreSQL statements:
 
   ```sql
   ALTER TABLE ai_dealbreaker_validations
@@ -419,13 +419,13 @@ func (s *Store) UpsertAIDealbreakerValidation(
       DROP COLUMN evidence;
   ```
 
-- [ ] Marshal `match` once before the upsert. Write
+- [x] Marshal `match` once before the upsert. Write
   `verdict, match_json, reason_code, reason_evidence, computed_at`; read and
   unmarshal the same columns. Return a contextual storage error for invalid
   JSON. Do not reconstruct a match from provider reason evidence.
-- [ ] Update the schema-version expectation from 18 to 19 and remove legacy
+- [x] Update the schema-version expectation from 18 to 19 and remove legacy
   `evidence` SQL references from account-lifecycle tests.
-- [ ] Run:
+- [x] Run:
 
   ```bash
   test -n "${JOBCRON_TEST_POSTGRES_URL:-}" &&
@@ -434,7 +434,7 @@ func (s *Store) UpsertAIDealbreakerValidation(
 
   Expected: all storage unit and PostgreSQL migration tests pass.
 
-- [ ] Search for obsolete runtime dependencies:
+- [x] Search for obsolete runtime dependencies:
 
   ```bash
   rg -n '\bevidence\b' internal/storage \
@@ -444,8 +444,8 @@ func (s *Store) UpsertAIDealbreakerValidation(
   Expected: no `ai_dealbreaker_validations.evidence` read, write, or fixture
   remains; unrelated extraction evidence is allowed.
 
-- [ ] Review the migration and exact cache-key/user filters.
-- [ ] Commit:
+- [x] Review the migration and exact cache-key/user filters.
+- [x] Commit:
 
   ```bash
   git add internal/storage
@@ -503,7 +503,7 @@ Append the label to the existing status text, for example
 
 ### Steps
 
-- [ ] Update scoring tests first. Prove:
+- [x] Update scoring tests first. Prove:
   - `applies` and `uncertain` use `candidate.Match.Evidence`, never
     `validation.ReasonEvidence`;
   - source/category flow into `ExclusionReason`;
@@ -512,7 +512,7 @@ Append the label to the existing status text, for example
   - multiple candidates clear exclusion only when all are
     `not_applicable`;
   - existing education, career, and minimum-score reasons are unchanged.
-- [ ] Run:
+- [x] Run:
 
   ```bash
   go test ./internal/scoring -run 'Test.*Exclusion|Test.*Dealbreaker' -count=1
@@ -520,7 +520,7 @@ Append the label to the existing status text, for example
 
   Expected: compile/assertion failures until scoring consumes `Match`.
 
-- [ ] Add server integration tests proving:
+- [x] Add server integration tests proving:
   - `validateDealbreakers` sends `DealbreakerModelInput`, including a match
     after rune 12,000;
   - each accepted validation is persisted with the exact server candidate
@@ -533,7 +533,7 @@ Append the label to the existing status text, for example
   - provider, model, user, content, and keyword isolation remain unchanged;
   - no-progress, budget-blocked, call-cap-blocked, and provider-error summaries
     remain correct.
-- [ ] Add a `runRerate` test with one on-surface and one off-surface posting.
+- [x] Add a `runRerate` test with one on-surface and one off-surface posting.
   Assert that one press:
   - loads all stored postings for Stage 1B;
   - evaluates selected-surface Stage 1B rows before off-surface rows when the
@@ -541,7 +541,7 @@ Append the label to the existing status text, for example
   - respects the shared cap/budget and leaves excess work pending;
   - runs Stage 1A and Stage 2 only for the selected surface;
   - makes no paid call for a current version-2 cache hit.
-- [ ] Run:
+- [x] Run:
 
   ```bash
   test -n "${JOBCRON_TEST_POSTGRES_URL:-}" &&
@@ -553,34 +553,34 @@ Append the label to the existing status text, for example
   Expected: failures because rerate is currently surface-scoped and persists
   provider evidence.
 
-- [ ] Update `validateDealbreakers` to:
+- [x] Update `validateDealbreakers` to:
   - call `ai.DealbreakerModelInput`;
   - map unresolved IDs back to the exact `candidate.Match`;
   - pass that match separately to storage;
   - retain per-posting pending counts, independent rows, budget/cap behavior,
     and the existing progress line
     `공고 #<id> (<company>) 문맥 확인 중...`.
-- [ ] In `runRerate`, keep `candidatePostingsForRerate` for Stage 1A and the
+- [x] In `runRerate`, keep `candidatePostingsForRerate` for Stage 1A and the
   later visible Stage 2 set. Load `s.store.AllPostings(ctx)` separately and
   build a deduplicated Stage 1B list with the selected-surface candidates first
   and the remaining stored postings in `AllPostings` order. Share the same
   `budget` and `callCap`.
-- [ ] Update `scoreAll` cache wiring in `internal/server/server.go` to pass the
+- [x] Update `scoreAll` cache wiring in `internal/server/server.go` to pass the
   version-2 validation map without weakening exact content/keyword matching.
-- [ ] Update UI/view tests first. Prove:
+- [x] Update UI/view tests first. Prove:
   - deterministic match evidence is escaped and token-marked;
   - the source label is deterministic;
   - unknown source/category values fall back calmly to `공고 정보`;
   - provider reason evidence is not rendered;
   - Today and Archive render the status/evidence while preserving bookmark,
     hidden, and external-link actions.
-- [ ] Add `SourceLabel` to `exclusionReasonView`, derive it only from the stored
+- [x] Add `SourceLabel` to `exclusionReasonView`, derive it only from the stored
   server match, and append it to the existing status line in
   `web/exclusion_reason.html`. Do not add CSS or client behavior.
-- [ ] Update all tests and stubs that construct `DealbreakerCandidate`,
+- [x] Update all tests and stubs that construct `DealbreakerCandidate`,
   `DealbreakerValidation`, or `UpsertAIDealbreakerValidation` so they use valid
   version-2 server matches and reason codes.
-- [ ] Add `internal/server/browser_fixture_test.go` behind the
+- [x] Add `internal/server/browser_fixture_test.go` behind the
   `browserfixture` build tag. Reuse the production PostgreSQL test server and
   existing session/credential helpers to:
   - seed a synthetic owner, AI profile, and two incident postings;
@@ -593,7 +593,7 @@ Append the label to the existing status text, for example
     route is called.
   This file must compile only in the test binary and add no production route or
   runtime flag.
-- [ ] Run:
+- [x] Run:
 
   ```bash
   test -n "${JOBCRON_TEST_POSTGRES_URL:-}" &&
@@ -602,9 +602,9 @@ Append the label to the existing status text, for example
 
   Expected: all scoring, rerate, isolation, blocker, and view tests pass.
 
-- [ ] Re-read the cumulative Task 4 diff for accidental Stage 1A/Stage 2
+- [x] Re-read the cumulative Task 4 diff for accidental Stage 1A/Stage 2
   broadening, provider-controlled evidence, or new UI surfaces.
-- [ ] Commit:
+- [x] Commit:
 
   ```bash
   git add internal/server internal/scoring web/exclusion_reason.html
@@ -629,16 +629,16 @@ Append the label to the existing status text, for example
 
 ### Steps
 
-- [ ] Update `docs/architecture.md` to describe:
+- [x] Update `docs/architecture.md` to describe:
   - unchanged deterministic candidate detection;
   - canonical server match provenance;
   - full-text Stage 1B versus capped Stage 1A/Stage 2 inputs;
   - all-stored-posting manual Stage 1B passes;
   - verdict/reason validation and conservative fallback;
   - version-2 persistence and existing exclusion UI rendering.
-- [ ] Point active architecture links to the new contract while it remains
+- [x] Point active architecture links to the new contract while it remains
   active. Do not load or rewrite unrelated archived documents.
-- [ ] Run formatting, static analysis, and builds:
+- [x] Run formatting, static analysis, and builds:
 
   ```bash
   test -z "$(gofmt -l .)"
@@ -646,7 +646,7 @@ Append the label to the existing status text, for example
   go build ./cmd/jobcron ./cmd/jobcron-import ./cmd/jobcron-user
   ```
 
-- [ ] Run the complete PostgreSQL-backed suite and race detector against a
+- [x] Run the complete PostgreSQL-backed suite and race detector against a
   disposable test database:
 
   ```bash
@@ -655,7 +655,7 @@ Append the label to the existing status text, for example
     go test -race ./... -count=1
   ```
 
-- [ ] Run live scraper integration tests:
+- [x] Run live scraper integration tests:
 
   ```bash
   go test -tags integration \
@@ -666,7 +666,7 @@ Append the label to the existing status text, for example
     ./internal/scraper/greenhouse/
   ```
 
-- [ ] Run the opt-in live-provider gate with credentials supplied only through
+- [x] Run the opt-in live-provider gate with credentials supplied only through
   the local environment:
 
   ```bash
@@ -681,7 +681,7 @@ Append the label to the existing status text, for example
   of the server match. If the provider is unavailable or rate-limited, record
   the exact sanitized blocker; do not claim the gate passed.
 
-- [ ] Read and apply the `frontend-qa` skill because the rendered UI changed.
+- [x] Read and apply the `frontend-qa` skill because the rendered UI changed.
   Start the deterministic test-only preview without opening the user's browser:
 
   ```bash
@@ -693,7 +693,7 @@ Append the label to the existing status text, for example
   Run it in a dedicated terminal/session and use the printed
   `BROWSER_FIXTURE_URL`. It contains only synthetic data and a deterministic
   provider, requires no credential, and stays alive for human inspection.
-- [ ] Using GStack `/browse`, walk the real user path on desktop and mobile:
+- [x] Using GStack `/browse`, walk the real user path on desktop and mobile:
   1. Open the test-only login URL, then navigate through the real All Jobs UI.
   2. Confirm the initial Stage 1B pending count.
   3. Press `AI 평가` until the pending count reaches zero.
@@ -708,13 +708,13 @@ Append the label to the existing status text, for example
      not merely a 200 response or generic page.
   9. Check that no browser console errors occur and adjacent bookmark/hidden
      actions still work.
-- [ ] Capture sanitized screenshots and browser notes under the ignored
+- [x] Capture sanitized screenshots and browser notes under the ignored
   `.superpowers/sdd/260725-dealbreaker-match-provenance/` directory. Do not
   track them.
-- [ ] Leave the fixture preview running and report its URL for human
+- [x] Leave the fixture preview running and report its URL for human
   inspection. Report the printed stop URL as the cleanup path; do not stop it
   before handoff unless verification fails.
-- [ ] Inspect the complete diff from the implementation base, then scan the
+- [x] Inspect the complete diff from the implementation base, then scan the
   staged documentation and code:
 
   ```bash
@@ -726,21 +726,21 @@ Append the label to the existing status text, for example
 
   Manually review tracked text for credentials, personal data, private
   topology, raw provider payloads, and unnecessary machine-specific details.
-- [ ] When every gate passes, mark all plan checkboxes complete, change the
+- [x] When every gate passes, mark all plan checkboxes complete, change the
   specification status to implemented, and move the spec and plan into:
 
   ```text
   docs/superpowers/archive/2026-07-25-contextual-dealbreaker-match-provenance/
   ```
 
-- [ ] After moving, change this plan's `[spec]` target to the adjacent archived
+- [x] After moving, change this plan's `[spec]` target to the adjacent archived
   contract and change the contract's `[prior-spec]` target to its correct
   archive-relative path. Run a local-link check so neither move leaves a broken
   documentation link.
-- [ ] Update `docs/superpowers/README.md` and `docs/README.md`: remove the
+- [x] Update `docs/superpowers/README.md` and `docs/README.md`: remove the
   completed items from active work, add concise archive links, and keep
   `docs/architecture.md` pointing to the durable archived contract.
-- [ ] Stage only the intended documentation, inspect the staged diff again,
+- [x] Stage only the intended documentation, inspect the staged diff again,
   rerun Gitleaks, and commit:
 
   ```bash
@@ -750,7 +750,7 @@ Append the label to the existing status text, for example
   git commit -m "docs: record dealbreaker provenance architecture"
   ```
 
-- [ ] Confirm the final worktree contains no unintended tracked changes and
+- [x] Confirm the final worktree contains no unintended tracked changes and
   report:
   - commit list;
   - exact verification commands and outcomes;
@@ -759,4 +759,4 @@ Append the label to the existing status text, for example
   - browser-flow results;
   - any independent decisions or sanitized blockers.
 
-[spec]: ../specs/260725-contextual-dealbreaker-match-provenance-contract.md
+[spec]: 260725-contextual-dealbreaker-match-provenance-contract.md

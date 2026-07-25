@@ -1,6 +1,6 @@
 # Contextual Dealbreaker Match-Provenance Contract
 
-**Status:** Approved design; implementation plan awaiting approval
+**Status:** Implemented 2026-07-25
 
 **Created:** 2026-07-25
 
@@ -486,4 +486,4 @@ is a forward fix, restoring the local database from a pre-migration backup, or
 resetting the disposable local database. Do not add a compatibility column or
 down migration solely to preserve old-binary rollback.
 
-[prior-spec]: ../archive/2026-07-18-contextual-dealbreaker-validation/260718-stage-1-contextual-dealbreaker-validation-and-exclusion-evidence.md
+[prior-spec]: ../2026-07-18-contextual-dealbreaker-validation/260718-stage-1-contextual-dealbreaker-validation-and-exclusion-evidence.md

@@ -231,26 +231,58 @@ exhausted sponsor never falls through to the triggering or analyzed user's crede
 
 ### Stage 1B: user-scoped dealbreaker context
 
-The deterministic matcher NFC-normalizes and lowercases text, then finds exact contiguous token
-sequences from the user's dealbreaker list. Each match becomes a candidate whose stable identity
-is the SHA-256 digest of that normalized token sequence.
+Candidate detection is deterministic and unchanged. The matcher NFC-normalizes and lowercases
+text, then finds exact contiguous token sequences from the user's dealbreaker list over
+`title + company + description`. Each match becomes a candidate whose stable identity is the
+SHA-256 digest of that normalized token sequence.
 
-Stage 1B batches only unresolved candidates and classifies each as `applies`, `not_applicable`, or
-`uncertain`. Conclusive evidence must be a bounded verbatim quote from the posting and contain the
-same candidate token sequence. The PostgreSQL cache key combines `user_id`, posting, posting
-content hash, `DealbreakerVersion`, and normalized keyword hash, so neither users nor changed
-inputs can share a verdict accidentally.
+Each candidate then carries one canonical server-owned match: the evidence quote, the field it
+came from (`structured_tag`, `title`, `company`, `description`, or `combined_fields`), and the tag
+category when a structured tag supplied it. The server picks the most specific field first, uses
+the shortest matching description line, and bounds evidence to 240 code points around the matched
+span. A structured tag qualifies only when the tag name itself matches the phrase and that name
+also appears in the description, so provenance never claims a field the posting text does not
+support. Saved dealbreaker lines are capped at 240 code points so bounded evidence can always
+contain the complete phrase. This match is immutable provider input: the detector owns the proof
+and the model owns only the verdict.
+
+Stage 1B alone sends the complete normalized posting, because a dealbreaker occurrence can sit
+past the 12,000-rune model-input cap and judging an occurrence the model never saw is worse than
+leaving it unresolved. Stage 1A and Stage 2 keep the capped input. All three key content on the
+same full-text hash, so widening Stage 1B's text does not change cache identity.
+
+Stage 1B batches only unresolved candidates and returns, per candidate, a verdict (`applies`,
+`not_applicable`, `uncertain`), one reason code compatible with that verdict, and optional
+grounded reason text. `applies` admits `requirement`, `responsibility`, and `expected_condition`;
+`not_applicable` admits `benefit_or_eligibility`, `explicitly_negated`, and
+`incidental_or_metadata`; `uncertain` admits only `insufficient_context`. A row is discarded when
+its candidate is unknown or duplicated, its server match is malformed, its verdict and reason code
+are incompatible, or an `uncertain` row carries any reason text. Reason text that is overlong or
+absent from the posting is dropped while the verdict survives, and rows decode independently so
+one malformed row never voids its valid siblings. The PostgreSQL cache key combines `user_id`,
+posting, posting content hash, `DealbreakerVersion`, and normalized keyword hash, so neither users
+nor changed inputs can share a verdict accidentally.
 
 A keyword exclusion is suppressed only when every matched candidate is `not_applicable`.
-`applies`, `uncertain`, missing cache entries, invalid evidence, unavailable credentials, provider
+`applies`, `uncertain`, missing cache entries, invalid rows, unavailable credentials, provider
 failures, and exhausted budgets all retain the deterministic exclusion. This conservative fallback
 lets AI remove a supported false positive without silently weakening an unresolved hard rule.
 
 Manual and opted-in scheduled scrapes may run Stage 1B before scoring. An explicit `AI 평가`
-rerate also evaluates currently excluded candidates before rebuilding the eligible Stage 2 set.
-Profile save and startup rescoring are provider-free: they reuse caches and mark missing validation
-as pending instead of making surprise paid calls. Stage 1B and Stage 2 share the user's run budget
-and call cap.
+press evaluates Stage 1B candidates across every stored posting, with the selected surface's rows
+first and remaining rows in stable storage order; a wrongly excluded posting is invisible on the
+surface that would otherwise scope the pass, so scoping it there would keep it hidden forever.
+Stage 1A extraction and Stage 2 scoring stay limited to the selected surface. The shared per-call
+cap and token budget still bound paid work, so several presses may be needed to drain a large
+backlog. Profile save and startup rescoring are provider-free: they reuse caches and mark missing
+validation as pending instead of making surprise paid calls. Stage 1B and Stage 2 share the user's
+run budget and call cap.
+
+Persistence follows the same split. `DealbreakerPromptVersion` is `2`, and migration `0019` stores
+`match_json`, `reason_code`, and `reason_evidence` on `ai_dealbreaker_validations` while dropping
+the version-1 `evidence` column. There is no down migration and no version-1 backfill; the earlier
+binary is intentionally unsupported after the migration. A returned row is stored against the
+candidate's own server match, never against anything the provider echoed back.
 
 Each rerate records contextual postings pending before and after the run plus attempted, accepted,
 and unresolved checks. A successful provider response that produces no citation-gated validations
@@ -260,9 +292,11 @@ validation separately from stale Stage 2 scores while keeping one unique-posting
 button.
 
 Scoring persists the exact decision in `ScoreResult.ExclusionReasons` inside
-`scores.breakdown_json`. Rendering therefore explains the score that actually caused exclusion
-without querying the validation cache or recalculating policy. The complete contract is in the
-[Stage 1 contextual validation specification][stage1-context-spec].
+`scores.breakdown_json`. Each keyword reason carries the server match's evidence, source, and
+category alongside the phrase and confidence, so rendering explains the score that actually caused
+exclusion without querying the validation cache or recalculating policy. The complete contract is
+in the [dealbreaker match-provenance contract][dealbreaker-provenance-spec]; it supersedes the
+earlier [Stage 1 contextual validation specification][stage1-context-spec].
 
 ### Stage 2: user fit
 
@@ -347,11 +381,15 @@ state live in PostgreSQL so they follow the account across devices. Browser stor
 presentation preferences and the temporary read-only demo behavior.
 
 Excluded daily and archive rows reuse one template partial that shows every persisted reason in
-profile order. The panel includes a visible label, conservative confidence text, and cited evidence
-when available. Keyword evidence is split into ordinary strings plus a marked token span; Go
+profile order. The panel includes a visible label, conservative confidence text, and the quoted
+server match when available, followed by a short Korean source label such as `복지 태그`, `제목`,
+`회사`, or `공고 본문`. That label reads only the stored server match, never provider output, and
+an unrecognized source falls back to the calm generic `공고 정보` rather than leaking a raw enum
+into the briefing. Keyword evidence is split into ordinary strings plus a marked token span; Go
 templates escape every segment, and provider output never becomes `template.HTML`. The danger
 styling keeps the full row at normal contrast and uses text and a warning symbol in addition to
-color.
+color. Match provenance reuses this existing surface; it adds no new explanation interface, CSS, or
+JavaScript.
 
 ## Deployment boundaries
 
@@ -393,6 +431,8 @@ overview.
 
 [postgres-credential-spec]:
   superpowers/specs/260714-postgresql-local-convergence-user-ai-credentials.md
+[dealbreaker-provenance-spec]:
+  superpowers/archive/2026-07-25-contextual-dealbreaker-match-provenance/260725-contextual-dealbreaker-match-provenance-contract.md
 [stage1-context-spec]:
   superpowers/archive/2026-07-18-contextual-dealbreaker-validation/260718-stage-1-contextual-dealbreaker-validation-and-exclusion-evidence.md
 [hosted-first-storage]:
