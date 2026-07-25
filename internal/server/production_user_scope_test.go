@@ -1572,7 +1572,7 @@ func TestProductionDealbreakerValidationIsolatesUserProfiles(t *testing.T) {
 		if calls, err := srv.validateDealbreakers(ctx, userID, []scraper.Posting{p}, prof, runtime, budget, &callCap{max: 1}, emit); err != nil || calls != 1 {
 			t.Fatalf("user %d validateDealbreakers calls=%d err=%v", userID, calls, err)
 		}
-		wantProgress := fmt.Sprintf("공고 #%d 테스트회사 문맥 확인 중...", postingID)
+		wantProgress := fmt.Sprintf("공고 #%d (테스트회사) 문맥 확인 중...", postingID)
 		if progress != wantProgress {
 			t.Fatalf("user %d progress=%q, want %q", userID, progress, wantProgress)
 		}
