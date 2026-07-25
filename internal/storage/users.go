@@ -328,8 +328,11 @@ SELECT expires_at
 	} else if err != nil {
 		return false, time.Time{}, err
 	}
-	now := time.Now().UTC()
-	return expiresAt.After(now), now, nil
+	var mutationTime time.Time
+	if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&mutationTime); err != nil {
+		return false, time.Time{}, err
+	}
+	return expiresAt.After(mutationTime), mutationTime, nil
 }
 
 func (s *Store) lockUsersForOwnerChange(ctx context.Context, tx *sql.Tx) error {

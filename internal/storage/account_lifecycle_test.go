@@ -451,6 +451,17 @@ UPDATE sessions
    AND session_token_hash = 'current-session'`, user.ID); err != nil {
 				t.Fatalf("expire locked session: %v", err)
 			}
+			var expiredByDatabase bool
+			if err := gateTx.QueryRowContext(ctx, `
+SELECT expires_at <= clock_timestamp()
+  FROM sessions
+ WHERE user_id = $1
+   AND session_token_hash = 'current-session'`, user.ID).Scan(&expiredByDatabase); err != nil {
+				t.Fatalf("check database session expiry: %v", err)
+			}
+			if !expiredByDatabase {
+				t.Fatal("database did not consider the locked session expired")
+			}
 			if err := gateTx.Commit(); err != nil {
 				t.Fatalf("release lock gate: %v", err)
 			}
