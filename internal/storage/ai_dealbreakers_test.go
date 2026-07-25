@@ -27,29 +27,41 @@ func TestAIDealbreakerValidationRoundTrip(t *testing.T) {
 	userID := insertMigrationTestUser(t, st, "dealbreaker-roundtrip@example.invalid")
 	postingID := insertMigrationTestPosting(t, st, "dealbreaker-roundtrip")
 	computedAt := time.Date(2026, 7, 18, 1, 2, 3, 0, time.UTC)
+	match := ai.DealbreakerMatch{
+		Evidence: "리서치 지원비",
+		Source:   ai.DealbreakerMatchStructuredTag,
+		Category: "welfare",
+	}
 	validation := ai.DealbreakerValidation{
-		CandidateID: "keyword-hash",
-		Verdict:     ai.DealbreakerNotApplicable,
-		Evidence:    "리서치 직무가 아닙니다",
+		CandidateID:    "keyword-hash",
+		Verdict:        ai.DealbreakerNotApplicable,
+		ReasonCode:     ai.DealbreakerReasonBenefitOrEligibility,
+		ReasonEvidence: "복지 항목입니다",
 	}
 
-	if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "content-hash", "ai-v1", "keyword-hash", validation, computedAt); err != nil {
+	if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "content-hash", "ai-v1", "keyword-hash", match, validation, computedAt); err != nil {
 		t.Fatalf("UpsertAIDealbreakerValidation: %v", err)
 	}
 	got := readDealbreakerValidations(t, st, userID, "ai-v1")
 	row := got[postingID]["content-hash\x00keyword-hash"]
 	if row.PostingID != postingID || row.ContentHash != "content-hash" || row.AIVersion != "ai-v1" ||
-		row.KeywordHash != "keyword-hash" || row.Validation != validation || !row.ComputedAt.Equal(computedAt) {
+		row.KeywordHash != "keyword-hash" || row.Match != match || row.Validation != validation ||
+		!row.ComputedAt.Equal(computedAt) {
 		t.Fatalf("round trip = %+v", row)
 	}
 
 	updatedAt := computedAt.Add(time.Hour)
-	updated := ai.DealbreakerValidation{CandidateID: "keyword-hash", Verdict: ai.DealbreakerApplies, Evidence: "리서치 업무"}
-	if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "content-hash", "ai-v1", "keyword-hash", updated, updatedAt); err != nil {
+	updatedMatch := ai.DealbreakerMatch{Evidence: "리서치 업무", Source: ai.DealbreakerMatchDescription}
+	updated := ai.DealbreakerValidation{
+		CandidateID: "keyword-hash",
+		Verdict:     ai.DealbreakerApplies,
+		ReasonCode:  ai.DealbreakerReasonResponsibility,
+	}
+	if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "content-hash", "ai-v1", "keyword-hash", updatedMatch, updated, updatedAt); err != nil {
 		t.Fatalf("update validation: %v", err)
 	}
 	row = readDealbreakerValidations(t, st, userID, "ai-v1")[postingID]["content-hash\x00keyword-hash"]
-	if row.Validation != updated || !row.ComputedAt.Equal(updatedAt) {
+	if row.Match != updatedMatch || row.Validation != updated || !row.ComputedAt.Equal(updatedAt) {
 		t.Fatalf("updated row = %+v", row)
 	}
 	var count int
@@ -61,6 +73,29 @@ func TestAIDealbreakerValidationRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAIDealbreakerValidationRejectsMalformedMatchJSON(t *testing.T) {
+	st, _ := newPostgresTestStoreWithSchema(t)
+	ctx := context.Background()
+	userID := insertMigrationTestUser(t, st, "dealbreaker-malformed@example.invalid")
+	postingID := insertMigrationTestPosting(t, st, "dealbreaker-malformed")
+	match := ai.DealbreakerMatch{Evidence: "야근", Source: ai.DealbreakerMatchDescription}
+	validation := ai.DealbreakerValidation{
+		CandidateID: "keyword",
+		Verdict:     ai.DealbreakerApplies,
+		ReasonCode:  ai.DealbreakerReasonRequirement,
+	}
+	if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "content", "ai-v1", "keyword", match, validation, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.ExecContext(ctx, `UPDATE ai_dealbreaker_validations SET match_json = 'not-json'`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := st.AIDealbreakerValidationsByPostingID(ctx, userID, "ai-v1"); err == nil {
+		t.Fatal("malformed match_json read succeeded")
+	}
+}
+
 func TestAIDealbreakerValidationIsUserScoped(t *testing.T) {
 	st, _ := newPostgresTestStoreWithSchema(t)
 	ctx := context.Background()
@@ -69,21 +104,23 @@ func TestAIDealbreakerValidationIsUserScoped(t *testing.T) {
 	postingID := insertMigrationTestPosting(t, st, "dealbreaker-user-scope")
 	when := time.Date(2026, 7, 18, 2, 0, 0, 0, time.UTC)
 
-	first := ai.DealbreakerValidation{CandidateID: "keyword", Verdict: ai.DealbreakerApplies, Evidence: "first"}
-	second := ai.DealbreakerValidation{CandidateID: "keyword", Verdict: ai.DealbreakerNotApplicable, Evidence: "second"}
-	if err := st.UpsertAIDealbreakerValidation(ctx, firstUserID, postingID, "content", "ai-v1", "keyword", first, when); err != nil {
+	firstMatch := ai.DealbreakerMatch{Evidence: "first", Source: ai.DealbreakerMatchTitle}
+	secondMatch := ai.DealbreakerMatch{Evidence: "second", Source: ai.DealbreakerMatchCompany}
+	first := ai.DealbreakerValidation{CandidateID: "keyword", Verdict: ai.DealbreakerApplies, ReasonCode: ai.DealbreakerReasonRequirement}
+	second := ai.DealbreakerValidation{CandidateID: "keyword", Verdict: ai.DealbreakerNotApplicable, ReasonCode: ai.DealbreakerReasonExplicitlyNegated}
+	if err := st.UpsertAIDealbreakerValidation(ctx, firstUserID, postingID, "content", "ai-v1", "keyword", firstMatch, first, when); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertAIDealbreakerValidation(ctx, secondUserID, postingID, "content", "ai-v1", "keyword", second, when); err != nil {
+	if err := st.UpsertAIDealbreakerValidation(ctx, secondUserID, postingID, "content", "ai-v1", "keyword", secondMatch, second, when); err != nil {
 		t.Fatal(err)
 	}
 
 	key := "content\x00keyword"
-	if got := readDealbreakerValidations(t, st, firstUserID, "ai-v1")[postingID][key].Validation; got != first {
-		t.Fatalf("first user read = %+v", got)
+	if row := readDealbreakerValidations(t, st, firstUserID, "ai-v1")[postingID][key]; row.Validation != first || row.Match != firstMatch {
+		t.Fatalf("first user read = %+v", row)
 	}
-	if got := readDealbreakerValidations(t, st, secondUserID, "ai-v1")[postingID][key].Validation; got != second {
-		t.Fatalf("second user read = %+v", got)
+	if row := readDealbreakerValidations(t, st, secondUserID, "ai-v1")[postingID][key]; row.Validation != second || row.Match != secondMatch {
+		t.Fatalf("second user read = %+v", row)
 	}
 }
 
@@ -92,8 +129,13 @@ func TestAIDealbreakerValidationKeyChangesMiss(t *testing.T) {
 	ctx := context.Background()
 	userID := insertMigrationTestUser(t, st, "dealbreaker-key@example.invalid")
 	postingID := insertMigrationTestPosting(t, st, "dealbreaker-key")
-	validation := ai.DealbreakerValidation{CandidateID: "keyword", Verdict: ai.DealbreakerUncertain}
-	if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "content", "ai-v1", "keyword", validation, time.Now()); err != nil {
+	match := ai.DealbreakerMatch{Evidence: "야근", Source: ai.DealbreakerMatchDescription}
+	validation := ai.DealbreakerValidation{
+		CandidateID: "keyword",
+		Verdict:     ai.DealbreakerUncertain,
+		ReasonCode:  ai.DealbreakerReasonInsufficientContext,
+	}
+	if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "content", "ai-v1", "keyword", match, validation, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -108,12 +150,12 @@ func TestAIDealbreakerValidationKeyChangesMiss(t *testing.T) {
 		t.Fatalf("changed AI version returned %d postings", len(got))
 	}
 	validation.CandidateID = "different"
-	if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "content", "ai-v1", "keyword", validation, time.Now()); err == nil {
+	if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "content", "ai-v1", "keyword", match, validation, time.Now()); err == nil {
 		t.Fatal("candidate/hash mismatch succeeded")
 	}
 	validation.CandidateID = "keyword"
 	validation.Verdict = ai.DealbreakerVerdict("invalid")
-	if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "content", "ai-v1", "keyword", validation, time.Now()); err == nil {
+	if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "content", "ai-v1", "keyword", match, validation, time.Now()); err == nil {
 		t.Fatal("invalid verdict succeeded")
 	}
 }
@@ -125,9 +167,10 @@ func TestAIDealbreakerValidationCascades(t *testing.T) {
 	secondUserID := insertMigrationTestUser(t, st, "dealbreaker-cascade-second@example.invalid")
 	firstPostingID := insertMigrationTestPosting(t, st, "dealbreaker-cascade-first")
 	secondPostingID := insertMigrationTestPosting(t, st, "dealbreaker-cascade-second")
-	validation := ai.DealbreakerValidation{CandidateID: "keyword", Verdict: ai.DealbreakerApplies}
+	match := ai.DealbreakerMatch{Evidence: "야근", Source: ai.DealbreakerMatchDescription}
+	validation := ai.DealbreakerValidation{CandidateID: "keyword", Verdict: ai.DealbreakerApplies, ReasonCode: ai.DealbreakerReasonRequirement}
 	for _, pair := range [][2]int64{{firstUserID, firstPostingID}, {secondUserID, secondPostingID}} {
-		if err := st.UpsertAIDealbreakerValidation(ctx, pair[0], pair[1], "content", "ai-v1", "keyword", validation, time.Now()); err != nil {
+		if err := st.UpsertAIDealbreakerValidation(ctx, pair[0], pair[1], "content", "ai-v1", "keyword", match, validation, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -157,10 +200,11 @@ func TestAIDealbreakerValidationsUseOneBatchQuery(t *testing.T) {
 	st, schema := newPostgresTestStoreWithSchema(t)
 	ctx := context.Background()
 	userID := insertMigrationTestUser(t, st, "dealbreaker-batch@example.invalid")
-	validation := ai.DealbreakerValidation{CandidateID: "keyword", Verdict: ai.DealbreakerApplies}
+	match := ai.DealbreakerMatch{Evidence: "야근", Source: ai.DealbreakerMatchDescription}
+	validation := ai.DealbreakerValidation{CandidateID: "keyword", Verdict: ai.DealbreakerApplies, ReasonCode: ai.DealbreakerReasonRequirement}
 	for _, suffix := range []string{"batch-first", "batch-second"} {
 		postingID := insertMigrationTestPosting(t, st, suffix)
-		if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "content", "ai-v1", "keyword", validation, time.Now()); err != nil {
+		if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "content", "ai-v1", "keyword", match, validation, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
