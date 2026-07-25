@@ -74,6 +74,7 @@ re-rates.
 
 - Discovering synonyms or semantic matches beyond deterministic phrase matching.
 - Changing the profile or dealbreaker-editing experience.
+- Invalidating or rerunning Stage 1A career and education extractions.
 - Changing Stage 2 scoring.
 - Redesigning source-specific scrapers or storing raw provider payloads.
 - Adding manual overrides or feedback-training workflows.
@@ -219,18 +220,18 @@ Wire format:
 `applies`
 
 : At least one occurrence asserts that the candidate condition is required,
-  performed, or expected for the role.
+performed, or expected for the role.
 
 `not_applicable`
 
 : Every occurrence is negated, describes a benefit or eligibility option, is
-  incidental metadata, or otherwise does not assert the condition as part of
-  the role.
+incidental metadata, or otherwise does not assert the condition as part of
+the role.
 
 `uncertain`
 
 : The supplied text does not support either conclusion with adequate
-  confidence.
+confidence.
 
 ### Reason codes
 
@@ -311,30 +312,40 @@ inclusion.
 
 ## Persistence and Cache Versioning
 
-Add migration `0019` to extend `ai_dealbreaker_validations`:
+Add migration `0019` to replace the legacy evidence field in
+`ai_dealbreaker_validations`:
 
 ```sql
 ALTER TABLE ai_dealbreaker_validations
     ADD COLUMN match_json TEXT NOT NULL DEFAULT '{}',
     ADD COLUMN reason_code TEXT NOT NULL DEFAULT '',
-    ADD COLUMN reason_evidence TEXT NOT NULL DEFAULT '';
+    ADD COLUMN reason_evidence TEXT NOT NULL DEFAULT '',
+    DROP COLUMN evidence;
 ```
 
 The exact PostgreSQL syntax may be split into separate statements to match
 project migration conventions.
 
-Compatibility requirements:
+Migration and cache requirements:
 
-- Keep the legacy `evidence` column for old-binary rollback compatibility.
-- Version 2 writes canonical server match evidence to both `match_json` and the
-  legacy `evidence` column.
-- Version 2 reads the structured match and reason fields.
+- Version 2 reads and writes only the structured match and reason fields.
+- Remove all storage and test dependencies on the legacy `evidence` column
+  before the migration is considered validated.
+- Old-binary compatibility is intentionally not supported. The application has
+  not been deployed and has no production users, so retaining duplicate data
+  solely for rollback would add dead schema and code.
 - Do not backfill version 1 rows.
 - Increment `DealbreakerPromptVersion` from `"1"` to `"2"`.
 - Version 1 rows remain stored but cannot satisfy a version 2 cache lookup.
 
-The version bump intentionally causes one revalidation pass and its associated
-paid calls. Subsequent cache hits remain free. Cache keys continue to isolate
+The version bump marks every Stage 1B contextual validation as pending without
+making an automatic provider call. The user initiates the replacement pass with
+the existing AI-evaluation control. Each press considers all stored postings but
+still obeys the configured per-call cap and token budget, so completing the
+manual rerun may require multiple presses. Stage 1A career and education
+extractions remain cached and are not rerun.
+
+Subsequent version 2 cache hits remain free. Cache keys continue to isolate
 user, posting content hash, provider, model, prompt version, and keyword hash.
 
 ## Rerate and UI Behavior
@@ -399,6 +410,10 @@ change surface.
     hallucinated or provider-selected quote.
 15. Re-running AI evaluation after valid version 2 responses does not leave
     candidates pending solely because reason evidence lacks the phrase.
+16. Migration `0019` upgrades a database at migration `0018`, removes the
+    legacy `evidence` column, and leaves no runtime query dependent on it.
+17. The version bump queues all Stage 1B validations for user-triggered rerun
+    while preserving existing Stage 1A career and education extractions.
 
 ## Verification Plan
 
@@ -416,16 +431,18 @@ change surface.
 
 ### Storage integration tests
 
-- Migration from the current schema.
+- Migration from schema version `0018`, including removal of `evidence`.
 - Version 2 insert, upsert, bulk read, and exact cache identity.
 - Coexistence of version 1 and version 2 rows.
-- Legacy `evidence` population for rollback.
+- Absence of runtime SQL and storage types that depend on `evidence`.
 - Per-user isolation.
 
 ### Server integration tests
 
 - A fixture with a hidden structured welfare tag and no phrase in the visible
   description.
+- A prompt-version bump leaves Stage 1A extraction rows untouched while making
+  every Stage 1B validation pending.
 - First rerate resolves a valid `not_applicable` candidate and restores the
   posting.
 - `applies`, `uncertain`, invalid, unavailable, and budget-limited cases remain
@@ -437,8 +454,9 @@ change surface.
 
 - Run the opt-in live-provider gate with test credentials and confirm the
   provider follows the version 2 schema.
-- In the local preview, run the existing AI-evaluation user flow and verify the
-  pending count changes.
+- In the local preview, manually run the existing AI-evaluation flow until the
+  Stage 1B pending count reaches zero, using multiple presses when the per-call
+  cap or token budget requires it.
 - Inspect a restored posting and an excluded posting to confirm their displayed
   deterministic evidence and source are correct.
 - Verify the browser console remains free of errors on the affected flow.
@@ -452,21 +470,17 @@ change surface.
 - Static analysis and build
 - Documentation link and publication-safety checks
 
-## Rollout and Rollback
+## Rollout and Recovery
 
-Deploy the additive migration before or with the version 2 binary. The prompt
-version bump naturally refreshes existing validations during normal rerate
-work.
+Apply migration `0019` with the version 2 binary after the full migration,
+storage, server, provider, and browser gates pass. The application makes no
+automatic replacement calls; the user manually reruns Stage 1B from the
+AI-evaluation control.
 
-Rollback requires only restoring the previous binary:
+Restoring the old binary after migration `0019` is intentionally unsupported
+because that binary requires the removed `evidence` column. Pre-launch recovery
+is a forward fix, restoring the local database from a pre-migration backup, or
+resetting the disposable local database. Do not add a compatibility column or
+down migration solely to preserve old-binary rollback.
 
-- The old binary continues to read version 1 rows.
-- The additive columns remain harmless.
-- Version 2 rows are ignored because their AI version differs.
-- No destructive down migration is required.
-
-The rollback cost is another validation pass when moving between prompt
-versions. It does not require deleting user data.
-
-[prior-spec]:
-  ../archive/2026-07-18-contextual-dealbreaker-validation/260718-stage-1-contextual-dealbreaker-validation-and-exclusion-evidence.md
+[prior-spec]: ../archive/2026-07-18-contextual-dealbreaker-validation/260718-stage-1-contextual-dealbreaker-validation-and-exclusion-evidence.md
