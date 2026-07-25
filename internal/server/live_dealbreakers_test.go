@@ -14,6 +14,8 @@ import (
 
 	"github.com/ohchanwu/jobcron/internal/ai"
 	"github.com/ohchanwu/jobcron/internal/profile"
+	"github.com/ohchanwu/jobcron/internal/scoring"
+	"github.com/ohchanwu/jobcron/internal/scraper"
 	"github.com/ohchanwu/jobcron/internal/storage"
 )
 
@@ -108,7 +110,7 @@ func TestLiveStage1BContextualDealbreakers(t *testing.T) {
 	prof := profile.Profile{
 		CareerYears:  0,
 		MinScore:     &zero,
-		Dealbreakers: []string{"리서치"},
+		Dealbreakers: []string{"리서치", "병역특례"},
 	}
 	saveAIRuntimeProfile(t, st, userID, prof)
 	runtime := testAIRuntime(userID, provider, model)
@@ -124,19 +126,27 @@ func TestLiveStage1BContextualDealbreakers(t *testing.T) {
 	applies.FirstSeenAt, applies.LastSeenAt = now, now
 	appliesID := mustUpsert(t, st, applies)
 
+	// The 병역특례 incident, reproduced against the live provider: the phrase
+	// reaches the matcher only through a structured welfare tag appended to the
+	// description, and the correct explanation never repeats it. Under version 1
+	// this stayed pending forever.
+	benefit := listingPosting("stage1-live-benefit", "신입 서버 개발자")
+	benefit.Description = "Go 백엔드 API를 개발합니다. 복지 제도를 폭넓게 지원합니다.\n병역특례 가능"
+	benefit.Tags = []scraper.Tag{{Name: "병역특례 가능", Category: "welfare"}}
+	benefit.FirstSeenAt, benefit.LastSeenAt = now, now
+	benefitID := mustUpsert(t, st, benefit)
+
 	// Seed the independent Stage 1A and Stage 2 caches so this paid gate spends
-	// only on the two Stage 1B judgments it is intended to verify.
+	// only on the three Stage 1B judgments it is intended to verify.
 	for _, seeded := range []struct {
-		id      int64
-		posting string
+		id int64
+		p  scraper.Posting
 	}{
-		{id: notApplicableID, posting: "not-applicable"},
-		{id: appliesID, posting: "applies"},
+		{id: notApplicableID, p: notApplicable},
+		{id: appliesID, p: applies},
+		{id: benefitID, p: benefit},
 	} {
-		var p = notApplicable
-		if seeded.posting == "applies" {
-			p = applies
-		}
+		p := seeded.p
 		_, contentHash, _ := ai.ModelInput(p)
 		if err := st.UpsertAIExtraction(ctx, seeded.id, contentHash, ai.ExtractionContractVersion(),
 			ai.Extraction{Newcomer: true, EducationEnum: ai.EduNone}, now); err != nil {
@@ -151,7 +161,7 @@ func TestLiveStage1BContextualDealbreakers(t *testing.T) {
 	if _, err := srv.scoreAll(ctx, userID, runtime); err != nil {
 		t.Fatalf("seed deterministic scores: %T", err)
 	}
-	for _, id := range []int64{notApplicableID, appliesID} {
+	for _, id := range []int64{notApplicableID, appliesID, benefitID} {
 		score, ok, err := st.ScoreByPostingIDForUser(ctx, userID, id)
 		if err != nil || !ok || score.Total != -1 {
 			t.Fatalf("deterministic exclusion precondition failed for posting %d", id)
@@ -167,11 +177,11 @@ func TestLiveStage1BContextualDealbreakers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run disposable live rerate: %T", err)
 	}
-	if first.ProviderCalls != 2 {
-		t.Fatalf("first provider calls = %d, want exactly 2 Stage 1B calls", first.ProviderCalls)
+	if first.ProviderCalls != 3 {
+		t.Fatalf("first provider calls = %d, want exactly 3 Stage 1B calls", first.ProviderCalls)
 	}
-	if extract, validation, scoreDelta := provider.counts(); extract != 0 || validation != 2 || scoreDelta != 0 {
-		t.Fatalf("paid call split = extract:%d validation:%d score:%d, want 0:2:0",
+	if extract, validation, scoreDelta := provider.counts(); extract != 0 || validation != 3 || scoreDelta != 0 {
+		t.Fatalf("paid call split = extract:%d validation:%d score:%d, want 0:3:0",
 			extract, validation, scoreDelta)
 	}
 	inAfter, outAfter, err := st.AIUsageForDay(ctx, userID, day)
@@ -187,28 +197,57 @@ func TestLiveStage1BContextualDealbreakers(t *testing.T) {
 		t.Fatalf("read validation cache: %T", err)
 	}
 	notApplicableValidation := onlyLiveValidation(t, "not_applicable", validations[notApplicableID], provider)
-	if notApplicableValidation.Validation.Verdict != ai.DealbreakerNotApplicable ||
-		!strings.Contains(notApplicable.Description, notApplicableValidation.Validation.Evidence) {
-		t.Fatal("negated research phrase did not produce a citation-gated not_applicable verdict")
+	assertLiveServerMatch(t, "not_applicable", notApplicable, prof, notApplicableValidation)
+	if notApplicableValidation.Validation.Verdict != ai.DealbreakerNotApplicable {
+		t.Fatalf("negated research phrase verdict = %q, want not_applicable",
+			notApplicableValidation.Validation.Verdict)
 	}
+
 	appliesValidation := onlyLiveValidation(t, "applies", validations[appliesID], provider)
-	if appliesValidation.Validation.Verdict != ai.DealbreakerApplies ||
-		!strings.Contains(applies.Description, appliesValidation.Validation.Evidence) {
-		t.Fatal("actual research responsibility did not produce a citation-gated applies verdict")
+	assertLiveServerMatch(t, "applies", applies, prof, appliesValidation)
+	if appliesValidation.Validation.Verdict != ai.DealbreakerApplies {
+		t.Fatalf("research responsibility verdict = %q, want applies", appliesValidation.Validation.Verdict)
+	}
+	switch appliesValidation.Validation.ReasonCode {
+	case ai.DealbreakerReasonRequirement, ai.DealbreakerReasonResponsibility, ai.DealbreakerReasonExpectedCondition:
+	default:
+		t.Fatalf("applies reason code = %q, want a requirement-family code",
+			appliesValidation.Validation.ReasonCode)
+	}
+
+	// The version-2 acceptance case: a benefit reading persists even though the
+	// model's explanation need not repeat 병역특례, and the stored provenance is
+	// the welfare tag the deterministic matcher actually hit.
+	benefitValidation := onlyLiveValidation(t, "benefit", validations[benefitID], provider)
+	assertLiveServerMatch(t, "benefit", benefit, prof, benefitValidation)
+	if benefitValidation.Validation.Verdict != ai.DealbreakerNotApplicable {
+		t.Fatalf("welfare-tag verdict = %q, want not_applicable", benefitValidation.Validation.Verdict)
+	}
+	if benefitValidation.Validation.ReasonCode != ai.DealbreakerReasonBenefitOrEligibility {
+		t.Fatalf("welfare-tag reason code = %q, want benefit_or_eligibility",
+			benefitValidation.Validation.ReasonCode)
+	}
+	if benefitValidation.Match.Source != ai.DealbreakerMatchStructuredTag ||
+		benefitValidation.Match.Category != "welfare" {
+		t.Fatalf("welfare-tag provenance = %+v, want the structured welfare tag", benefitValidation.Match)
 	}
 
 	brief, err := srv.buildBriefingWithRuntime(ctx, now, userID, runtime)
 	if err != nil {
 		t.Fatalf("build live briefing: %T", err)
 	}
-	if len(brief.Today) != 1 || brief.Today[0].Posting.ID != notApplicableID {
-		t.Fatal("not_applicable posting did not re-enter Today")
+	restored := map[int64]bool{}
+	for _, dp := range brief.Today {
+		restored[dp.Posting.ID] = true
+	}
+	if !restored[notApplicableID] || !restored[benefitID] {
+		t.Fatal("not_applicable postings did not re-enter Today")
 	}
 	if len(brief.Excluded) != 1 || brief.Excluded[0].Posting.ID != appliesID {
 		t.Fatal("applies posting did not remain excluded")
 	}
-	if got := renderedEvidence(brief.Excluded[0].ExclusionReasons); got != appliesValidation.Validation.Evidence {
-		t.Fatal("excluded card did not render the exact citation-gated evidence quote")
+	if got := renderedEvidence(brief.Excluded[0].ExclusionReasons); got != appliesValidation.Match.Evidence {
+		t.Fatalf("excluded card rendered %q, want the deterministic server match", got)
 	}
 
 	extractBefore, validationBefore, scoreBefore := provider.counts()
@@ -252,6 +291,36 @@ func onlyLiveValidation(
 		return row
 	}
 	panic("unreachable")
+}
+
+// assertLiveServerMatch proves the persisted row carries the server's own
+// deterministic match, and that any optional reason evidence the live provider
+// chose to send is grounded in the full Stage 1B input without ever standing in
+// for that match.
+func assertLiveServerMatch(
+	t *testing.T,
+	label string,
+	p scraper.Posting,
+	prof profile.Profile,
+	row storage.AIDealbreakerValidation,
+) {
+	t.Helper()
+	var want ai.DealbreakerMatch
+	for _, candidate := range scoring.DealbreakerCandidates(p, prof) {
+		if candidate.ID == row.KeywordHash {
+			want = candidate.Match
+		}
+	}
+	if want.Evidence == "" {
+		t.Fatalf("%s: stored row has no matching server candidate", label)
+	}
+	if row.Match != want {
+		t.Fatalf("%s: stored match = %+v, want the server candidate match %+v", label, row.Match, want)
+	}
+	modelText, _ := ai.DealbreakerModelInput(p)
+	if quote := row.Validation.ReasonEvidence; quote != "" && !strings.Contains(modelText, quote) {
+		t.Fatalf("%s: persisted reason evidence is not grounded in the model input", label)
+	}
 }
 
 func renderedEvidence(reasons []exclusionReasonView) string {

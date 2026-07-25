@@ -5,7 +5,7 @@
   <div class="exclusion-reason">
     <p class="exclusion-label">{{.Label}}</p>
     {{if .HasEvidence}}<blockquote>{{range .Evidence}}{{if .Marked}}<mark>{{.Text}}</mark>{{else}}{{.Text}}{{end}}{{end}}</blockquote>{{end}}
-    <p class="exclusion-status">{{.Status}}</p>
+    <p class="exclusion-status">{{.Status}}{{if .SourceLabel}} · {{.SourceLabel}}{{end}}</p>
   </div>
   {{end}}
 </section>

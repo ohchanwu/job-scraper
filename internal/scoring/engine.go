@@ -41,12 +41,18 @@ type DealbreakerHit struct {
 }
 
 // ExclusionReason is one persisted explanation for an excluded posting.
+//
+// For a contextual keyword exclusion, Evidence/Source/Category come from the
+// server-owned DealbreakerMatch — never from the provider's optional reason
+// evidence. The model owns the verdict; the detector owns the proof.
 type ExclusionReason struct {
-	Kind       string `json:"kind"`
-	Label      string `json:"label"`
-	Phrase     string `json:"phrase,omitempty"`
-	Evidence   string `json:"evidence,omitempty"`
-	Confidence string `json:"confidence"`
+	Kind       string                    `json:"kind"`
+	Label      string                    `json:"label"`
+	Phrase     string                    `json:"phrase,omitempty"`
+	Evidence   string                    `json:"evidence,omitempty"`
+	Source     ai.DealbreakerMatchSource `json:"source,omitempty"`
+	Category   string                    `json:"category,omitempty"`
+	Confidence string                    `json:"confidence"`
 }
 
 // ScoreResult is the outcome of scoring one posting against a profile.
@@ -146,16 +152,18 @@ func hardExclusionReasons(
 			Kind:       dealbreakerKeyword,
 			Label:      "제외 키워드: " + candidate.Phrase,
 			Phrase:     candidate.Phrase,
+			Source:     candidate.Match.Source,
+			Category:   candidate.Match.Category,
 			Confidence: "unverified",
 		}
 		if ok && validation.CandidateID == candidate.ID {
 			switch validation.Verdict {
 			case ai.DealbreakerApplies:
 				reason.Confidence = "confirmed"
-				reason.Evidence = validation.Evidence
+				reason.Evidence = candidate.Match.Evidence
 			case ai.DealbreakerUncertain:
 				reason.Confidence = "uncertain"
-				reason.Evidence = validation.Evidence
+				reason.Evidence = candidate.Match.Evidence
 			}
 		}
 		if hit == nil {

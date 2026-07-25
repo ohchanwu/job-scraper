@@ -294,7 +294,12 @@ func TestScoreSuppressesHitOnlyWhenNotApplicable(t *testing.T) {
 	candidate := DealbreakerCandidates(p, prof)[0]
 
 	r := Score(p, prof, nil, nil, map[string]ai.DealbreakerValidation{
-		candidate.ID: {CandidateID: candidate.ID, Verdict: ai.DealbreakerNotApplicable, Evidence: "리서치 아님"},
+		candidate.ID: {
+			CandidateID:    candidate.ID,
+			Verdict:        ai.DealbreakerNotApplicable,
+			ReasonCode:     ai.DealbreakerReasonExplicitlyNegated,
+			ReasonEvidence: "리서치 아님",
+		},
 	})
 	if r.Total == -1 || r.DealbreakerHit != nil {
 		t.Fatalf("not_applicable hit was retained: %+v", r)
@@ -314,7 +319,12 @@ func TestScoreRejectsMismatchedValidationCandidateID(t *testing.T) {
 	candidate := DealbreakerCandidates(p, prof)[0]
 
 	r := Score(p, prof, nil, nil, map[string]ai.DealbreakerValidation{
-		candidate.ID: {CandidateID: "different-candidate", Verdict: ai.DealbreakerNotApplicable, Evidence: "리서치 아님"},
+		candidate.ID: {
+			CandidateID:    "different-candidate",
+			Verdict:        ai.DealbreakerNotApplicable,
+			ReasonCode:     ai.DealbreakerReasonExplicitlyNegated,
+			ReasonEvidence: "리서치 아님",
+		},
 	})
 	if r.Total != -1 || len(r.ExclusionReasons) != 1 {
 		t.Fatalf("mismatched candidate suppressed exclusion: %+v", r)
@@ -331,14 +341,18 @@ func TestScoreRetainsAppliesUncertainMissingAndUnavailableHits(t *testing.T) {
 	prof.Dealbreakers = []string{"리서치"}
 	candidate := DealbreakerCandidates(p, prof)[0]
 
+	// The provider's optional reason evidence is deliberately unrelated text: a
+	// rendered reason must quote the server match, never the model.
+	const modelQuote = "모델이 고른 전혀 다른 문장"
+
 	tests := []struct {
 		name        string
 		validations map[string]ai.DealbreakerValidation
 		confidence  string
 		evidence    string
 	}{
-		{"applies", map[string]ai.DealbreakerValidation{candidate.ID: {CandidateID: candidate.ID, Verdict: ai.DealbreakerApplies, Evidence: "리서치 업무를 수행"}}, "confirmed", "리서치 업무를 수행"},
-		{"uncertain", map[string]ai.DealbreakerValidation{candidate.ID: {CandidateID: candidate.ID, Verdict: ai.DealbreakerUncertain}}, "uncertain", ""},
+		{"applies", map[string]ai.DealbreakerValidation{candidate.ID: {CandidateID: candidate.ID, Verdict: ai.DealbreakerApplies, ReasonCode: ai.DealbreakerReasonRequirement, ReasonEvidence: modelQuote}}, "confirmed", candidate.Match.Evidence},
+		{"uncertain", map[string]ai.DealbreakerValidation{candidate.ID: {CandidateID: candidate.ID, Verdict: ai.DealbreakerUncertain, ReasonCode: ai.DealbreakerReasonInsufficientContext}}, "uncertain", candidate.Match.Evidence},
 		{"missing", map[string]ai.DealbreakerValidation{}, "unverified", ""},
 		{"unavailable", nil, "unverified", ""},
 	}
@@ -355,7 +369,85 @@ func TestScoreRetainsAppliesUncertainMissingAndUnavailableHits(t *testing.T) {
 			if got.Kind != "keyword" || got.Label != "제외 키워드: 리서치" || got.Phrase != "리서치" || got.Confidence != tc.confidence || got.Evidence != tc.evidence {
 				t.Errorf("reason = %+v", got)
 			}
+			if got.Evidence == modelQuote {
+				t.Errorf("reason quoted provider reason evidence: %+v", got)
+			}
+			if got.Source != candidate.Match.Source {
+				t.Errorf("reason source = %q, want %q", got.Source, candidate.Match.Source)
+			}
 		})
+	}
+}
+
+// TestScoreExclusionReasonCarriesStructuredTagProvenance is the 병역특례
+// incident: the phrase reaches the combined text only through a structured
+// welfare tag, so the rendered reason must name that tag as its source.
+func TestScoreExclusionReasonCarriesStructuredTagProvenance(t *testing.T) {
+	p := basePosting()
+	p.Description = "백엔드 개발자를 찾습니다.\n병역특례 가능"
+	p.Tags = []scraper.Tag{{Name: "병역특례 가능", Category: "welfare"}}
+	prof := baseProfile()
+	prof.Dealbreakers = []string{"병역특례"}
+	candidate := DealbreakerCandidates(p, prof)[0]
+
+	r := Score(p, prof, nil, nil, map[string]ai.DealbreakerValidation{
+		candidate.ID: {
+			CandidateID:    candidate.ID,
+			Verdict:        ai.DealbreakerApplies,
+			ReasonCode:     ai.DealbreakerReasonRequirement,
+			ReasonEvidence: "지원자는 반드시 근무해야 합니다",
+		},
+	})
+	if len(r.ExclusionReasons) != 1 {
+		t.Fatalf("reasons = %+v, want one", r.ExclusionReasons)
+	}
+	got := r.ExclusionReasons[0]
+	want := ExclusionReason{
+		Kind:       "keyword",
+		Label:      "제외 키워드: 병역특례",
+		Phrase:     "병역특례",
+		Evidence:   "병역특례 가능",
+		Source:     ai.DealbreakerMatchStructuredTag,
+		Category:   "welfare",
+		Confidence: "confirmed",
+	}
+	if got != want {
+		t.Fatalf("reason = %+v, want %+v", got, want)
+	}
+}
+
+// TestScoreClearsExclusionOnlyWhenEveryCandidateIsNotApplicable locks the
+// multi-candidate rule: one unresolved candidate keeps the whole posting out.
+func TestScoreClearsExclusionOnlyWhenEveryCandidateIsNotApplicable(t *testing.T) {
+	p := basePosting()
+	p.Description = "이 포지션은 리서치 아님. 야근 없음."
+	prof := baseProfile()
+	prof.Dealbreakers = []string{"리서치", "야근"}
+	candidates := DealbreakerCandidates(p, prof)
+	if len(candidates) != 2 {
+		t.Fatalf("candidates = %+v, want two", candidates)
+	}
+	notApplicable := func(c ai.DealbreakerCandidate) ai.DealbreakerValidation {
+		return ai.DealbreakerValidation{
+			CandidateID: c.ID,
+			Verdict:     ai.DealbreakerNotApplicable,
+			ReasonCode:  ai.DealbreakerReasonExplicitlyNegated,
+		}
+	}
+
+	partial := Score(p, prof, nil, nil, map[string]ai.DealbreakerValidation{
+		candidates[0].ID: notApplicable(candidates[0]),
+	})
+	if partial.Total != -1 || partial.DealbreakerHit == nil || partial.DealbreakerHit.Phrase != "야근" {
+		t.Fatalf("partial clearance restored the posting: %+v", partial)
+	}
+
+	all := Score(p, prof, nil, nil, map[string]ai.DealbreakerValidation{
+		candidates[0].ID: notApplicable(candidates[0]),
+		candidates[1].ID: notApplicable(candidates[1]),
+	})
+	if all.Total == -1 || all.DealbreakerHit != nil {
+		t.Fatalf("full clearance kept the posting excluded: %+v", all)
 	}
 }
 
@@ -367,13 +459,13 @@ func TestScoreDoesNotHideLaterApplicableHit(t *testing.T) {
 	candidates := DealbreakerCandidates(p, prof)
 
 	r := Score(p, prof, nil, nil, map[string]ai.DealbreakerValidation{
-		candidates[0].ID: {CandidateID: candidates[0].ID, Verdict: ai.DealbreakerNotApplicable, Evidence: "리서치 아님"},
-		candidates[1].ID: {CandidateID: candidates[1].ID, Verdict: ai.DealbreakerApplies, Evidence: "야근 업무를 담당"},
+		candidates[0].ID: {CandidateID: candidates[0].ID, Verdict: ai.DealbreakerNotApplicable, ReasonCode: ai.DealbreakerReasonExplicitlyNegated},
+		candidates[1].ID: {CandidateID: candidates[1].ID, Verdict: ai.DealbreakerApplies, ReasonCode: ai.DealbreakerReasonResponsibility},
 	})
 	if r.Total != -1 || r.DealbreakerHit == nil || r.DealbreakerHit.Phrase != "야근" {
 		t.Fatalf("result = %+v, want retained later 야근 hit", r)
 	}
-	if len(r.ExclusionReasons) != 1 || r.ExclusionReasons[0].Phrase != "야근" || r.ExclusionReasons[0].Evidence != "야근 업무를 담당" {
+	if len(r.ExclusionReasons) != 1 || r.ExclusionReasons[0].Phrase != "야근" || r.ExclusionReasons[0].Evidence != candidates[1].Match.Evidence {
 		t.Fatalf("reasons = %+v, want only confirmed 야근", r.ExclusionReasons)
 	}
 }

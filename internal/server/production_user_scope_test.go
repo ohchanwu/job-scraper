@@ -165,11 +165,13 @@ func TestProductionTwoAccountHTTPIsolationAndLifecycle(t *testing.T) {
 			t.Fatalf("seed AI score for user %d: %v", seeded.userID, err)
 		}
 		_, contentHash, _ := ai.ModelInput(sharedAI)
-		if err := st.UpsertAIDealbreakerValidation(ctx, seeded.userID, sharedAI.ID, contentHash, "shared-validation-version", seeded.keywordHash, ai.DealbreakerValidation{
-			CandidateID: seeded.keywordHash,
-			Verdict:     ai.DealbreakerApplies,
-			Evidence:    seeded.evidence,
-		}, now); err != nil {
+		if err := st.UpsertAIDealbreakerValidation(ctx, seeded.userID, sharedAI.ID, contentHash, "shared-validation-version", seeded.keywordHash,
+			ai.DealbreakerMatch{Evidence: seeded.evidence, Source: ai.DealbreakerMatchDescription},
+			ai.DealbreakerValidation{
+				CandidateID: seeded.keywordHash,
+				Verdict:     ai.DealbreakerApplies,
+				ReasonCode:  ai.DealbreakerReasonRequirement,
+			}, now); err != nil {
 			t.Fatalf("seed contextual validation for user %d: %v", seeded.userID, err)
 		}
 		if err := st.AddAIUsage(ctx, seeded.userID, now.Format("2006-01-02"), seeded.usageIn, seeded.usageOut); err != nil {
@@ -1557,7 +1559,7 @@ func TestProductionDealbreakerValidationIsolatesUserProfiles(t *testing.T) {
 				return []ai.DealbreakerValidation{{
 					CandidateID: candidates[0].ID,
 					Verdict:     ai.DealbreakerApplies,
-					Evidence:    candidates[0].Phrase,
+					ReasonCode:  ai.DealbreakerReasonRequirement,
 				}}, ai.Usage{InputTokens: 10, OutputTokens: 2}, nil
 			},
 		}
@@ -1607,8 +1609,8 @@ func TestProductionScoreAllIgnoresStaleDealbreakerContentHash(t *testing.T) {
 	p.ID = postingID
 	runtime := testAIRuntime(userID, &ai.StubProvider{NameVal: "stub"}, "shared-model")
 	candidate := scoring.DealbreakerCandidates(p, prof)[0]
-	validation := ai.DealbreakerValidation{CandidateID: candidate.ID, Verdict: ai.DealbreakerNotApplicable, Evidence: "리서치 아님"}
-	if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "stale-content-hash", runtime.DealbreakerVersion, candidate.ID, validation, time.Now()); err != nil {
+	validation := ai.DealbreakerValidation{CandidateID: candidate.ID, Verdict: ai.DealbreakerNotApplicable, ReasonCode: ai.DealbreakerReasonExplicitlyNegated}
+	if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "stale-content-hash", runtime.DealbreakerVersion, candidate.ID, candidate.Match, validation, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := srv.scoreAll(ctx, userID, runtime); err != nil {
@@ -1671,8 +1673,8 @@ func TestProductionDealbreakerCacheMissesOnRuntimeVersionChange(t *testing.T) {
 			_, contentHash, _ := ai.ModelInput(p)
 			candidate := scoring.DealbreakerCandidates(p, prof)[0]
 			oldRuntime := tc.oldRuntime(userID)
-			validation := ai.DealbreakerValidation{CandidateID: candidate.ID, Verdict: ai.DealbreakerApplies, Evidence: "리서치 업무"}
-			if err := st.UpsertAIDealbreakerValidation(ctx, userID, p.ID, contentHash, oldRuntime.DealbreakerVersion, candidate.ID, validation, time.Now()); err != nil {
+			validation := ai.DealbreakerValidation{CandidateID: candidate.ID, Verdict: ai.DealbreakerApplies, ReasonCode: ai.DealbreakerReasonRequirement}
+			if err := st.UpsertAIDealbreakerValidation(ctx, userID, p.ID, contentHash, oldRuntime.DealbreakerVersion, candidate.ID, candidate.Match, validation, time.Now()); err != nil {
 				t.Fatal(err)
 			}
 
@@ -1683,7 +1685,7 @@ func TestProductionDealbreakerCacheMissesOnRuntimeVersionChange(t *testing.T) {
 			provider := &ai.StubProvider{
 				NameVal: providerName,
 				ValidateDealbreakersFn: func(_ context.Context, _ string, candidates []ai.DealbreakerCandidate) ([]ai.DealbreakerValidation, ai.Usage, error) {
-					return []ai.DealbreakerValidation{{CandidateID: candidates[0].ID, Verdict: ai.DealbreakerApplies, Evidence: "리서치 업무"}}, ai.Usage{}, nil
+					return []ai.DealbreakerValidation{{CandidateID: candidates[0].ID, Verdict: ai.DealbreakerApplies, ReasonCode: ai.DealbreakerReasonRequirement}}, ai.Usage{}, nil
 				},
 			}
 			newRuntime := tc.newRuntime(userID, provider)

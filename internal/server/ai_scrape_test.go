@@ -127,7 +127,7 @@ func TestRunScrapeOrdersDealbreakerValidationBeforeStage2(t *testing.T) {
 		NameVal: "anthropic",
 		ValidateDealbreakersFn: func(_ context.Context, _ string, candidates []ai.DealbreakerCandidate) ([]ai.DealbreakerValidation, ai.Usage, error) {
 			order = append(order, "stage1b")
-			return []ai.DealbreakerValidation{{CandidateID: candidates[0].ID, Verdict: ai.DealbreakerNotApplicable, Evidence: "리서치 아님"}}, ai.Usage{InputTokens: 2}, nil
+			return []ai.DealbreakerValidation{{CandidateID: candidates[0].ID, Verdict: ai.DealbreakerNotApplicable, ReasonCode: ai.DealbreakerReasonExplicitlyNegated}}, ai.Usage{InputTokens: 2}, nil
 		},
 		ScoreDeltaFn: func(context.Context, string, string) ([]ai.RawDeltaItem, ai.Usage, error) {
 			postings, err := st.AllPostings(ctx)
@@ -194,7 +194,7 @@ func TestRunScrapeDealbreakerCacheHitSpendsNothing(t *testing.T) {
 			return ai.Extraction{Newcomer: true, EducationEnum: ai.EduNone}, ai.Usage{InputTokens: 1}, nil
 		},
 		ValidateDealbreakersFn: func(_ context.Context, _ string, candidates []ai.DealbreakerCandidate) ([]ai.DealbreakerValidation, ai.Usage, error) {
-			return []ai.DealbreakerValidation{{CandidateID: candidates[0].ID, Verdict: ai.DealbreakerNotApplicable, Evidence: "리서치 아님"}}, ai.Usage{InputTokens: 2}, nil
+			return []ai.DealbreakerValidation{{CandidateID: candidates[0].ID, Verdict: ai.DealbreakerNotApplicable, ReasonCode: ai.DealbreakerReasonExplicitlyNegated}}, ai.Usage{InputTokens: 2}, nil
 		},
 		ScoreDeltaFn: func(context.Context, string, string) ([]ai.RawDeltaItem, ai.Usage, error) {
 			return nil, ai.Usage{InputTokens: 3}, nil

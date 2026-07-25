@@ -113,9 +113,13 @@ func (s *Server) validateDealbreakers(
 	}
 	now := time.Now().UTC()
 	for _, p := range postings {
-		modelText, contentHash, _ := ai.ModelInput(p)
+		// Stage 1B alone sends the FULL normalized posting: a dealbreaker can sit
+		// past rune 12,000, and judging an occurrence the model never saw is worse
+		// than not judging it. The content hash is still the full-text hash, so
+		// Stage 1A/Stage 2 cache identity is untouched.
+		modelText, contentHash := ai.DealbreakerModelInput(p)
 		candidates := scoring.DealbreakerCandidates(p, prof)
-		unresolved := candidates[:0]
+		var unresolved []ai.DealbreakerCandidate
 		for _, candidate := range candidates {
 			if _, ok := cached[p.ID][contentHash+"\x00"+candidate.ID]; !ok {
 				unresolved = append(unresolved, candidate)
@@ -123,6 +127,12 @@ func (s *Server) validateDealbreakers(
 		}
 		if len(unresolved) == 0 {
 			continue
+		}
+		// The server owns match provenance: a returned row is stored against the
+		// candidate's own match, never against anything the provider echoed back.
+		matches := make(map[string]ai.DealbreakerMatch, len(unresolved))
+		for _, candidate := range unresolved {
+			matches[candidate.ID] = candidate.Match
 		}
 		summary.PendingBefore++
 		if !budget.canSpend() {
@@ -148,14 +158,23 @@ func (s *Server) validateDealbreakers(
 			}
 			continue
 		}
+		accepted := 0
 		for _, validation := range validations {
-			if err := s.store.UpsertAIDealbreakerValidation(ctx, userID, p.ID, contentHash, runtime.DealbreakerVersion, validation.CandidateID, validation, now); err != nil {
+			match, ok := matches[validation.CandidateID]
+			if !ok {
+				// Not one of this posting's unresolved candidates — the parser already
+				// drops unknown IDs, so this is belt-and-braces against a row that
+				// could otherwise be stored with a fabricated match.
+				continue
+			}
+			if err := s.store.UpsertAIDealbreakerValidation(ctx, userID, p.ID, contentHash, runtime.DealbreakerVersion, validation.CandidateID, match, validation, now); err != nil {
 				return summary, err
 			}
+			accepted++
 		}
-		summary.AcceptedChecks += len(validations)
-		summary.UnresolvedChecks += len(unresolved) - len(validations)
-		if len(validations) < len(unresolved) {
+		summary.AcceptedChecks += accepted
+		summary.UnresolvedChecks += len(unresolved) - accepted
+		if accepted < len(unresolved) {
 			summary.PendingAfter++
 		}
 		emit("progress", fmt.Sprintf("공고 #%d (%s) 문맥 확인 중...", p.ID, p.Company))
@@ -461,7 +480,11 @@ func (s *Server) runRerate(ctx context.Context, surface string, emit func(event,
 	for _, p := range candidates {
 		s.extractStage1(ctx, p.ID, p, now, func() *stage1Funding { return stage1 })
 	}
-	validation, validationErr := s.validateDealbreakers(ctx, userID, candidates, prof, runtime, budget, calls, emit)
+	stage1B, err := s.stage1BPostings(ctx, candidates)
+	if err != nil {
+		return summary, err
+	}
+	validation, validationErr := s.validateDealbreakers(ctx, userID, stage1B, prof, runtime, budget, calls, emit)
 	summary.ProviderCalls += validation.ProviderCalls
 	summary.ContextPendingBefore = validation.PendingBefore
 	summary.ContextPendingAfter = validation.PendingAfter
@@ -622,6 +645,38 @@ func (s *Server) rerateOne(
 		return false, true, err
 	}
 	return true, true, nil
+}
+
+// stage1BPostings orders every stored posting for a contextual-validation pass:
+// the selected surface's rows first, then the remaining stored rows in
+// AllPostings order. Stage 1B is the only stage that leaves the surface — a
+// dealbreaker validation is what decides whether a posting belongs on a surface
+// at all, so scoping it to the current surface would keep wrongly-excluded rows
+// invisible forever. The shared per-call cap and token budget still bound the
+// spend, so the surface-first order is what makes one press fix what the user is
+// actually looking at.
+func (s *Server) stage1BPostings(ctx context.Context, surfaceFirst []scraper.Posting) ([]scraper.Posting, error) {
+	stored, err := s.store.AllPostings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]scraper.Posting, 0, len(stored)+len(surfaceFirst))
+	seen := make(map[int64]bool, len(stored)+len(surfaceFirst))
+	for _, p := range surfaceFirst {
+		if seen[p.ID] {
+			continue
+		}
+		seen[p.ID] = true
+		out = append(out, p)
+	}
+	for _, p := range stored {
+		if seen[p.ID] {
+			continue
+		}
+		seen[p.ID] = true
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 func (s *Server) candidatePostingsForRerate(ctx context.Context, surface string, now time.Time, userID int64, runtime *AIRuntime) ([]scraper.Posting, error) {

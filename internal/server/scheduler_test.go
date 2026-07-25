@@ -258,7 +258,7 @@ func TestRunScheduledScrapeValidatesDealbreakersForSoleOptedInOwner(t *testing.T
 			return ai.Extraction{Newcomer: true, EducationEnum: ai.EduNone}, ai.Usage{InputTokens: 1}, nil
 		},
 		ValidateDealbreakersFn: func(_ context.Context, _ string, candidates []ai.DealbreakerCandidate) ([]ai.DealbreakerValidation, ai.Usage, error) {
-			return []ai.DealbreakerValidation{{CandidateID: candidates[0].ID, Verdict: ai.DealbreakerApplies, Evidence: "리서치 업무"}}, ai.Usage{InputTokens: 2}, nil
+			return []ai.DealbreakerValidation{{CandidateID: candidates[0].ID, Verdict: ai.DealbreakerApplies, ReasonCode: ai.DealbreakerReasonRequirement}}, ai.Usage{InputTokens: 2}, nil
 		},
 	}
 	srv.newAIProvider = func(string, string, string, time.Duration) (ai.Provider, error) { return provider, nil }
@@ -499,7 +499,7 @@ func TestRunScheduledScrapeFundsStage1OnceAndFiltersPaidWork(t *testing.T) {
 				return []ai.DealbreakerValidation{{
 					CandidateID: candidates[0].ID,
 					Verdict:     ai.DealbreakerNotApplicable,
-					Evidence:    "리서치 서버 개발",
+					ReasonCode:  ai.DealbreakerReasonIncidentalOrMetadata,
 				}}, ai.Usage{InputTokens: 2}, nil
 			},
 			ScoreDeltaFn: func(context.Context, string, string) ([]ai.RawDeltaItem, ai.Usage, error) {

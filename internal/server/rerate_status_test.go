@@ -184,7 +184,7 @@ func TestValidateDealbreakersReportsPartialAcceptedChecks(t *testing.T) {
 			return []ai.DealbreakerValidation{{
 				CandidateID: candidates[0].ID,
 				Verdict:     ai.DealbreakerApplies,
-				Evidence:    "리서치",
+				ReasonCode:  ai.DealbreakerReasonRequirement,
 			}}, ai.Usage{InputTokens: 10, OutputTokens: 2}, nil
 		},
 	}

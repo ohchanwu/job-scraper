@@ -11,6 +11,8 @@ import (
 
 	"github.com/ohchanwu/jobcron/internal/ai"
 	"github.com/ohchanwu/jobcron/internal/profile"
+	"github.com/ohchanwu/jobcron/internal/scraper"
+	"github.com/ohchanwu/jobcron/internal/storage"
 )
 
 // rerateStub returns a provider whose ScoreDelta cites a quote that is present
@@ -101,7 +103,7 @@ func TestRunRerateValidatesExcludedPostingBeforeStage2(t *testing.T) {
 	provider := &ai.StubProvider{
 		NameVal: "stub",
 		ValidateDealbreakersFn: func(_ context.Context, _ string, candidates []ai.DealbreakerCandidate) ([]ai.DealbreakerValidation, ai.Usage, error) {
-			return []ai.DealbreakerValidation{{CandidateID: candidates[0].ID, Verdict: ai.DealbreakerNotApplicable, Evidence: "리서치 아님"}}, ai.Usage{InputTokens: 2}, nil
+			return []ai.DealbreakerValidation{{CandidateID: candidates[0].ID, Verdict: ai.DealbreakerNotApplicable, ReasonCode: ai.DealbreakerReasonExplicitlyNegated}}, ai.Usage{InputTokens: 2}, nil
 		},
 		ScoreDeltaFn: func(context.Context, string, string) ([]ai.RawDeltaItem, ai.Usage, error) {
 			return []ai.RawDeltaItem{{Signal: "서버", Kind: ai.KindPresence, Delta: 1, Quote: "서버 개발"}}, ai.Usage{InputTokens: 3}, nil
@@ -255,7 +257,7 @@ func TestRunRerateSponsorExhaustionPreservesUserFundedStages(t *testing.T) {
 		return []ai.DealbreakerValidation{{
 			CandidateID: candidates[0].ID,
 			Verdict:     ai.DealbreakerNotApplicable,
-			Evidence:    "리서치 아님",
+			ReasonCode:  ai.DealbreakerReasonExplicitlyNegated,
 		}}, ai.Usage{InputTokens: 2}, nil
 	}
 	provider.ScoreDeltaFn = func(context.Context, string, string) (
@@ -754,4 +756,417 @@ func currentProfile(t *testing.T, srv *Server) profile.Profile {
 		t.Fatalf("unmarshal profile: %v", err)
 	}
 	return p
+}
+
+// TestValidateDealbreakersSendsFullPostingAndStoresServerMatch locks the two
+// ownership halves of the version-2 contract: Stage 1B alone sees the posting
+// past ModelInput's 12,000-rune cap, and the row it persists carries the
+// server's own match — never anything the model said.
+func TestValidateDealbreakersSendsFullPostingAndStoresServerMatch(t *testing.T) {
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	ctx := context.Background()
+	userID := insertAIRuntimeTestUser(t, st, "stage1b-full-input@example.invalid")
+	prof := profile.Profile{CareerYears: 0, Dealbreakers: []string{"당직"}}
+	saveAIRuntimeProfile(t, st, userID, prof)
+	now := time.Now().UTC()
+	p := listingPosting("stage1b-full-input", "신입 서버 개발자")
+	// The dealbreaker line sits well past maxModelTextRunes, so a Stage-1A-shaped
+	// input would hand the model a posting the phrase never appears in.
+	p.Description = strings.Repeat("가", 12500) + "\n야간 당직 근무가 필수입니다"
+	p.FirstSeenAt, p.LastSeenAt = now, now
+	p.ID = mustUpsert(t, st, p)
+
+	var sentText string
+	var sentCandidates []ai.DealbreakerCandidate
+	provider := &ai.StubProvider{
+		NameVal: "stub",
+		ValidateDealbreakersFn: func(_ context.Context, modelText string, candidates []ai.DealbreakerCandidate) ([]ai.DealbreakerValidation, ai.Usage, error) {
+			sentText, sentCandidates = modelText, candidates
+			return []ai.DealbreakerValidation{{
+				CandidateID: candidates[0].ID,
+				Verdict:     ai.DealbreakerApplies,
+				ReasonCode:  ai.DealbreakerReasonRequirement,
+				// Deliberately not the server match: the stored row must ignore it.
+				ReasonEvidence: "야간 당직 근무가 필수입니다",
+			}}, ai.Usage{InputTokens: 4}, nil
+		},
+	}
+	runtime := testAIRuntime(userID, provider, "shared-model")
+
+	summary, err := srv.validateDealbreakers(ctx, userID, []scraper.Posting{p}, prof, runtime,
+		srv.newAIBudget(ctx, userID, runtime), &callCap{max: 4}, noopEmit)
+	if err != nil {
+		t.Fatalf("validateDealbreakers: %v", err)
+	}
+	if summary.AcceptedChecks != 1 || summary.PendingAfter != 0 {
+		t.Fatalf("summary = %+v, want one accepted check and nothing pending", summary)
+	}
+	if !strings.Contains(sentText, "당직") {
+		t.Fatalf("model input dropped the matched phrase: %d runes sent", len([]rune(sentText)))
+	}
+	if len([]rune(sentText)) <= 12000 {
+		t.Fatalf("model input = %d runes, want the untruncated posting", len([]rune(sentText)))
+	}
+	if len(sentCandidates) != 1 || !strings.Contains(sentCandidates[0].Match.Evidence, "당직") {
+		t.Fatalf("candidates = %+v, want one phrase-bearing server match", sentCandidates)
+	}
+
+	_, contentHash := ai.DealbreakerModelInput(p)
+	rows, err := st.AIDealbreakerValidationsByPostingID(ctx, userID, runtime.DealbreakerVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := rows[p.ID][contentHash+"\x00"+sentCandidates[0].ID]
+	if !ok {
+		t.Fatalf("no stored row under the full-text content hash: %+v", rows)
+	}
+	if stored.Match != sentCandidates[0].Match {
+		t.Fatalf("stored match = %+v, want the server candidate match %+v", stored.Match, sentCandidates[0].Match)
+	}
+	if stored.Validation.ReasonCode != ai.DealbreakerReasonRequirement {
+		t.Fatalf("stored validation = %+v", stored.Validation)
+	}
+}
+
+// TestValidateDealbreakersResolvesNotApplicableWithoutReasonEvidence is
+// acceptance criterion 2: a correct not_applicable no longer stays pending just
+// because the model's explanation omitted the phrase.
+func TestValidateDealbreakersResolvesNotApplicableWithoutReasonEvidence(t *testing.T) {
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	ctx := context.Background()
+	userID := insertAIRuntimeTestUser(t, st, "stage1b-benefit@example.invalid")
+	zero := 0
+	prof := profile.Profile{CareerYears: 0, MinScore: &zero, Dealbreakers: []string{"병역특례"}}
+	saveAIRuntimeProfile(t, st, userID, prof)
+	now := time.Now().UTC()
+	p := listingPosting("stage1b-benefit", "신입 서버 개발자")
+	p.Description = "서버 개발자를 찾습니다.\n병역특례 가능"
+	p.Tags = []scraper.Tag{{Name: "병역특례 가능", Category: "welfare"}}
+	p.FirstSeenAt, p.LastSeenAt = now, now
+	p.ID = mustUpsert(t, st, p)
+
+	provider := &ai.StubProvider{
+		NameVal: "stub",
+		ValidateDealbreakersFn: func(_ context.Context, _ string, candidates []ai.DealbreakerCandidate) ([]ai.DealbreakerValidation, ai.Usage, error) {
+			return []ai.DealbreakerValidation{{
+				CandidateID: candidates[0].ID,
+				Verdict:     ai.DealbreakerNotApplicable,
+				ReasonCode:  ai.DealbreakerReasonBenefitOrEligibility,
+			}}, ai.Usage{InputTokens: 2}, nil
+		},
+	}
+	runtime := testAIRuntime(userID, provider, "shared-model")
+	if _, err := srv.scoreAll(ctx, userID, runtime); err != nil {
+		t.Fatal(err)
+	}
+	before, ok, err := st.ScoreByPostingIDForUser(ctx, userID, p.ID)
+	if err != nil || !ok || before.Total != -1 {
+		t.Fatalf("precondition score = %+v ok=%v err=%v, want conservative exclusion", before, ok, err)
+	}
+
+	summary, err := srv.validateDealbreakers(ctx, userID, []scraper.Posting{p}, prof, runtime,
+		srv.newAIBudget(ctx, userID, runtime), &callCap{max: 4}, noopEmit)
+	if err != nil {
+		t.Fatalf("validateDealbreakers: %v", err)
+	}
+	if summary.PendingBefore != 1 || summary.PendingAfter != 0 || summary.AcceptedChecks != 1 {
+		t.Fatalf("summary = %+v, want resolved on the first response", summary)
+	}
+	if _, err := srv.scoreAll(ctx, userID, runtime); err != nil {
+		t.Fatal(err)
+	}
+	after, ok, err := st.ScoreByPostingIDForUser(ctx, userID, p.ID)
+	if err != nil || !ok || after.Total == -1 {
+		t.Fatalf("benefit posting stayed excluded: score = %+v ok=%v err=%v", after, ok, err)
+	}
+}
+
+// TestValidateDealbreakersPersistsValidRowsAndLeavesUnknownIDsPending proves a
+// row the server cannot attribute to one of its own candidates is dropped, not
+// stored against an invented match, while its valid twin still lands.
+func TestValidateDealbreakersPersistsValidRowsAndLeavesUnknownIDsPending(t *testing.T) {
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	ctx := context.Background()
+	userID := insertAIRuntimeTestUser(t, st, "stage1b-partial@example.invalid")
+	prof := profile.Profile{CareerYears: 0, Dealbreakers: []string{"리서치", "영업"}}
+	saveAIRuntimeProfile(t, st, userID, prof)
+	now := time.Now().UTC()
+	p := listingPosting("stage1b-partial", "신입 리서치 및 영업 개발자")
+	p.Description = "리서치 및 영업 업무를 수행합니다"
+	p.FirstSeenAt, p.LastSeenAt = now, now
+	p.ID = mustUpsert(t, st, p)
+
+	provider := &ai.StubProvider{
+		NameVal: "stub",
+		ValidateDealbreakersFn: func(_ context.Context, _ string, candidates []ai.DealbreakerCandidate) ([]ai.DealbreakerValidation, ai.Usage, error) {
+			return []ai.DealbreakerValidation{
+				{CandidateID: candidates[0].ID, Verdict: ai.DealbreakerApplies, ReasonCode: ai.DealbreakerReasonRequirement},
+				{CandidateID: "candidate-the-server-never-issued", Verdict: ai.DealbreakerNotApplicable, ReasonCode: ai.DealbreakerReasonExplicitlyNegated},
+			}, ai.Usage{InputTokens: 2}, nil
+		},
+	}
+	runtime := testAIRuntime(userID, provider, "shared-model")
+
+	summary, err := srv.validateDealbreakers(ctx, userID, []scraper.Posting{p}, prof, runtime,
+		srv.newAIBudget(ctx, userID, runtime), &callCap{max: 4}, noopEmit)
+	if err != nil {
+		t.Fatalf("validateDealbreakers: %v", err)
+	}
+	if summary.AttemptedChecks != 2 || summary.AcceptedChecks != 1 || summary.UnresolvedChecks != 1 || summary.PendingAfter != 1 {
+		t.Fatalf("summary = %+v, want one accepted and one still pending", summary)
+	}
+	rows, err := st.AIDealbreakerValidationsByPostingID(ctx, userID, runtime.DealbreakerVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows[p.ID]) != 1 {
+		t.Fatalf("stored rows = %+v, want only the attributable one", rows[p.ID])
+	}
+}
+
+// stage1BSurfaceFixture seeds one posting on today's briefing and one that is
+// off every surface, both carrying the same dealbreaker.
+//
+// The off-surface row is first seen TOMORROW on purpose. AllPostings sorts
+// newest-first, so this makes storage order the exact opposite of surface-first
+// order: a Stage 1B pass that simply walked AllPostings would spend its single
+// capped call on the row the user cannot see, and the ordering test would fail.
+func stage1BSurfaceFixture(t *testing.T, email string) (*Server, *storage.Store, int64, scraper.Posting, scraper.Posting, profile.Profile) {
+	t.Helper()
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	userID := insertAIRuntimeTestUser(t, st, email)
+	zero := 0
+	prof := profile.Profile{CareerYears: 0, MinScore: &zero, Dealbreakers: []string{"리서치"}, JobLikes: "서버 개발"}
+	saveAIRuntimeProfile(t, st, userID, prof)
+	now := time.Now().UTC()
+
+	onSurface := listingPosting("stage1b-on-surface", "신입 리서치 개발자")
+	onSurface.Description = "리서치 아님. 서버 개발자를 찾습니다"
+	onSurface.FirstSeenAt, onSurface.LastSeenAt = now, now
+	onSurface.ID = mustUpsert(t, st, onSurface)
+
+	offSurface := listingPosting("stage1b-off-surface", "다른 날 리서치 개발자")
+	offSurface.Description = "리서치 아님. 다른 날 공고입니다"
+	offSurface.FirstSeenAt = now.AddDate(0, 0, 1)
+	offSurface.LastSeenAt = now
+	offSurface.ID = mustUpsert(t, st, offSurface)
+
+	stored, err := st.AllPostings(context.Background())
+	if err != nil {
+		t.Fatalf("AllPostings: %v", err)
+	}
+	if len(stored) != 2 || stored[0].ID != offSurface.ID {
+		t.Fatalf("fixture precondition: AllPostings order must lead with the off-surface row, got %+v", stored)
+	}
+
+	return srv, st, userID, onSurface, offSurface, prof
+}
+
+// TestRunRerateSpendsTheSharedCapOnSurfaceRowsFirst: Stage 1B leaves the
+// surface, but the row the user is looking at must be the one a single
+// capped press actually fixes.
+func TestRunRerateSpendsTheSharedCapOnSurfaceRowsFirst(t *testing.T) {
+	srv, st, userID, onSurface, offSurface, _ := stage1BSurfaceFixture(t, "stage1b-order@example.invalid")
+	ctx := context.Background()
+
+	var seen []string
+	provider := &ai.StubProvider{
+		NameVal: "stub",
+		ValidateDealbreakersFn: func(_ context.Context, modelText string, candidates []ai.DealbreakerCandidate) ([]ai.DealbreakerValidation, ai.Usage, error) {
+			seen = append(seen, modelText)
+			return []ai.DealbreakerValidation{{
+				CandidateID: candidates[0].ID,
+				Verdict:     ai.DealbreakerNotApplicable,
+				ReasonCode:  ai.DealbreakerReasonExplicitlyNegated,
+			}}, ai.Usage{InputTokens: 2}, nil
+		},
+	}
+	runtime := testAIRuntime(userID, provider, "shared-model")
+	runtime.PerCallCap = 1
+	if _, err := srv.scoreAll(ctx, userID, runtime); err != nil {
+		t.Fatal(err)
+	}
+
+	summary, err := srv.runRerate(ctx, "today", noopEmit, userID, runtime)
+	if err != nil {
+		t.Fatalf("runRerate: %v", err)
+	}
+	if summary.ContextPendingBefore != 2 {
+		t.Fatalf("pending before = %d, want both stored postings considered", summary.ContextPendingBefore)
+	}
+	if summary.ContextPendingAfter != 1 || !summary.ContextCallCapBlocked {
+		t.Fatalf("summary = %+v, want the off-surface row left pending by the shared cap", summary)
+	}
+	if len(seen) != 1 || !strings.Contains(seen[0], "신입 리서치 개발자") {
+		t.Fatalf("the single capped call did not go to the surface row: %d call(s)", len(seen))
+	}
+	onScore, _, err := st.ScoreByPostingIDForUser(ctx, userID, onSurface.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	offScore, _, err := st.ScoreByPostingIDForUser(ctx, userID, offSurface.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if onScore.Total == -1 || offScore.Total != -1 {
+		t.Fatalf("on-surface=%d off-surface=%d, want the surface row restored first", onScore.Total, offScore.Total)
+	}
+}
+
+// TestRunRerateValidatesOffSurfaceRowsButKeepsStage1AAndStage2OnSurface is the
+// scope guard: only Stage 1B may leave the selected surface.
+func TestRunRerateValidatesOffSurfaceRowsButKeepsStage1AAndStage2OnSurface(t *testing.T) {
+	srv, st, userID, onSurface, offSurface, _ := stage1BSurfaceFixture(t, "stage1b-scope@example.invalid")
+	ctx := context.Background()
+
+	var validated, extracted, scored []string
+	provider := &ai.StubProvider{
+		NameVal: "stub",
+		ValidateDealbreakersFn: func(_ context.Context, modelText string, candidates []ai.DealbreakerCandidate) ([]ai.DealbreakerValidation, ai.Usage, error) {
+			validated = append(validated, modelText)
+			return []ai.DealbreakerValidation{{
+				CandidateID: candidates[0].ID,
+				Verdict:     ai.DealbreakerNotApplicable,
+				ReasonCode:  ai.DealbreakerReasonExplicitlyNegated,
+			}}, ai.Usage{InputTokens: 2}, nil
+		},
+		ExtractFn: func(_ context.Context, modelText string) (ai.Extraction, ai.Usage, error) {
+			extracted = append(extracted, modelText)
+			return ai.Extraction{Newcomer: true, EducationEnum: ai.EduNone}, ai.Usage{InputTokens: 2}, nil
+		},
+		ScoreDeltaFn: func(_ context.Context, modelText, _ string) ([]ai.RawDeltaItem, ai.Usage, error) {
+			scored = append(scored, modelText)
+			return nil, ai.Usage{InputTokens: 3}, nil
+		},
+	}
+	runtime := testAIRuntime(userID, provider, "shared-model")
+	if _, err := srv.scoreAll(ctx, userID, runtime); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := srv.runRerate(ctx, "today", noopEmit, userID, runtime); err != nil {
+		t.Fatalf("runRerate: %v", err)
+	}
+	if len(validated) != 2 {
+		t.Fatalf("Stage 1B calls = %d, want every stored posting", len(validated))
+	}
+	for _, text := range extracted {
+		if strings.Contains(text, "다른 날 리서치 개발자") {
+			t.Fatal("Stage 1A extraction left the selected surface")
+		}
+	}
+	for _, text := range scored {
+		if strings.Contains(text, "다른 날 리서치 개발자") {
+			t.Fatal("Stage 2 scoring left the selected surface")
+		}
+	}
+	offScore, _, err := st.ScoreByPostingIDForUser(ctx, userID, offSurface.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if offScore.Total == -1 {
+		t.Fatalf("off-surface posting stayed excluded after validation: %+v", offScore)
+	}
+
+	// A second press is a pure cache hit: no candidate is pending under the
+	// current version-2 identity, so nothing is re-spent.
+	callsBefore := provider.ValidateDealbreakersCalls
+	if _, err := srv.runRerate(ctx, "today", noopEmit, userID, runtime); err != nil {
+		t.Fatalf("second runRerate: %v", err)
+	}
+	if provider.ValidateDealbreakersCalls != callsBefore {
+		t.Fatalf("Stage 1B calls = %d, want no re-spend on a current cache hit", provider.ValidateDealbreakersCalls)
+	}
+	_ = onSurface
+}
+
+// TestProviderReasonEvidenceNeverReachesScoreOrRender is the end-to-end
+// ownership proof: a unique sentinel returned as the model's reason evidence is
+// persisted in ai_dealbreaker_validations, yet appears in neither the score
+// breakdown JSON nor the rendered Today/Archive HTML. Only the server match
+// does.
+func TestProviderReasonEvidenceNeverReachesScoreOrRender(t *testing.T) {
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	srv.SetProductionMode(true)
+	ctx := context.Background()
+	userID, cookie := createSessionUser(t, st, "sentinel@example.invalid", "sentinel-session-token")
+	zero := 0
+	prof := profile.Profile{CareerYears: 0, MinScore: &zero, Dealbreakers: []string{"병역특례"}}
+	saveAIRuntimeProfile(t, st, userID, prof)
+
+	// Deliberately phrase-free, grounded nowhere near the server match, and
+	// unlikely to collide with any other string in the page.
+	const sentinel = "ZZTOP-model-only-reason-evidence-0f1e2d"
+
+	now := time.Now().UTC()
+	p := listingPosting("sentinel-provenance", "신입 서버 개발자")
+	p.Description = "서버 개발자를 찾습니다. " + sentinel + "\n병역특례 가능"
+	p.Tags = []scraper.Tag{{Name: "병역특례 가능", Category: "welfare"}}
+	p.FirstSeenAt, p.LastSeenAt = now, now
+	p.ID = mustUpsert(t, st, p)
+
+	provider := &ai.StubProvider{
+		NameVal: "stub",
+		ValidateDealbreakersFn: func(_ context.Context, _ string, candidates []ai.DealbreakerCandidate) ([]ai.DealbreakerValidation, ai.Usage, error) {
+			return []ai.DealbreakerValidation{{
+				CandidateID:    candidates[0].ID,
+				Verdict:        ai.DealbreakerApplies,
+				ReasonCode:     ai.DealbreakerReasonRequirement,
+				ReasonEvidence: sentinel,
+			}}, ai.Usage{InputTokens: 2}, nil
+		},
+	}
+	runtime := testAIRuntime(userID, provider, "shared-model")
+	if _, err := srv.validateDealbreakers(ctx, userID, []scraper.Posting{p}, prof, runtime,
+		srv.newAIBudget(ctx, userID, runtime), &callCap{max: 4}, noopEmit); err != nil {
+		t.Fatalf("validateDealbreakers: %v", err)
+	}
+	if _, err := srv.scoreAll(ctx, userID, runtime); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := st.AIDealbreakerValidationsByPostingID(ctx, userID, runtime.DealbreakerVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := false
+	for _, row := range rows[p.ID] {
+		if row.Validation.ReasonEvidence == sentinel {
+			stored = true
+		}
+		if row.Match.Evidence != "병역특례 가능" || row.Match.Source != ai.DealbreakerMatchStructuredTag {
+			t.Fatalf("stored provenance = %+v, want the welfare tag", row.Match)
+		}
+	}
+	if !stored {
+		t.Fatal("precondition: the sentinel reason evidence was not persisted, so the leak check proves nothing")
+	}
+
+	score, ok, err := st.ScoreByPostingIDForUser(ctx, userID, p.ID)
+	if err != nil || !ok {
+		t.Fatalf("read score: ok=%v err=%v", ok, err)
+	}
+	if strings.Contains(score.BreakdownJSON, sentinel) {
+		t.Fatalf("provider reason evidence leaked into the persisted score: %s", score.BreakdownJSON)
+	}
+	if !strings.Contains(score.BreakdownJSON, "병역특례 가능") {
+		t.Fatalf("server match missing from the persisted score: %s", score.BreakdownJSON)
+	}
+
+	for _, path := range []string{"/briefing", "/"} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.AddCookie(cookie)
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d", path, rec.Code)
+		}
+		body := rec.Body.String()
+		if strings.Contains(body, sentinel) {
+			t.Fatalf("GET %s rendered the provider's reason evidence", path)
+		}
+		if !strings.Contains(body, "AI 문맥 확인 · 복지 태그") {
+			t.Fatalf("GET %s did not render the deterministic source label", path)
+		}
+	}
 }
