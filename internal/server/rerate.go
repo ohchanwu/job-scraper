@@ -129,7 +129,7 @@ func (s *Server) validateDealbreakers(
 				return providerCalls, err
 			}
 		}
-		emit("progress", fmt.Sprintf("공고 %d 문맥 확인 중...", p.ID))
+		emit("progress", fmt.Sprintf("공고 #%d %s 문맥 확인 중...", p.ID, p.Company))
 	}
 	return providerCalls, providerErr
 }
