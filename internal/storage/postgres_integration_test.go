@@ -186,7 +186,8 @@ SELECT match_json, reason_code, reason_evidence
 SELECT EXISTS (
     SELECT 1
       FROM information_schema.columns
-     WHERE table_name = 'ai_dealbreaker_validations'
+     WHERE table_schema = current_schema()
+       AND table_name = 'ai_dealbreaker_validations'
        AND column_name = 'evidence'
 )`).Scan(&evidenceExists); err != nil {
 		t.Fatalf("inspect evidence column: %v", err)
