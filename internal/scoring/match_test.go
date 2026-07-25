@@ -160,6 +160,47 @@ func TestCanonicalDealbreakerMatchBoundsLongEvidenceAroundOccurrence(t *testing.
 	}
 }
 
+func TestCanonicalDealbreakerMatchCompactsOversizedMatchSpan(t *testing.T) {
+	tests := []struct {
+		name   string
+		line   string
+		phrase string
+		want   string
+	}{
+		{
+			name:   "long separator run",
+			line:   "alpha" + strings.Repeat(".", 241) + "beta",
+			phrase: "alpha beta",
+			want:   "alpha beta",
+		},
+		{
+			name:   "decomposed source token",
+			line:   "cafe\u0301" + strings.Repeat(".", 241) + "beta",
+			phrase: "café beta",
+			want:   "café beta",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DealbreakerCandidates(
+				scraper.Posting{Description: tt.line},
+				profile.Profile{Dealbreakers: []string{tt.phrase}},
+			)
+			if len(got) != 1 {
+				t.Fatalf("candidates = %+v, want one", got)
+			}
+			evidence := got[0].Match.Evidence
+			if evidence != tt.want {
+				t.Fatalf("evidence = %q, want compact source match %q", evidence, tt.want)
+			}
+			if len([]rune(evidence)) > maxDealbreakerEvidenceRunes || !tokenmatch.Contains(evidence, tt.phrase) {
+				t.Fatalf("evidence must be <=240 runes and phrase-bearing: %q", evidence)
+			}
+		})
+	}
+}
+
 func TestDealbreakerCandidatesPreserveNormalizationParticlesOrderAndID(t *testing.T) {
 	t.Run("NFC normalization", func(t *testing.T) {
 		got := DealbreakerCandidates(

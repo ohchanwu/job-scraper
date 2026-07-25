@@ -100,8 +100,15 @@ func boundedMatchEvidence(value, phrase string) string {
 	if !ok {
 		return string(runes[:maxDealbreakerEvidenceRunes])
 	}
+	matched := value[startByte:endByte]
+	if utf8.RuneCountInString(matched) > maxDealbreakerEvidenceRunes {
+		// The matcher permits arbitrarily long separator runs between adjacent
+		// tokens. Compact only that matched source span so bounded evidence keeps
+		// the same tokens without changing matcher semantics.
+		return strings.Join(tokenmatch.Tokenize(matched), " ")
+	}
 	start := utf8.RuneCountInString(value[:startByte])
-	end := start + utf8.RuneCountInString(value[startByte:endByte])
+	end := start + utf8.RuneCountInString(matched)
 	windowStart := start - (maxDealbreakerEvidenceRunes-(end-start))/2
 	if windowStart < 0 {
 		windowStart = 0
