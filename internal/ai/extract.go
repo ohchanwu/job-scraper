@@ -92,6 +92,11 @@ func rawModelText(p scraper.Posting) string {
 	return norm.NFC.String(b.String())
 }
 
+func modelTextHash(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
 // ModelInput is the server's single entry point for the scrape wiring (T4):
 // the text to send the model, the content_hash that keys the extraction cache
 // (sha256 of the PRE-truncation normalized text, [:12]), and whether the sent
@@ -99,13 +104,19 @@ func rawModelText(p scraper.Posting) string {
 // maxModelTextRunes never produces a false cache hit (S6).
 func ModelInput(p scraper.Posting) (text string, contentHash string, truncated bool) {
 	full := rawModelText(p)
-	sum := sha256.Sum256([]byte(full))
-	hash := hex.EncodeToString(sum[:])[:12]
+	hash := modelTextHash(full)
 	runes := []rune(full)
 	if len(runes) > maxModelTextRunes {
 		return string(runes[:maxModelTextRunes]), hash, true
 	}
 	return full, hash, false
+}
+
+// DealbreakerModelInput returns the complete normalized posting for contextual
+// validation while retaining ModelInput's full-text cache identity.
+func DealbreakerModelInput(p scraper.Posting) (text string, contentHash string) {
+	text = rawModelText(p)
+	return text, modelTextHash(text)
 }
 
 // extractionWire is the JSON contract the model emits and parseExtraction

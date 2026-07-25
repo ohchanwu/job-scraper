@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -731,6 +732,55 @@ func TestHandleProfileSaveThenLoad(t *testing.T) {
 	}
 	if strings.Contains(body, `name="must_have"`) {
 		t.Error("GET /profile still renders the removed 필수 키워드 textarea")
+	}
+}
+
+func TestHandleProfileSaveDealbreakerLengthBoundary(t *testing.T) {
+	tests := []struct {
+		name        string
+		dealbreaker string
+		wantStatus  int
+	}{
+		{name: "240 Unicode runes save", dealbreaker: strings.Repeat("가", 240), wantStatus: http.StatusSeeOther},
+		{name: "241 Unicode runes reject", dealbreaker: strings.Repeat("가", 241), wantStatus: http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, st := newTestServer(t, &fakeScraper{})
+			previous := profile.Profile{Dealbreakers: []string{"기존 제외어"}, JobLikes: "기존 목표"}
+			saveTestProfile(t, st, previous)
+
+			form := url.Values{"dealbreakers": {tt.dealbreaker}}
+			req := httptest.NewRequest(http.MethodPost, "/profile", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%q", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			jsonStr, _, ok, err := st.Profile(context.Background())
+			if err != nil || !ok {
+				t.Fatalf("Profile: ok=%v err=%v", ok, err)
+			}
+			got, err := profile.Unmarshal(jsonStr)
+			if err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if tt.wantStatus == http.StatusBadRequest {
+				if !strings.Contains(rec.Body.String(), "제외 키워드는 한 줄에 240자 이하로 입력해주세요.") {
+					t.Fatalf("body = %q, want concise dealbreaker length guidance", rec.Body.String())
+				}
+				if !slices.Equal(got.Dealbreakers, previous.Dealbreakers) || got.JobLikes != previous.JobLikes {
+					t.Fatalf("rejected save changed profile: got=%+v previous=%+v", got, previous)
+				}
+				return
+			}
+			if !slices.Equal(got.Dealbreakers, []string{tt.dealbreaker}) {
+				t.Fatalf("saved dealbreakers = %v, want 240-rune value", got.Dealbreakers)
+			}
+		})
 	}
 }
 

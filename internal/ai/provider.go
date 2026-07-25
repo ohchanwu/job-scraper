@@ -39,10 +39,27 @@ type Provider interface {
 	ScoreDelta(ctx context.Context, modelText, profileText string) ([]RawDeltaItem, Usage, error)
 }
 
+type DealbreakerMatchSource string
+
+const (
+	DealbreakerMatchTitle         DealbreakerMatchSource = "title"
+	DealbreakerMatchCompany       DealbreakerMatchSource = "company"
+	DealbreakerMatchDescription   DealbreakerMatchSource = "description"
+	DealbreakerMatchStructuredTag DealbreakerMatchSource = "structured_tag"
+	DealbreakerMatchCombined      DealbreakerMatchSource = "combined_fields"
+)
+
+type DealbreakerMatch struct {
+	Evidence string                 `json:"evidence"`
+	Source   DealbreakerMatchSource `json:"source"`
+	Category string                 `json:"category,omitempty"`
+}
+
 // DealbreakerCandidate is one deterministic profile-phrase match to validate.
 type DealbreakerCandidate struct {
-	ID     string
-	Phrase string
+	ID     string           `json:"candidate_id"`
+	Phrase string           `json:"phrase"`
+	Match  DealbreakerMatch `json:"match"`
 }
 
 type DealbreakerVerdict string

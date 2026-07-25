@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ohchanwu/jobcron/internal/ai"
 	"github.com/ohchanwu/jobcron/internal/credential"
@@ -562,6 +563,13 @@ func (s *Server) handleProfileSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	dealbreakers := parseLines(r.FormValue("dealbreakers"))
+	for _, phrase := range dealbreakers {
+		if utf8.RuneCountInString(phrase) > 240 {
+			http.Error(w, "제외 키워드는 한 줄에 240자 이하로 입력해주세요.", http.StatusBadRequest)
+			return
+		}
+	}
 	previousProfile, _, err := s.loadProfile(r.Context(), userID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -622,7 +630,7 @@ func (s *Server) handleProfileSave(w http.ResponseWriter, r *http.Request) {
 			Weight:   atoi(r.FormValue("location_weight")),
 			RemoteOK: r.FormValue("remote_ok") != "",
 		},
-		Dealbreakers:         parseLines(r.FormValue("dealbreakers")),
+		Dealbreakers:         dealbreakers,
 		JobLikes:             strings.TrimSpace(r.FormValue("job_likes")),
 		JobDislikes:          strings.TrimSpace(r.FormValue("job_dislikes")),
 		ShortTermGoals:       strings.TrimSpace(r.FormValue("short_term_goals")),

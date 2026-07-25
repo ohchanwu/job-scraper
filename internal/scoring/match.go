@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/ohchanwu/jobcron/internal/ai"
 	"github.com/ohchanwu/jobcron/internal/profile"
@@ -11,6 +12,8 @@ import (
 	"github.com/ohchanwu/jobcron/internal/tokenmatch"
 	"golang.org/x/text/unicode/norm"
 )
+
+const maxDealbreakerEvidenceRunes = 240
 
 // tokenize splits text the way SQLite FTS5's unicode61 tokenizer does: it
 // NFC-normalizes the text, breaks it into maximal runs of letters and digits
@@ -46,7 +49,65 @@ func DealbreakerCandidates(p scraper.Posting, prof profile.Profile) []ai.Dealbre
 		candidates = append(candidates, ai.DealbreakerCandidate{
 			ID:     hex.EncodeToString(sum[:]),
 			Phrase: phrase,
+			Match:  canonicalDealbreakerMatch(p, text, phrase),
 		})
 	}
 	return candidates
+}
+
+func canonicalDealbreakerMatch(p scraper.Posting, combinedText, phrase string) ai.DealbreakerMatch {
+	for _, tag := range p.Tags {
+		if tokenmatch.Contains(tag.Name, phrase) && tokenmatch.Contains(p.Description, tag.Name) {
+			return ai.DealbreakerMatch{
+				Evidence: boundedMatchEvidence(tag.Name, phrase),
+				Source:   ai.DealbreakerMatchStructuredTag,
+				Category: tag.Category,
+			}
+		}
+	}
+	if tokenmatch.Contains(p.Title, phrase) {
+		return ai.DealbreakerMatch{Evidence: boundedMatchEvidence(p.Title, phrase), Source: ai.DealbreakerMatchTitle}
+	}
+	if tokenmatch.Contains(p.Company, phrase) {
+		return ai.DealbreakerMatch{Evidence: boundedMatchEvidence(p.Company, phrase), Source: ai.DealbreakerMatchCompany}
+	}
+	if line, ok := shortestMatchingLine(p.Description, phrase); ok {
+		return ai.DealbreakerMatch{Evidence: boundedMatchEvidence(line, phrase), Source: ai.DealbreakerMatchDescription}
+	}
+	return ai.DealbreakerMatch{Evidence: boundedMatchEvidence(combinedText, phrase), Source: ai.DealbreakerMatchCombined}
+}
+
+func shortestMatchingLine(description, phrase string) (string, bool) {
+	var shortest string
+	for _, line := range strings.Split(description, "\n") {
+		line = strings.TrimSpace(line)
+		if !tokenmatch.Contains(line, phrase) {
+			continue
+		}
+		if shortest == "" || utf8.RuneCountInString(line) < utf8.RuneCountInString(shortest) {
+			shortest = line
+		}
+	}
+	return shortest, shortest != ""
+}
+
+func boundedMatchEvidence(value, phrase string) string {
+	runes := []rune(value)
+	if len(runes) <= maxDealbreakerEvidenceRunes {
+		return value
+	}
+	startByte, endByte, ok := tokenmatch.Find(value, phrase)
+	if !ok {
+		return string(runes[:maxDealbreakerEvidenceRunes])
+	}
+	start := utf8.RuneCountInString(value[:startByte])
+	end := start + utf8.RuneCountInString(value[startByte:endByte])
+	windowStart := start - (maxDealbreakerEvidenceRunes-(end-start))/2
+	if windowStart < 0 {
+		windowStart = 0
+	}
+	if windowStart+maxDealbreakerEvidenceRunes > len(runes) {
+		windowStart = len(runes) - maxDealbreakerEvidenceRunes
+	}
+	return string(runes[windowStart : windowStart+maxDealbreakerEvidenceRunes])
 }

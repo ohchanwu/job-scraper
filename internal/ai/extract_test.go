@@ -69,6 +69,30 @@ func TestBuildModelTextTruncationAndHashStability(t *testing.T) {
 	})
 }
 
+func TestDealbreakerModelInputUsesFullNormalizedTextAndSharedHash(t *testing.T) {
+	p := scraper.Posting{
+		Title:       "신입 백엔드",
+		Company:     "가나다",
+		Description: strings.Repeat("가", maxModelTextRunes) + " cafe\u0301",
+	}
+
+	modelText, modelHash, truncated := ModelInput(p)
+	dealbreakerText, dealbreakerHash := DealbreakerModelInput(p)
+
+	if !truncated || len([]rune(modelText)) != maxModelTextRunes {
+		t.Fatalf("ModelInput = %d runes, truncated=%v; want capped at %d", len([]rune(modelText)), truncated, maxModelTextRunes)
+	}
+	if len([]rune(dealbreakerText)) <= maxModelTextRunes {
+		t.Fatalf("DealbreakerModelInput = %d runes, want full text beyond %d", len([]rune(dealbreakerText)), maxModelTextRunes)
+	}
+	if !strings.Contains(dealbreakerText, "café") {
+		t.Fatalf("DealbreakerModelInput missing NFC-normalized suffix: %q", dealbreakerText[len(dealbreakerText)-20:])
+	}
+	if dealbreakerHash != modelHash {
+		t.Fatalf("content hashes differ: dealbreaker=%q model=%q", dealbreakerHash, modelHash)
+	}
+}
+
 func TestParseExtractionValid(t *testing.T) {
 	t.Run("max present", func(t *testing.T) {
 		ext, err := parseExtraction([]byte(`{"min_career":2,"max_career":5,"newcomer":false,"education":"bachelor","career_evidence":"경력 2-5년","education_evidence":"학사 이상"}`), "경력 2-5년, 학사 이상")
