@@ -1,0 +1,412 @@
+# Jobcron Terraform-First Production Launch: Human-Blocked Steps
+
+**Status:** Active; awaiting Terraform implementation plans and human-authorized
+external changes<br>
+**Recorded:** 2026-07-26<br>
+**Owner:** Human operator, assisted by agents where appropriate<br>
+**Infrastructure authority:** [Terraform AWS foundation and Cloudflare ingress
+automation][terraform-spec]
+
+## Purpose
+
+Define the decisions, private inputs, approval gates, and real-world verification
+that only the human operator can supply for Jobcron's first production launch.
+This document is not an executable command runbook and does not authorize an AWS,
+Cloudflare, registry, DNS, database, or production change by itself.
+
+Each of the six implementation slices in the Terraform specification requires its
+own implementation plan, saved Terraform plan, verification evidence, and explicit
+human approval before state changes. Those slice plans own exact commands. This
+document owns the human checkpoints that those plans must not bypass.
+
+## Supersession History
+
+The [July 16 human-blocked launch specification][archived-spec] was never
+implemented. Before the alpha deployment, the product sequence changed to
+implement pre-alpha milestone 2 first. That work expanded the launch surface to
+include multi-user accounts, cohort-gated signup, Anthropic/OpenAI/Gemini
+bring-your-own-key support, sponsor-funded Stage 1 analysis, and contextual
+dealbreaker provenance.
+
+The later Terraform-first infrastructure decision also replaced the old
+document's manual host assumptions. The archived specification therefore must
+not be executed: it assumes SSH, an existing persistent EC2 `.env`, public port
+80, Caddy-managed public certificates, and a manually prepared host.
+
+The following execution artifacts share some of those stale assumptions and are
+non-authoritative until a Terraform implementation slice updates and verifies
+them:
+
+- `deploy/production/HUMAN_DEPLOY_GUIDE.md`
+- `deploy/production/README.md`
+- `deploy/production/compose.yaml`
+- `docs/superpowers/plans/260715-postgresql-convergence-slice-5-first-production-deployment.md`
+
+## Verified Planning State
+
+As recorded in the Terraform infrastructure specification:
+
+- the existing EC2 and RDS resources are disconnected and are not a functional
+  production stack;
+- no production Terraform roots, remote state, state locking, GitHub OIDC
+  roles, replacement host, or automated Cloudflare prefix-list path exist yet;
+- the old EC2, old VPC, and old RDS are retained rollback resources, not the
+  target architecture;
+- the replacement architecture uses a canonical VPC, private PostgreSQL RDS,
+  a replacement EC2 host managed through Session Manager, transient runtime
+  secrets below `/run/jobcron`, Caddy on origin port 443 only, and Cloudflare
+  Full (strict); and
+- infrastructure implementation must precede production cutover.
+
+Every drift-prone cloud fact must be re-verified through authenticated tools
+before planning or applying a change. Tracked documentation must contain no real
+account identifiers, resource identifiers, addresses, endpoints, credentials,
+certificates, or private recovery locations.
+
+## Authority Boundary
+
+An agent may prepare plans, inspect value-blind metadata, run approved checks,
+and execute an authorized change while the human is present. An agent must not:
+
+- invent or select the human's identity, account, billing, or recovery values;
+- reveal, copy into Git, or echo undisclosed secret values;
+- approve spending or a Terraform apply on the human's behalf;
+- choose the canonical production resources without an authenticated inventory;
+- enable public traffic before the human authorizes cutover;
+- delete rollback resources or close the rollback window; or
+- treat a successful command as proof of a successful user experience.
+
+## Global Hard Gates
+
+These gates apply to every implementation slice:
+
+1. No state-changing phase starts until the exact saved plan has been reviewed
+   and explicitly approved by the human.
+2. No real secret may enter Git, Terraform variables, plans, state, EC2 user
+   data, issue text, chat, screenshots, or shared logs.
+3. No cloud identifier or personal address may enter tracked documentation.
+4. Jobcron and Caddy remain stopped while the runtime secret is absent,
+   incomplete, malformed, or unavailable.
+5. The existing EC2, VPC, RDS, and recovery materials remain intact until the
+   explicit rollback-close checkpoint.
+6. The EIP and DNS cutover cannot start until the replacement stack passes
+   private-path data, application, archive, and recovery checks.
+7. Each user-facing claim must be verified through the same browser path a real
+   user will use. HTTP status checks alone are insufficient.
+8. Any failed gate stops the sequence. The operator records the failure
+   privately and resumes only from a newly reviewed plan or documented recovery
+   point.
+
+## Human-Controlled Inputs
+
+Prepare these values privately. Checkbox completion belongs in the
+access-controlled operator log, not in this public file.
+
+### Identity And Approval
+
+- [ ] Authenticated `jobcron-admin` AWS CLI profile backed by IAM Identity
+      Center and MFA
+- [ ] Expected AWS account, role, and region, checked without publishing their
+      exact values
+- [ ] Cloudflare account and zone access
+- [ ] OCI registry repository and credentials for image publication and host
+      pulls
+- [ ] Approval limits for infrastructure spending
+- [ ] Access-controlled operator-log location
+- [ ] Private rollback decision owner and rollback-window end condition
+
+### Application And Data
+
+- [ ] Approved release commit SHA
+- [ ] Immutable `linux/arm64` image reference and digest
+- [ ] Owner identity and password
+- [ ] Cohort signup access code for `JOBCRON_SIGNUP_ACCESS_CODE`
+- [ ] Sponsor user ID for `JOBCRON_STAGE1_SPONSOR_USER_ID`
+- [ ] Production session secret
+- [ ] Credential-encryption master key, plus a separately stored recovery copy
+- [ ] Immutable SQLite snapshot with its matching durable `-wal` file
+- [ ] Human-approved provider credentials for the minimal paid AI checks
+
+### Infrastructure And Edge
+
+- [ ] Private inventory of the existing VPC, subnets, route tables, EIP, EC2,
+      RDS, security groups, DNS records, and rollback values
+- [ ] Human selection of the canonical VPC after the authenticated inventory
+- [ ] Human-approved non-overlapping private subnet CIDRs
+- [ ] Cloudflare Origin CA certificate and private key
+- [ ] Private record of Origin CA expiry and a renewal reminder
+- [ ] Private locations for Terraform recovery evidence, database archives,
+      log archives, and verified MacBook copies
+
+## Human Execution Gates By Terraform Slice
+
+The slice order is load-bearing. A later slice may be planned while an earlier
+one is under review, but it may not apply changes that depend on an incomplete
+earlier slice.
+
+### Slice 1: Identity, State Bootstrap, And Terraform CI
+
+Human actions and approvals:
+
+- [ ] Configure and authenticate `jobcron-admin` through IAM Identity Center.
+- [ ] Confirm the caller identity, expected role, and expected region without
+      publishing exact values.
+- [ ] Review and approve the bootstrap resource names, access boundaries,
+      encryption, versioning, and lock strategy.
+- [ ] Review and approve the exact local bootstrap plan before its apply.
+- [ ] Confirm state migrated to the protected S3 backend and test recovery from
+      an object version.
+- [ ] Review the production and edge GitHub OIDC trust boundaries.
+- [ ] Confirm CI is plan-only for production and that no long-lived AWS access
+      keys were added.
+
+Exit evidence:
+
+- authenticated Identity Center access works;
+- remote state, native locking, encryption, versioning, and recovery work;
+- the protected production workflow cannot apply without human approval; and
+- the narrow edge role cannot mutate production compute, database, IAM, or
+  secrets.
+
+### Slice 2: Canonical VPC And EIP Adoption
+
+Human actions and approvals:
+
+- [ ] Run or supervise the authenticated, read-only infrastructure inventory.
+- [ ] Select the canonical VPC and confirm sufficient non-overlapping address
+      space for two private database subnets.
+- [ ] Compare the inventory with the proposed import blocks and saved adoption
+      plan.
+- [ ] Approve adoption only when the plan imports the chosen VPC, existing
+      public networking, and EIP without replacement or destruction.
+- [ ] Confirm the old EC2 and old RDS remain untouched.
+
+Exit evidence:
+
+- Terraform owns the approved existing network and EIP objects;
+- the post-import plan is clean; and
+- no production or rollback resource was replaced or deleted.
+
+### Slice 3: Private Database Tier And Secret Containers
+
+Human actions and approvals:
+
+- [ ] Review and approve the plan for two private database subnets, database
+      subnet group, security groups, new encrypted RDS instance, recovery
+      bucket, and empty runtime-secret container.
+- [ ] Confirm the plan uses RDS-managed master credentials and does not expose a
+      secret version to Terraform.
+- [ ] Approve the apply only after checking deletion protection,
+      `prevent_destroy`, backup retention, TLS requirements, and public-access
+      settings.
+- [ ] Record the new RDS restore identifiers and recovery evidence privately.
+
+Exit evidence:
+
+- RDS is private, encrypted, backed up, deletion-protected, and reachable on
+  port 5432 only from the application security group;
+- Terraform cannot read or persist runtime or RDS master secret values; and
+- the recovery bucket is private, encrypted, versioned, and protected.
+
+### Slice 4: Replacement EC2, Transient Runtime, And Recovery
+
+Human actions and approvals:
+
+- [ ] Review and approve the replacement-host, IAM, Session Manager, bootstrap,
+      Caddy, and archive plan.
+- [ ] Confirm the host has encrypted storage, no SSH key pair, no port 22
+      ingress, and only the narrow permissions approved by the Terraform spec.
+- [ ] Establish Session Manager access and an SSM port-forward from the trusted
+      Mac to private RDS.
+- [ ] Create the lower-privilege application database role without revealing
+      the RDS master credential.
+- [ ] Populate the runtime secret outside Terraform with every required
+      application value, the immutable image reference, lower-privilege
+      `DATABASE_URL`, cohort signup code, sponsor user ID, and Origin CA
+      certificate and key.
+- [ ] Confirm missing or malformed secret fields keep Jobcron and Caddy stopped.
+- [ ] Confirm successful preparation writes sensitive material only below the
+      memory-backed `/run/jobcron` path with restrictive permissions.
+- [ ] Verify one database dump and one sanitized log archive reaches the
+      recovery bucket, is copied to the trusted Mac, and passes its manifest
+      check.
+
+Exit evidence:
+
+- Session Manager replaces SSH;
+- the instance cannot read the RDS master secret or delete recovery archives;
+- reboot recreates the transient runtime files without leaving a persistent
+  `.env` or TLS private key;
+- the approved image starts privately and connects to RDS with TLS through the
+  lower-privilege role; and
+- a pulled database dump restores into a disposable database with matching
+  schema and row-count evidence.
+
+### Slice 5: Cloudflare Prefix-List Automation
+
+Human actions and approvals:
+
+- [ ] Review the fetched official Cloudflare IPv4 set, validation result,
+      prefix-list quota, saved edge plan, and narrow edge-role permissions.
+- [ ] Approve an edge apply only when the plan can change the tagged prefix
+      list and its single origin port 443 ingress rule.
+- [ ] Confirm malformed, empty, implausible, duplicate, or oversized upstream
+      data fails without changing AWS.
+- [ ] Confirm a no-change scheduled run is a no-op.
+
+Exit evidence:
+
+- the origin security group accepts port 443 only through the managed
+  Cloudflare prefix list;
+- direct internet access to ports 22, 80, 7777, and 5432 is blocked; and
+- an upstream fetch failure preserves the last valid prefix-list version.
+
+### Slice 6: Data Bootstrap, Cutover, And Production Verification
+
+#### Release And Data Preparation
+
+- [ ] Re-run the repository's documented build, full test, race, lint,
+      formatting, and production-mode checks on the exact release SHA.
+- [ ] Run Gitleaks and manually inspect the publication diff.
+- [ ] Build and publish the immutable `linux/arm64` image, inspect its manifest,
+      and record its digest privately.
+- [ ] Take the immutable SQLite snapshot and matching durable WAL file without
+      opening the live source database in a way that changes it.
+- [ ] Through the SSM port-forward, create the owner using the reviewed secure
+      prompt flow.
+- [ ] Create a pre-import RDS snapshot.
+- [ ] Run the reviewed import dry run, review its source fingerprint and
+      counts, apply it once, then confirm the required idempotence behavior.
+- [ ] Record import and snapshot evidence privately.
+
+#### Private-Path Verification Before Cutover
+
+- [ ] Verify migrations, owner login, imported data, provider-credential
+      storage, one paid provider call, scheduled scrape configuration, database
+      dump, log archive, and restart behavior while public traffic remains off.
+- [ ] Verify the current production configuration includes cohort signup and
+      sponsor-funded Stage 1 without exposing either configured value.
+- [ ] Confirm the replacement stack is healthy and the old resources remain
+      available for rollback.
+
+#### EIP, DNS, And Cloudflare Cutover
+
+- [ ] Review and explicitly approve the saved EIP reassociation plan.
+- [ ] Issue or confirm the Origin CA certificate covers the apex and `www`.
+- [ ] Populate the runtime secret before Caddy starts.
+- [ ] Record current DNS and EIP rollback values privately.
+- [ ] Re-associate the EIP only after all private-path gates pass.
+- [ ] Set the apex and `www` behavior, enable proxying, and select Full
+      (strict).
+- [ ] Keep origin port 80 closed. Defer HSTS until stable HTTPS and rollback
+      behavior are proven.
+
+#### Real Browser Acceptance
+
+Using a real browser through the proxied public hostname:
+
+- [ ] The apex and `www` behavior completes without a certificate error or
+      redirect loop.
+- [ ] Owner login works and the expected imported profile appears.
+- [ ] Profile edits persist across logout, login, and container recreation.
+- [ ] Job listings, score order, score details, bookmarks, hidden jobs, and
+      canonical outbound job links show the expected content.
+- [ ] Anthropic, OpenAI, and Gemini credential states remain isolated per user.
+- [ ] A minimal paid AI re-rate succeeds with a human-approved provider key.
+- [ ] Contextual dealbreaker evidence and blocker states render as specified.
+- [ ] Cohort signup rejects an incorrect access code and accepts the approved
+      code without revealing it.
+- [ ] Sponsor-funded Stage 1 work is attributed to the configured sponsor
+      without granting an application role.
+- [ ] The scheduled scrape survives application restart and its next-run state
+      is visible.
+- [ ] No console error appears during the walked launch paths.
+
+#### Durability And Closeout
+
+- [ ] Recreate the application container and confirm PostgreSQL-backed state and
+      encrypted provider credentials remain usable.
+- [ ] Confirm automated RDS backups and point-in-time recovery are active.
+- [ ] Confirm a fresh dump and log archive reach S3 and the MacBook copy verifies
+      their manifests.
+- [ ] Run a final no-change Terraform plan for each root.
+- [ ] Store sanitized verification evidence in tracked documentation and exact
+      operational evidence only in the private log.
+- [ ] Keep the old resources until the human explicitly closes the rollback
+      window.
+
+## Failure And Rollback Contract
+
+### Before EIP Or DNS Cutover
+
+- Stop the sequence.
+- Keep the old resources untouched.
+- Destroy only newly created disposable resources, and only after reviewing a
+  saved destroy plan.
+- Repair the failed slice and start again from a clean saved plan.
+
+### After EIP Cutover But Before New Production Writes
+
+- Re-associate the EIP to the old instance.
+- Disable Cloudflare proxying or restore the recorded edge state if required by
+  the approved rollback procedure.
+- Keep the new resources for diagnosis unless the human approves their removal.
+
+### After New PostgreSQL Writes Begin
+
+- Treat the new RDS database as authoritative.
+- Roll back the application only to a schema-compatible immutable image.
+- Use an approved snapshot or point-in-time recovery when data recovery is
+  required.
+- Never restore SQLite as a writable production database.
+
+### Terraform State Failure
+
+- Recover state from a known S3 object version.
+- Reconcile state with read-only inspection and a reviewed plan.
+- Never reconstruct missing state through a blind apply.
+
+### EC2 Loss
+
+- Recreate the host through Terraform.
+- Restore runtime configuration from the approved Secrets Manager version.
+- Restore data from RDS or the verified archive path as appropriate.
+- Do not rebuild the server through undocumented manual SSH steps.
+
+### Credential-Encryption Key Loss
+
+- Restore the separately controlled recovery copy.
+- If no valid recovery copy exists, require affected users to replace their
+  provider credentials.
+- Never rotate the key by silently making existing ciphertext unreadable.
+
+## Definition Of Done
+
+This human-blocked specification is complete only when:
+
+1. all six Terraform slices have approved plans, verified applies, and recorded
+   human checkpoints;
+2. the replacement stack satisfies the Terraform infrastructure acceptance
+   criteria;
+3. the exact release, import, paid-provider, browser, durability, archive, and
+   recovery checks above pass;
+4. the old EC2, VPC, and RDS are removed only after the human closes the
+   rollback window;
+5. `docs/architecture.md`, the production deployment guide, Compose/Caddy
+   references, and the Superpowers index describe the deployed architecture;
+6. no secret or private production identifier appears in tracked artifacts,
+   Terraform state, plans, or shared logs; and
+7. the human records the final go-live and rollback-close decisions privately.
+
+## Out Of Scope
+
+- Autoscaling, an Application Load Balancer, private application subnets,
+  Multi-AZ RDS, origin IPv6, and HSTS
+- Routine application releases after the first production launch
+- Storing real operational values in tracked documentation
+- Treating this checklist as authorization to apply or cut over
+
+[archived-spec]:
+  ../archive/2026-07-26-first-production-launch-human-blocked-steps/260716-first-production-launch-human-blocked-steps.md
+[terraform-spec]:
+  260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md

@@ -1,7 +1,20 @@
 # Jobcron First Production Launch: Human-Blocked Steps
 
-**Status:** Active; repository preparation is complete and external rollout is
-awaiting human authorization<br>
+> [!WARNING]
+> **Status: Superseded; never implemented.**
+>
+> This July 16 launch sequence was never executed. Before the alpha deployment,
+> the product plan changed to implement pre-alpha milestone 2 first, which made
+> this document stale. It was superseded by the
+> [Terraform-first production launch human-blocked steps][replacement-spec].
+>
+> The later Terraform-first infrastructure decision also invalidated this
+> document's manual EC2, SSH, persistent `.env`, public-ingress, and certificate
+> assumptions. This file is retained only as historical evidence. Do not execute
+> its checklist or linked commands.
+
+**Original status (2026-07-16):** Active; repository preparation was complete
+and external rollout was awaiting human authorization<br>
 **Owner:** Human operator, assisted by an agent where appropriate<br>
 **Implementation source:** [PostgreSQL convergence specification][convergence-spec]<br>
 **Execution source:** [Slice 5 first-production plan][slice-5-plan]<br>
@@ -97,7 +110,7 @@ handle undisclosed secrets, approve spending, or close the rollback window.
 ## Human Execution Checklist
 
 Follow the exact sequence and commands in the
-[production human deploy guide](../../../deploy/production/HUMAN_DEPLOY_GUIDE.md).
+[production human deploy guide](../../../../deploy/production/HUMAN_DEPLOY_GUIDE.md).
 This checklist records the approval gates and observable outcomes without
 duplicating secret-bearing commands.
 
@@ -257,6 +270,10 @@ skipped items have a private rationale, rollback evidence exists, no secret has
 entered a public artifact, the authenticated production path passes, and the
 human explicitly closes the rollback window.
 
-[convergence-spec]: 260714-postgresql-local-convergence-user-ai-credentials.md
-[slice-5-plan]: ../plans/260715-postgresql-convergence-slice-5-first-production-deployment.md
-[deploy-guide]: ../../../deploy/production/HUMAN_DEPLOY_GUIDE.md
+[convergence-spec]:
+  ../../specs/260714-postgresql-local-convergence-user-ai-credentials.md
+[slice-5-plan]:
+  ../../plans/260715-postgresql-convergence-slice-5-first-production-deployment.md
+[deploy-guide]: ../../../../deploy/production/HUMAN_DEPLOY_GUIDE.md
+[replacement-spec]:
+  ../../specs/260726-terraform-first-production-launch-human-blocked-steps.md

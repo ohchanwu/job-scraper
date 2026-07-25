@@ -7,12 +7,12 @@ decision records needed for the current task.
 ## Active Work
 
 - [Terraform AWS foundation and Cloudflare ingress automation][terraform-aws-foundation]
-- [First production human steps](specs/260716-first-production-launch-human-blocked-steps.md)
+- [Terraform-first production launch human-blocked steps][terraform-launch-human-steps]
 - [PostgreSQL local convergence and per-user AI credentials](specs/260714-postgresql-local-convergence-user-ai-credentials.md)
-- [Slice 5: First production deployment](plans/260715-postgresql-convergence-slice-5-first-production-deployment.md)
 
 ## Recently Archived
 
+- [Superseded first production human steps][archived-first-production-human-steps]
 - [PostgreSQL account-mutation clock source][account-mutation-clock-plan]
 - [Contextual dealbreaker match-provenance contract][dealbreaker-match-provenance-spec]
 - [Contextual dealbreaker match-provenance implementation][dealbreaker-match-provenance-plan]
@@ -89,6 +89,10 @@ decision records needed for the current task.
   archive/2026-07-26-postgresql-account-mutation-clock-source/260726-postgresql-account-mutation-clock-source.md
 [terraform-aws-foundation]:
   specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md
+[terraform-launch-human-steps]:
+  specs/260726-terraform-first-production-launch-human-blocked-steps.md
+[archived-first-production-human-steps]:
+  archive/2026-07-26-first-production-launch-human-blocked-steps/260716-first-production-launch-human-blocked-steps.md
 [multi-user-account-spec]:
   archive/2026-07-22-multi-user-account-expansion/260715-multi-user-account-expansion.md
 [multi-user-account-plan]:
