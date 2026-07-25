@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/ohchanwu/jobcron/internal/ai"
 )
 
 const goTrimSpaceCharacters = "\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
@@ -146,6 +148,81 @@ SELECT career_evidence, education_evidence
 	}
 	if careerEvidence != "신입 가능" || educationEvidence != "" {
 		t.Fatalf("migrated evidence = career:%q education:%q", careerEvidence, educationEvidence)
+	}
+}
+
+func TestDealbreakerMatchProvenanceMigration(t *testing.T) {
+	st := newPostgresTestStoreThroughMigration(t, 18)
+	ctx := context.Background()
+	userID := insertMigrationTestUser(t, st, "provenance-migration@example.invalid")
+	postingID := insertMigrationTestPosting(t, st, "provenance-migration")
+	if _, err := st.db.ExecContext(ctx, `
+INSERT INTO ai_dealbreaker_validations (
+    user_id, posting_id, content_hash, ai_version, keyword_hash,
+    verdict, evidence, computed_at
+) VALUES ($1, $2, 'content', 'anthropic|model|1|prof', 'keyword', 'applies', '야근이 잦습니다', now())`,
+		userID, postingID); err != nil {
+		t.Fatalf("seed version-1 validation: %v", err)
+	}
+
+	if err := applyPostgresMigrationVersion(st.db, 19); err != nil {
+		t.Fatalf("apply migration 0019: %v", err)
+	}
+	assertMigrationVersionRecorded(t, st, 19, true)
+
+	var matchJSON, reasonCode, reasonEvidence string
+	if err := st.db.QueryRowContext(ctx, `
+SELECT match_json, reason_code, reason_evidence
+  FROM ai_dealbreaker_validations
+ WHERE user_id = $1 AND posting_id = $2`, userID, postingID).Scan(&matchJSON, &reasonCode, &reasonEvidence); err != nil {
+		t.Fatalf("read migrated validation: %v", err)
+	}
+	if matchJSON != "{}" || reasonCode != "" || reasonEvidence != "" {
+		t.Fatalf("migrated row = match:%q reason_code:%q reason_evidence:%q", matchJSON, reasonCode, reasonEvidence)
+	}
+
+	var evidenceExists bool
+	if err := st.db.QueryRowContext(ctx, `
+SELECT EXISTS (
+    SELECT 1
+      FROM information_schema.columns
+     WHERE table_name = 'ai_dealbreaker_validations'
+       AND column_name = 'evidence'
+)`).Scan(&evidenceExists); err != nil {
+		t.Fatalf("inspect evidence column: %v", err)
+	}
+	if evidenceExists {
+		t.Fatal("legacy evidence column still exists after migration 0019")
+	}
+
+	// A version-2 row differs only by ai_version, so it coexists under the
+	// unchanged primary key and the version-1 row misses a version-2 lookup.
+	match := ai.DealbreakerMatch{Evidence: "야근이 잦습니다", Source: ai.DealbreakerMatchDescription}
+	validation := ai.DealbreakerValidation{
+		CandidateID: "keyword",
+		Verdict:     ai.DealbreakerApplies,
+		ReasonCode:  ai.DealbreakerReasonExpectedCondition,
+	}
+	const version2 = "anthropic|model|2|prof"
+	if err := st.UpsertAIDealbreakerValidation(ctx, userID, postingID, "content", version2, "keyword", match, validation, time.Now()); err != nil {
+		t.Fatalf("insert version-2 validation: %v", err)
+	}
+	var rows int
+	if err := st.db.QueryRowContext(ctx, `SELECT count(*) FROM ai_dealbreaker_validations`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 2 {
+		t.Fatalf("rows after version-2 insert = %d, want 2", rows)
+	}
+	got, err := st.AIDealbreakerValidationsByPostingID(ctx, userID, version2)
+	if err != nil {
+		t.Fatalf("AIDealbreakerValidationsByPostingID: %v", err)
+	}
+	if len(got[postingID]) != 1 {
+		t.Fatalf("version-2 lookup returned %d rows, want only the version-2 row", len(got[postingID]))
+	}
+	if row := got[postingID]["content\x00keyword"]; row.Match != match || row.Validation != validation {
+		t.Fatalf("version-2 lookup row = %+v", row)
 	}
 }
 

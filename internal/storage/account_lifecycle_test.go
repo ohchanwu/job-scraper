@@ -580,7 +580,7 @@ func seedAccountLifecycleState(ctx context.Context, st *Store, userID, postingID
 		{`INSERT INTO ai_usage (user_id, day, input_tokens, output_tokens) VALUES ($1, CURRENT_DATE, 1, 1)`, []any{userID}},
 		{`INSERT INTO user_ai_credentials (user_id, provider, ciphertext, nonce, encryption_version) VALUES ($1, 'anthropic', $2, $3, 1)`, []any{userID, bytes.Repeat([]byte{1}, 17), bytes.Repeat([]byte{2}, 12)}},
 		{`INSERT INTO local_data_imports (user_id, source_sha256, source_counts, imported_counts) VALUES ($1, $2, '{}'::jsonb, '{}'::jsonb)`, []any{userID, strings.Repeat("a", 64)}},
-		{`INSERT INTO ai_dealbreaker_validations (user_id, posting_id, content_hash, ai_version, keyword_hash, verdict, evidence, computed_at) VALUES ($1, $2, 'content', 'version', 'keyword', 'applies', 'evidence', now())`, []any{userID, postingID}},
+		{`INSERT INTO ai_dealbreaker_validations (user_id, posting_id, content_hash, ai_version, keyword_hash, verdict, match_json, reason_code, computed_at) VALUES ($1, $2, 'content', 'version', 'keyword', 'applies', '{"evidence":"야근","source":"description"}', 'requirement', now())`, []any{userID, postingID}},
 	}
 	for _, statement := range statements {
 		if _, err := st.db.ExecContext(ctx, statement.query, statement.args...); err != nil {

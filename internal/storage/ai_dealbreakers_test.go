@@ -238,8 +238,9 @@ func TestAIDealbreakerValidationsUseOneBatchQuery(t *testing.T) {
 func TestAIDealbreakerValidationRejectsSQLite(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
-	validation := ai.DealbreakerValidation{CandidateID: "keyword", Verdict: ai.DealbreakerApplies}
-	if err := st.UpsertAIDealbreakerValidation(ctx, 1, 1, "content", "ai-v1", "keyword", validation, time.Now()); err == nil {
+	match := ai.DealbreakerMatch{Evidence: "야근", Source: ai.DealbreakerMatchDescription}
+	validation := ai.DealbreakerValidation{CandidateID: "keyword", Verdict: ai.DealbreakerApplies, ReasonCode: ai.DealbreakerReasonRequirement}
+	if err := st.UpsertAIDealbreakerValidation(ctx, 1, 1, "content", "ai-v1", "keyword", match, validation, time.Now()); err == nil {
 		t.Fatal("SQLite upsert succeeded")
 	}
 	if _, err := st.AIDealbreakerValidationsByPostingID(ctx, 1, "ai-v1"); err == nil {
@@ -249,9 +250,10 @@ func TestAIDealbreakerValidationRejectsSQLite(t *testing.T) {
 
 func TestAIDealbreakerValidationRejectsNonPositiveUserID(t *testing.T) {
 	st := &Store{dialect: DialectPostgres}
-	validation := ai.DealbreakerValidation{CandidateID: "keyword", Verdict: ai.DealbreakerApplies}
+	match := ai.DealbreakerMatch{Evidence: "야근", Source: ai.DealbreakerMatchDescription}
+	validation := ai.DealbreakerValidation{CandidateID: "keyword", Verdict: ai.DealbreakerApplies, ReasonCode: ai.DealbreakerReasonRequirement}
 	for _, userID := range []int64{0, -1} {
-		if err := st.UpsertAIDealbreakerValidation(context.Background(), userID, 1, "content", "ai-v1", "keyword", validation, time.Now()); err == nil {
+		if err := st.UpsertAIDealbreakerValidation(context.Background(), userID, 1, "content", "ai-v1", "keyword", match, validation, time.Now()); err == nil {
 			t.Fatalf("upsert user ID %d succeeded", userID)
 		}
 		if _, err := st.AIDealbreakerValidationsByPostingID(context.Background(), userID, "ai-v1"); err == nil {

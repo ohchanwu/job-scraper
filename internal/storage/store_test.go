@@ -177,8 +177,8 @@ func TestOpenPostgresAppliesSchema(t *testing.T) {
 	if err := st.db.QueryRow(`SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil && err != sql.ErrNoRows {
 		t.Fatalf("query schema_migrations: %v", err)
 	}
-	if version != 18 {
-		t.Fatalf("schema version = %d, want 18", version)
+	if version != 19 {
+		t.Fatalf("schema version = %d, want 19", version)
 	}
 }
 
