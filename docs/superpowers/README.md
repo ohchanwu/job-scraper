@@ -6,6 +6,7 @@ decision records needed for the current task.
 
 ## Active Work
 
+- [PostgreSQL account-mutation clock source][account-mutation-clock-plan]
 - [Terraform AWS foundation and Cloudflare ingress automation][terraform-aws-foundation]
 - [First production human steps](specs/260716-first-production-launch-human-blocked-steps.md)
 - [PostgreSQL local convergence and per-user AI credentials](specs/260714-postgresql-local-convergence-user-ai-credentials.md)
@@ -84,6 +85,8 @@ decision records needed for the current task.
   archive/2026-07-25-contextual-dealbreaker-match-provenance/260725-contextual-dealbreaker-match-provenance-contract.md
 [dealbreaker-match-provenance-plan]:
   archive/2026-07-25-contextual-dealbreaker-match-provenance/260725-contextual-dealbreaker-match-provenance-implementation.md
+[account-mutation-clock-plan]:
+  plans/260726-postgresql-account-mutation-clock-source.md
 [terraform-aws-foundation]:
   specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md
 [multi-user-account-spec]:
