@@ -44,6 +44,8 @@ screenshots/
 
 # Local implementation artifacts and human-only handoff notes.
 /.superpowers/archive/
+# Ephemeral SDD execution output: screenshots, browser notes, raw evidence.
+/.superpowers/sdd/
 /.worktrees/
 
 # Terraform local artifacts. State, variable values, plans, and crash output can
