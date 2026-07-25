@@ -216,6 +216,37 @@ func TestParseDealbreakerValidationsRejectsMalformedJSON(t *testing.T) {
 	}
 }
 
+func TestParseDealbreakerValidationsStructurallyInvalidRowKeepsSiblings(t *testing.T) {
+	// reason_evidence is a number, not a string: that row fails to decode. It
+	// must be dropped independently, never reject the whole operation and lose
+	// the valid sibling.
+	raw := []byte(`{"checks":[
+		{"candidate_id":"research","verdict":"applies","reason_code":"requirement","reason_evidence":""},
+		{"candidate_id":"research-duties","verdict":"applies","reason_code":"requirement","reason_evidence":123}
+	]}`)
+	got, err := parseDealbreakerValidations(raw, validationModelText, dealbreakerCandidates[:2])
+	if err != nil {
+		t.Fatalf("parseDealbreakerValidations: %v", err)
+	}
+	if len(got) != 1 || got[0].CandidateID != "research" {
+		t.Fatalf("a structurally invalid row must not drop valid siblings: %+v", got)
+	}
+}
+
+func TestParseDealbreakerValidationsChecksNotArrayIsOperationError(t *testing.T) {
+	if _, err := parseDealbreakerValidations([]byte(`{"checks":{"candidate_id":"research"}}`), validationModelText, dealbreakerCandidates[:1]); err == nil {
+		t.Fatal("a checks value that is not an array must be an operation-level error")
+	}
+}
+
+func TestDealbreakerPromptStatesMixedUndecidableUncertain(t *testing.T) {
+	for _, want := range []string{"genuinely undecidable", "return uncertain"} {
+		if !strings.Contains(dealbreakerSystemPrompt, want) {
+			t.Fatalf("system prompt missing %q", want)
+		}
+	}
+}
+
 func TestDealbreakerPromptSerializesServerMatch(t *testing.T) {
 	cand := dbCandidate("id", "야근", "야근 없는 팀", DealbreakerMatchTitle)
 	cand.Match.Category = "welfare"

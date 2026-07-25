@@ -87,6 +87,32 @@ func TestChatCompletionsRequestAndResponseContract(t *testing.T) {
 	}
 }
 
+// TestChatCompletionsValidateDealbreakersV2 proves the shared chat-completions
+// adapter parses the version-2 dealbreaker schema end-to-end — no adapter-side
+// branching, same provider-independent parser as Anthropic.
+func TestChatCompletionsValidateDealbreakersV2(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"choices":[{"message":{"content":"{\"checks\":[{\"candidate_id\":\"research\",\"verdict\":\"not_applicable\",\"reason_code\":\"explicitly_negated\",\"reason_evidence\":\"리서치 아님\"}]}"}}],"usage":{"prompt_tokens":12,"completion_tokens":6}}`)
+	}))
+	defer srv.Close()
+
+	p, err := newHTTPProvider(newChatCompletionsSpec("openai", srv.URL), "secret", "model-x", srv.URL, 0)
+	if err != nil {
+		t.Fatalf("newHTTPProvider: %v", err)
+	}
+	got, usage, err := p.ValidateDealbreakers(context.Background(), "리서치 아님",
+		[]DealbreakerCandidate{{ID: "research", Phrase: "리서치", Match: DealbreakerMatch{Evidence: "리서치 아님", Source: DealbreakerMatchDescription}}})
+	if err != nil {
+		t.Fatalf("ValidateDealbreakers: %v", err)
+	}
+	if len(got) != 1 || got[0].Verdict != DealbreakerNotApplicable || got[0].ReasonCode != DealbreakerReasonExplicitlyNegated {
+		t.Fatalf("validation = %+v", got)
+	}
+	if usage != (Usage{InputTokens: 12, OutputTokens: 6}) {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
 func TestChatCompletionsRejectsMalformedEnvelope(t *testing.T) {
 	for _, name := range []string{"openai", "gemini"} {
 		t.Run(name, func(t *testing.T) {
