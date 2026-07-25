@@ -347,9 +347,11 @@ Login creates a session only if the user's password hash still equals the exact 
 while holding the same PostgreSQL user-row lock used by password mutation. A concurrent
 self-service password change or operator reset therefore cannot leave a session authenticated by
 the old password. PostgreSQL self-service mutations lock the matching user before the matching
-session; SQLite compatibility uses one conditional mutation statement. Both paths require the user
-ID, expected password hash, and submitting hashed session to remain unexpired at one
-transaction-time timestamp.
+session, then sample `clock_timestamp()` from PostgreSQL. The session-expiry decision and
+password-change `updated_at` value therefore use one database wall-clock timestamp sampled after
+lock acquisition. SQLite compatibility uses one application timestamp in its conditional mutation
+statement. Both paths require the user ID, expected password hash, and submitting hashed session to
+remain unexpired at that path's single authoritative timestamp.
 Self-service changes preserve only the submitting session; operator resets revoke all sessions.
 
 Foreign keys remove dependent user state when its owner is deleted. Composite keys and repository

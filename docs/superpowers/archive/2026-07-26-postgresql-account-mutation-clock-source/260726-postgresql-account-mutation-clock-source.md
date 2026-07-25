@@ -65,7 +65,7 @@ design discussion.
 - Produces: the same signature and caller contract; its returned `time.Time` is
   now sampled by PostgreSQL after both required row locks.
 
-- [ ] **Step 1: Correct the issue priority and preserve the observed regression**
+- [x] **Step 1: Correct the issue priority and preserve the observed regression**
 
 Run:
 
@@ -89,7 +89,7 @@ Expected:
   `TestPostgresAccountMutationsRejectSessionExpiredWhileWaitingForLock`; the
   previously captured full-race failure is the red evidence.
 
-- [ ] **Step 2: Make the test explicitly prove PostgreSQL considers the locked session expired**
+- [x] **Step 2: Make the test explicitly prove PostgreSQL considers the locked session expired**
 
 In
 `TestPostgresAccountMutationsRejectSessionExpiredWhileWaitingForLock`, after
@@ -112,7 +112,7 @@ if !expiredByDatabase {
 This assertion defines the expected authority: when PostgreSQL says the session
 is expired, both account mutations must reject it.
 
-- [ ] **Step 3: Run the focused test before the implementation edit**
+- [x] **Step 3: Run the focused test before the implementation edit**
 
 Run:
 
@@ -126,7 +126,7 @@ Expected: the new database-expiry assertion passes. The mutation assertion may
 still pass or intermittently fail on the old implementation; record the result
 without adding sleeps or a fake clock seam.
 
-- [ ] **Step 4: Sample PostgreSQL's wall clock after the session lock**
+- [x] **Step 4: Sample PostgreSQL's wall clock after the session lock**
 
 In `lockPostgresAccountMutation`, keep both existing `FOR UPDATE` queries.
 Replace:
@@ -150,7 +150,7 @@ Do not combine `clock_timestamp()` with the session `FOR UPDATE` query. The
 separate query makes its ordering explicit: it runs only after the lock-acquiring
 query has returned.
 
-- [ ] **Step 5: Run the focused regression repeatedly**
+- [x] **Step 5: Run the focused regression repeatedly**
 
 Run:
 
@@ -167,7 +167,7 @@ go test -race ./internal/storage \
 Expected: both subtests (`change_password` and `delete_self`) pass every
 repetition with no race report.
 
-- [ ] **Step 6: Verify neighboring account lifecycle behavior**
+- [x] **Step 6: Verify neighboring account lifecycle behavior**
 
 Run:
 
@@ -183,7 +183,7 @@ go test -race ./internal/storage \
 Expected: password replacement, session revocation, rollback, self-deletion,
 concurrent mutation, and expiry cases all pass.
 
-- [ ] **Step 7: Review the Task 1 diff**
+- [x] **Step 7: Review the Task 1 diff**
 
 Run:
 
@@ -202,7 +202,7 @@ Confirm:
 - PostgreSQL expiry no longer depends on `time.Now()`.
 - SQLite still uses one application `now` value in its conditional statement.
 
-- [ ] **Step 8: Commit the storage fix**
+- [x] **Step 8: Commit the storage fix**
 
 Run:
 
@@ -223,13 +223,9 @@ files.
 **Files:**
 
 - Modify: `docs/architecture.md:346-353`
-- Modify:
-  `docs/superpowers/plans/260726-postgresql-account-mutation-clock-source.md`
-- Modify: `docs/superpowers/README.md`
-- Move on completion:
-  `docs/superpowers/plans/260726-postgresql-account-mutation-clock-source.md`
-  to
+- Modify/archive:
   `docs/superpowers/archive/2026-07-26-postgresql-account-mutation-clock-source/260726-postgresql-account-mutation-clock-source.md`
+- Modify: `docs/superpowers/README.md`
 
 **Interfaces:**
 
@@ -238,7 +234,7 @@ files.
 - Produces: current architecture documentation, completed plan evidence, and a
   closed `jobs-89k`.
 
-- [ ] **Step 1: Update the architecture description**
+- [x] **Step 1: Update the architecture description**
 
 Replace the account-mutation timing sentence around
 `docs/architecture.md:349-353` with:
@@ -256,7 +252,7 @@ remain unexpired at that path's single authoritative timestamp.
 Keep the surrounding login-serialization and session-revocation documentation
 unchanged.
 
-- [ ] **Step 2: Run formatting, static analysis, builds, and the full suites**
+- [x] **Step 2: Run formatting, static analysis, builds, and the full suites**
 
 Run:
 
@@ -273,7 +269,7 @@ Expected: every command exits zero and the race suite reports no data race.
 If the unrelated Jumpit pacing test flakes, reproduce it separately and report
 the existing `jobs-e71`; do not modify scraper code in this workstream.
 
-- [ ] **Step 3: Inspect the complete implementation range**
+- [x] **Step 3: Inspect the complete implementation range**
 
 Record the Task 1 parent and inspect the range:
 
@@ -291,7 +287,7 @@ Confirm the range contains only:
 - the architecture update;
 - this plan's completion and archive/index changes.
 
-- [ ] **Step 4: Complete and archive the plan**
+- [x] **Step 4: Complete and archive the plan**
 
 After every preceding gate passes:
 
@@ -309,7 +305,7 @@ rg -n '260726-postgresql-account-mutation-clock-source' docs
 
 Expected: tracked references point only to the archive path.
 
-- [ ] **Step 5: Run documentation and publication-safety checks**
+- [x] **Step 5: Run documentation and publication-safety checks**
 
 Run the repository's local Markdown link check if one exists. Otherwise verify
 every relative link in the three changed Markdown files resolves locally.
@@ -319,7 +315,6 @@ Then run:
 ```bash
 git add docs/architecture.md docs/superpowers/README.md
 git add -A \
-  docs/superpowers/plans/260726-postgresql-account-mutation-clock-source.md \
   docs/superpowers/archive/2026-07-26-postgresql-account-mutation-clock-source/
 git diff --cached --check
 git diff --cached
@@ -329,7 +324,7 @@ gitleaks git --staged --redact --no-banner
 Manually confirm the staged documentation contains no credentials, personal
 data, production identifiers, raw logs, or unnecessary local paths.
 
-- [ ] **Step 6: Commit the documentation lifecycle update**
+- [x] **Step 6: Commit the documentation lifecycle update**
 
 Run:
 
@@ -339,7 +334,7 @@ git commit -m "docs: record PostgreSQL account expiry clock"
 
 Expected: one documentation-only commit following Task 1.
 
-- [ ] **Step 7: Close the issue and report the local-only result**
+- [x] **Step 7: Close the issue and report the local-only result**
 
 Run:
 
@@ -359,3 +354,15 @@ Report:
 - `jobs-89k` closed at P3;
 - preserved user-owned untracked files;
 - no push, MR/PR, deploy, or browser work.
+
+## Execution Evidence
+
+- Before the implementation edit, the strengthened focused regression passed
+  20 non-race repetitions. The planned 100 race repetitions were not repeated;
+  the previously captured full-race failure remained the RED evidence because
+  this clock-skew defect is nondeterministic by design.
+- After the fix, the focused regression passed 100 ordinary repetitions and 20
+  race-enabled repetitions. The neighboring account-mutation tests passed once
+  both ordinarily and with the race detector.
+- On integrated `main`, formatting, vet, all three command builds, the complete
+  test suite, and the complete race suite exited successfully.
