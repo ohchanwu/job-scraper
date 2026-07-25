@@ -6,6 +6,7 @@ decision records needed for the current task.
 
 ## Active Work
 
+- [AI re-rate blocker surfacing](plans/260725-ai-rerate-blocker-surfacing-plan.md)
 - [Terraform AWS foundation and Cloudflare ingress automation][terraform-aws-foundation]
 - [First production human steps](specs/260716-first-production-launch-human-blocked-steps.md)
 - [PostgreSQL local convergence and per-user AI credentials](specs/260714-postgresql-local-convergence-user-ai-credentials.md)
