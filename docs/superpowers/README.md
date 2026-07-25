@@ -7,6 +7,7 @@ decision records needed for the current task.
 ## Active Work
 
 - [Contextual dealbreaker match-provenance contract][dealbreaker-match-provenance-spec]
+- [Contextual dealbreaker match-provenance implementation][dealbreaker-match-provenance-plan]
 - [Terraform AWS foundation and Cloudflare ingress automation][terraform-aws-foundation]
 - [First production human steps](specs/260716-first-production-launch-human-blocked-steps.md)
 - [PostgreSQL local convergence and per-user AI credentials](specs/260714-postgresql-local-convergence-user-ai-credentials.md)
@@ -81,6 +82,8 @@ decision records needed for the current task.
   archive/2026-07-18-contextual-dealbreaker-validation/260718-stage-1-contextual-dealbreaker-validation-and-exclusion-evidence-plan.md
 [dealbreaker-match-provenance-spec]:
   specs/260725-contextual-dealbreaker-match-provenance-contract.md
+[dealbreaker-match-provenance-plan]:
+  plans/260725-contextual-dealbreaker-match-provenance-implementation.md
 [terraform-aws-foundation]:
   specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md
 [multi-user-account-spec]:

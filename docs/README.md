@@ -33,6 +33,7 @@ Use this index instead of recursively loading the entire documentation tree.
 
 - [Active Superpowers work and context policy](superpowers/README.md)
 - [Contextual dealbreaker match-provenance contract](superpowers/specs/260725-contextual-dealbreaker-match-provenance-contract.md)
+- [Contextual dealbreaker match-provenance implementation](superpowers/plans/260725-contextual-dealbreaker-match-provenance-implementation.md)
 - [Stage 1 contextual dealbreaker validation and exclusion evidence][contextual-dealbreaker-spec]
 - [Ponytail codebase reduction campaign][ponytail-campaign-plan]
 - [Ponytail reduction candidate ledger][ponytail-campaign-ledger]

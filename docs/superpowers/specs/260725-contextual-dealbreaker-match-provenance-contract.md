@@ -1,6 +1,6 @@
 # Contextual Dealbreaker Match-Provenance Contract
 
-**Status:** Approved design, awaiting implementation plan
+**Status:** Approved design; implementation plan awaiting approval
 
 **Created:** 2026-07-25
 
@@ -73,7 +73,9 @@ re-rates.
 ## Non-goals
 
 - Discovering synonyms or semantic matches beyond deterministic phrase matching.
-- Changing the profile or dealbreaker-editing experience.
+- Redesigning the profile or dealbreaker-editing experience, apart from
+  rejecting a dealbreaker line longer than the contract's 240-code-point
+  evidence limit. The saved phrase is never silently truncated.
 - Invalidating or rerunning Stage 1A career and education extractions.
 - Changing Stage 2 scoring.
 - Redesigning source-specific scrapers or storing raw provider payloads.
@@ -390,8 +392,9 @@ change surface.
    `benefit_or_eligibility` and empty reason evidence.
 3. A phrase asserted as a role requirement persists as `applies` and remains
    excluded.
-4. Optional reason evidence that is irrelevant, ungrounded, or too long is
-   dropped without rejecting an otherwise valid verdict.
+4. Optional reason evidence that is ungrounded or too long is dropped without
+   rejecting an otherwise valid verdict. Semantic relevance remains the
+   model's responsibility and is not inferred by the parser.
 5. Unknown or duplicate candidate IDs, invalid verdicts, and incompatible
    reason codes remain unresolved.
 6. `uncertain` requires `insufficient_context` and retains exclusion.
