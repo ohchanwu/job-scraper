@@ -2,7 +2,7 @@
 
 Date: 2026-07-25
 
-Status: Active; investigation complete, implementation not started.
+Status: Completed by `b896249` on 2026-07-25.
 
 ## What is happening
 
@@ -151,3 +151,11 @@ being mislabeled as a context problem.
 - Server tests, full PostgreSQL and fallback suites, `go vet`, and build pass.
 - Desktop and mobile browser QA verify copy wrapping, reload persistence, retry,
   and absence of console errors.
+
+## Completion note
+
+The implementation reused the existing provider return contract: the server
+derives unresolved checks from requested versus accepted validations, avoiding
+adapter-wide interface churn. It added the `no_progress` terminal outcome,
+before/after contextual counts, blocker-specific copy, split UI counters, and
+reload persistence coverage.
