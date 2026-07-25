@@ -83,6 +83,17 @@ func (c *callCap) tryReserve() bool {
 	return true
 }
 
+type dealbreakerValidationSummary struct {
+	ProviderCalls    int
+	PendingBefore    int
+	PendingAfter     int
+	AttemptedChecks  int
+	AcceptedChecks   int
+	UnresolvedChecks int
+	BudgetBlocked    bool
+	CallCapBlocked   bool
+}
+
 func (s *Server) validateDealbreakers(
 	ctx context.Context,
 	userID int64,
@@ -92,13 +103,13 @@ func (s *Server) validateDealbreakers(
 	budget *aiBudget,
 	calls *callCap,
 	emit func(event, data string),
-) (providerCalls int, providerErr error) {
+) (summary dealbreakerValidationSummary, providerErr error) {
 	if runtime == nil || runtime.UserID != userID || budget == nil || calls == nil || userID <= 0 || s.store.Dialect() != storage.DialectPostgres {
-		return 0, nil
+		return summary, nil
 	}
 	cached, err := s.store.AIDealbreakerValidationsByPostingID(ctx, userID, runtime.DealbreakerVersion)
 	if err != nil {
-		return 0, err
+		return summary, err
 	}
 	now := time.Now().UTC()
 	for _, p := range postings {
@@ -110,15 +121,28 @@ func (s *Server) validateDealbreakers(
 				unresolved = append(unresolved, candidate)
 			}
 		}
-		if len(unresolved) == 0 || !budget.canSpend() || !calls.tryReserve() {
+		if len(unresolved) == 0 {
+			continue
+		}
+		summary.PendingBefore++
+		if !budget.canSpend() {
+			summary.PendingAfter++
+			summary.BudgetBlocked = true
+			continue
+		}
+		if !calls.tryReserve() {
+			summary.PendingAfter++
+			summary.CallCapBlocked = true
 			continue
 		}
 		validations, usage, err := runtime.Provider.ValidateDealbreakers(ctx, modelText, unresolved)
-		providerCalls++
+		summary.ProviderCalls++
+		summary.AttemptedChecks += len(unresolved)
 		if usage.InputTokens+usage.OutputTokens > 0 {
 			budget.debit(ctx, usage)
 		}
 		if err != nil {
+			summary.PendingAfter++
 			if providerErr == nil {
 				providerErr = err
 			}
@@ -126,31 +150,38 @@ func (s *Server) validateDealbreakers(
 		}
 		for _, validation := range validations {
 			if err := s.store.UpsertAIDealbreakerValidation(ctx, userID, p.ID, contentHash, runtime.DealbreakerVersion, validation.CandidateID, validation, now); err != nil {
-				return providerCalls, err
+				return summary, err
 			}
+		}
+		summary.AcceptedChecks += len(validations)
+		summary.UnresolvedChecks += len(unresolved) - len(validations)
+		if len(validations) < len(unresolved) {
+			summary.PendingAfter++
 		}
 		emit("progress", fmt.Sprintf("공고 #%d (%s) 문맥 확인 중...", p.ID, p.Company))
 	}
-	return providerCalls, providerErr
+	return summary, providerErr
 }
 
 // rerateInfo is the per-surface re-rate button view model. A nil *rerateInfo
 // means "no AI key configured" — the template renders no button at all (design
-// §4: no dead control). StaleCount drives the gold attention treatment for
-// stale Stage-2 rows and unresolved contextual dealbreakers;
+// §4: no dead control). PendingCount drives the gold attention treatment;
+// PendingContextCount and PendingScoreCount explain its two independent causes.
 // Analyzed/Visible drive the persistent "N/M 분석됨" progress indicator.
 type rerateInfo struct {
-	Surface    string // "today" | "bookmarks" | "archive"
-	StaleCount int    // rows with stale Stage 2 or pending contextual validation
-	Analyzed   int    // visible rows with a current-goal AI delta cached (N)
-	Visible    int    // total visible, non-excluded rows on this surface (M)
+	Surface             string // "today" | "bookmarks" | "archive"
+	PendingCount        int    // unique rows with either pending cause
+	PendingContextCount int    // rows missing contextual validation
+	PendingScoreCount   int    // visible rows with a stale Stage-2 score
+	Analyzed            int    // visible rows with a current-goal AI delta cached (N)
+	Visible             int    // total visible, non-excluded rows on this surface (M)
 }
 
 // buildRerateInfo returns the re-rate button state for a surface, or nil when AI
 // is off (so the button is hidden). Across the given posting lists it counts the
-// visible, non-excluded rows (Visible), how many rows carry a stale AI line or
-// lack a current contextual validation (StaleCount), and how many already have
-// a delta cached against the CURRENT
+// visible, non-excluded rows (Visible), the separate contextual-validation and
+// stale Stage-2 causes behind PendingCount, and how many already have a delta
+// cached against the CURRENT
 // goal text (Analyzed). Analyzed reads the fresh ai_scores cache, NOT the chips —
 // a row analyzed but with no surviving signal shows no chip yet is still counted,
 // which is the whole point of the indicator (it resolves "analyzed or just
@@ -184,22 +215,30 @@ func (s *Server) buildRerateInfo(ctx context.Context, userID int64, runtime *AIR
 				}
 			}
 			if pendingValidation {
-				info.StaleCount++
+				info.PendingContextCount++
 			}
 			if dp.Excluded {
+				if pendingValidation {
+					info.PendingCount++
+				}
 				continue
 			}
 			info.Visible++
 			if _, ok := fresh[dp.Posting.ID]; ok {
 				info.Analyzed++
 			}
+			pendingScore := false
 			for _, li := range dp.Breakdown {
 				if li.Stale {
-					if !pendingValidation {
-						info.StaleCount++
-					}
+					pendingScore = true
 					break
 				}
+			}
+			if pendingScore {
+				info.PendingScoreCount++
+			}
+			if pendingValidation || pendingScore {
+				info.PendingCount++
 			}
 		}
 	}
@@ -217,9 +256,17 @@ func validRerateSurface(surface string) bool {
 }
 
 type rerateSummary struct {
-	Analyzed      int
-	Visible       int
-	ProviderCalls int
+	Analyzed                int
+	Visible                 int
+	ProviderCalls           int
+	ContextPendingBefore    int
+	ContextPendingAfter     int
+	ContextAttemptedChecks  int
+	ContextAcceptedChecks   int
+	ContextUnresolvedChecks int
+	ContextFailureMessage   string
+	ContextBudgetBlocked    bool
+	ContextCallCapBlocked   bool
 }
 
 // handleRerateSSE re-rates the VISIBLE rows of one surface with the Stage-2 AI
@@ -314,6 +361,10 @@ func (s *Server) handleRerateSSE(w http.ResponseWriter, r *http.Request) {
 
 func rerateDoneOutcome(summary rerateSummary) rerateOutcome {
 	switch {
+	case summary.ContextPendingBefore > 0 && summary.ContextPendingAfter >= summary.ContextPendingBefore:
+		return rerateOutcomeNoProgress
+	case summary.ContextPendingBefore > 0 && summary.ContextPendingAfter > 0:
+		return rerateOutcomePartial
 	case summary.Visible == 0:
 		return rerateOutcomeEmpty
 	case summary.ProviderCalls == 0 && summary.Analyzed >= summary.Visible:
@@ -331,6 +382,27 @@ func rerateDoneOutcome(summary rerateSummary) rerateOutcome {
 // not reach M reads as "intentional, press again," not "broken."
 func rerateDoneMessage(summary rerateSummary) string {
 	switch {
+	case summary.ContextPendingBefore > 0 && summary.ContextFailureMessage != "":
+		return fmt.Sprintf("%s AI 문맥 확인 %d개가 남았어요.", summary.ContextFailureMessage, summary.ContextPendingAfter)
+	case summary.ContextPendingBefore > 0 && summary.ContextBudgetBlocked:
+		return fmt.Sprintf(
+			"오늘 AI 예산을 다 써서 %d개를 확인하지 못했어요 — 프로필 설정에서 한도를 바꿀 수 있어요.",
+			summary.ContextPendingAfter)
+	case summary.ContextPendingBefore > 0 && summary.ContextCallCapBlocked:
+		return fmt.Sprintf(
+			"이번에는 AI 문맥 확인 %d개가 남았어요. 더 보려면 다시 눌러주세요.",
+			summary.ContextPendingAfter)
+	case summary.ContextPendingBefore > 0 && summary.ContextPendingAfter >= summary.ContextPendingBefore:
+		return fmt.Sprintf(
+			"%d개는 AI가 근거를 확인하지 못했어요. 지금 다시 눌러도 같은 결과일 수 있어요.",
+			summary.ContextPendingAfter)
+	case summary.ContextPendingAfter > 0:
+		return fmt.Sprintf(
+			"공고 %d개의 AI 문맥을 확인했고 %d개가 남았어요.",
+			summary.ContextPendingBefore-summary.ContextPendingAfter,
+			summary.ContextPendingAfter)
+	case summary.ContextPendingBefore > 0:
+		return fmt.Sprintf("AI 문맥 확인이 필요한 공고 %d개를 모두 확인했어요.", summary.ContextPendingBefore)
 	case summary.Visible == 0:
 		return "지금 화면에 분석할 공고가 없어요."
 	case summary.ProviderCalls == 0 && summary.Analyzed >= summary.Visible:
@@ -389,11 +461,18 @@ func (s *Server) runRerate(ctx context.Context, surface string, emit func(event,
 	for _, p := range candidates {
 		s.extractStage1(ctx, p.ID, p, now, func() *stage1Funding { return stage1 })
 	}
-	if validationCalls, validationErr := s.validateDealbreakers(ctx, userID, candidates, prof, runtime, budget, calls, emit); validationErr != nil {
-		summary.ProviderCalls += validationCalls
-		emit("status", providerFailureMessage(validationErr))
-	} else {
-		summary.ProviderCalls += validationCalls
+	validation, validationErr := s.validateDealbreakers(ctx, userID, candidates, prof, runtime, budget, calls, emit)
+	summary.ProviderCalls += validation.ProviderCalls
+	summary.ContextPendingBefore = validation.PendingBefore
+	summary.ContextPendingAfter = validation.PendingAfter
+	summary.ContextAttemptedChecks = validation.AttemptedChecks
+	summary.ContextAcceptedChecks = validation.AcceptedChecks
+	summary.ContextUnresolvedChecks = validation.UnresolvedChecks
+	summary.ContextBudgetBlocked = validation.BudgetBlocked
+	summary.ContextCallCapBlocked = validation.CallCapBlocked
+	if validationErr != nil {
+		summary.ContextFailureMessage = providerFailureMessage(validationErr)
+		emit("status", summary.ContextFailureMessage)
 	}
 	if _, err := s.scoreAll(ctx, userID, runtime); err != nil {
 		return summary, err

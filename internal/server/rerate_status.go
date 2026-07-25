@@ -21,10 +21,11 @@ const (
 )
 
 const (
-	rerateOutcomeChanged rerateOutcome = "changed"
-	rerateOutcomeCached  rerateOutcome = "cached"
-	rerateOutcomePartial rerateOutcome = "partial"
-	rerateOutcomeEmpty   rerateOutcome = "empty"
+	rerateOutcomeChanged    rerateOutcome = "changed"
+	rerateOutcomeCached     rerateOutcome = "cached"
+	rerateOutcomePartial    rerateOutcome = "partial"
+	rerateOutcomeEmpty      rerateOutcome = "empty"
+	rerateOutcomeNoProgress rerateOutcome = "no_progress"
 )
 
 type rerateKey struct {

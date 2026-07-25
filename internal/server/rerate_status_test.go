@@ -10,6 +10,7 @@ import (
 
 	"github.com/ohchanwu/jobcron/internal/ai"
 	"github.com/ohchanwu/jobcron/internal/profile"
+	"github.com/ohchanwu/jobcron/internal/scraper"
 )
 
 func TestRerateTrackerRecordsLifecycle(t *testing.T) {
@@ -120,8 +121,132 @@ func TestRerateInfoMarksMissingDealbreakerValidationPending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if briefing.Rerate == nil || briefing.Rerate.StaleCount != 1 {
+	if briefing.Rerate == nil ||
+		briefing.Rerate.PendingCount != 1 ||
+		briefing.Rerate.PendingContextCount != 1 ||
+		briefing.Rerate.PendingScoreCount != 0 {
 		t.Fatalf("rerate info = %+v, want one pending contextual validation", briefing.Rerate)
+	}
+}
+
+func TestValidateDealbreakersReportsSuccessfulCallWithNoAcceptedChecks(t *testing.T) {
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	ctx := context.Background()
+	userID := insertAIRuntimeTestUser(t, st, "rerate-no-progress@example.invalid")
+	prof := profile.Profile{Dealbreakers: []string{"리서치"}}
+	saveAIRuntimeProfile(t, st, userID, prof)
+	p := listingPosting("rerate-no-progress", "신입 리서치 개발자")
+	p.Description = "리서치 업무를 수행합니다"
+	p.FirstSeenAt, p.LastSeenAt = time.Now().UTC(), time.Now().UTC()
+	p.ID = mustUpsert(t, st, p)
+	provider := &ai.StubProvider{
+		NameVal: "stub",
+		ValidateDealbreakersFn: func(context.Context, string, []ai.DealbreakerCandidate) ([]ai.DealbreakerValidation, ai.Usage, error) {
+			return nil, ai.Usage{InputTokens: 10, OutputTokens: 2}, nil
+		},
+	}
+	runtime := testAIRuntime(userID, provider, "shared-model")
+
+	got, err := srv.validateDealbreakers(
+		ctx,
+		userID,
+		[]scraper.Posting{p},
+		prof,
+		runtime,
+		srv.newAIBudget(ctx, userID, runtime),
+		&callCap{max: 1},
+		noopEmit,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ProviderCalls != 1 || got.PendingBefore != 1 || got.PendingAfter != 1 {
+		t.Fatalf("validation summary = %+v, want one attempted posting still pending", got)
+	}
+	if got.AttemptedChecks != 1 || got.AcceptedChecks != 0 {
+		t.Fatalf("validation checks = %+v, want one attempted and zero accepted", got)
+	}
+}
+
+func TestValidateDealbreakersReportsPartialAcceptedChecks(t *testing.T) {
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	ctx := context.Background()
+	userID := insertAIRuntimeTestUser(t, st, "rerate-partial-context@example.invalid")
+	prof := profile.Profile{Dealbreakers: []string{"리서치", "영업"}}
+	saveAIRuntimeProfile(t, st, userID, prof)
+	p := listingPosting("rerate-partial-context", "신입 리서치 및 영업 개발자")
+	p.Description = "리서치 및 영업 업무를 수행합니다"
+	p.FirstSeenAt, p.LastSeenAt = time.Now().UTC(), time.Now().UTC()
+	p.ID = mustUpsert(t, st, p)
+	provider := &ai.StubProvider{
+		NameVal: "stub",
+		ValidateDealbreakersFn: func(_ context.Context, _ string, candidates []ai.DealbreakerCandidate) ([]ai.DealbreakerValidation, ai.Usage, error) {
+			return []ai.DealbreakerValidation{{
+				CandidateID: candidates[0].ID,
+				Verdict:     ai.DealbreakerApplies,
+				Evidence:    "리서치",
+			}}, ai.Usage{InputTokens: 10, OutputTokens: 2}, nil
+		},
+	}
+	runtime := testAIRuntime(userID, provider, "shared-model")
+
+	got, err := srv.validateDealbreakers(
+		ctx,
+		userID,
+		[]scraper.Posting{p},
+		prof,
+		runtime,
+		srv.newAIBudget(ctx, userID, runtime),
+		&callCap{max: 1},
+		noopEmit,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PendingBefore != 1 || got.PendingAfter != 1 {
+		t.Fatalf("validation summary = %+v, want posting pending until both checks resolve", got)
+	}
+	if got.AttemptedChecks != 2 || got.AcceptedChecks != 1 || got.UnresolvedChecks != 1 {
+		t.Fatalf("validation checks = %+v, want 2 attempted, 1 accepted, 1 unresolved", got)
+	}
+}
+
+func TestRunRerateCarriesContextValidationProgressIntoTerminalSummary(t *testing.T) {
+	srv, st := newPostgresTestServer(t, &fakeScraper{})
+	ctx := context.Background()
+	userID := insertAIRuntimeTestUser(t, st, "rerate-terminal-summary@example.invalid")
+	prof := profile.Profile{Dealbreakers: []string{"리서치"}}
+	saveAIRuntimeProfile(t, st, userID, prof)
+	p := listingPosting("rerate-terminal-summary", "신입 리서치 개발자")
+	p.Description = "리서치 업무를 수행합니다"
+	p.FirstSeenAt, p.LastSeenAt = time.Now().UTC(), time.Now().UTC()
+	mustUpsert(t, st, p)
+	provider := &ai.StubProvider{
+		NameVal: "stub",
+		ValidateDealbreakersFn: func(context.Context, string, []ai.DealbreakerCandidate) ([]ai.DealbreakerValidation, ai.Usage, error) {
+			return nil, ai.Usage{InputTokens: 10, OutputTokens: 2}, nil
+		},
+		ScoreDeltaFn: func(context.Context, string, string) ([]ai.RawDeltaItem, ai.Usage, error) {
+			return nil, ai.Usage{InputTokens: 10, OutputTokens: 2}, nil
+		},
+	}
+	runtime := testAIRuntime(userID, provider, "shared-model")
+	if _, err := srv.scoreAll(ctx, userID, runtime); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := srv.runRerate(ctx, "today", noopEmit, userID, runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ContextPendingBefore != 1 || got.ContextPendingAfter != 1 {
+		t.Fatalf("rerate summary = %+v, want unchanged contextual pending count", got)
+	}
+	if got.ContextAttemptedChecks != 1 || got.ContextAcceptedChecks != 0 || got.ContextUnresolvedChecks != 1 {
+		t.Fatalf("rerate checks = %+v, want one attempted, zero accepted, and one unresolved", got)
+	}
+	if rerateDoneOutcome(got) != rerateOutcomeNoProgress {
+		t.Fatalf("rerate outcome = %q, want %q", rerateDoneOutcome(got), rerateOutcomeNoProgress)
 	}
 }
 

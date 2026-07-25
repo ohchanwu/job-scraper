@@ -1569,8 +1569,8 @@ func TestProductionDealbreakerValidationIsolatesUserProfiles(t *testing.T) {
 				progress = data
 			}
 		}
-		if calls, err := srv.validateDealbreakers(ctx, userID, []scraper.Posting{p}, prof, runtime, budget, &callCap{max: 1}, emit); err != nil || calls != 1 {
-			t.Fatalf("user %d validateDealbreakers calls=%d err=%v", userID, calls, err)
+		if summary, err := srv.validateDealbreakers(ctx, userID, []scraper.Posting{p}, prof, runtime, budget, &callCap{max: 1}, emit); err != nil || summary.ProviderCalls != 1 {
+			t.Fatalf("user %d validateDealbreakers summary=%+v err=%v", userID, summary, err)
 		}
 		wantProgress := fmt.Sprintf("공고 #%d (테스트회사) 문맥 확인 중...", postingID)
 		if progress != wantProgress {
@@ -1687,9 +1687,9 @@ func TestProductionDealbreakerCacheMissesOnRuntimeVersionChange(t *testing.T) {
 				},
 			}
 			newRuntime := tc.newRuntime(userID, provider)
-			calls, err := srv.validateDealbreakers(ctx, userID, []scraper.Posting{p}, prof, newRuntime, srv.newAIBudget(ctx, userID, newRuntime), &callCap{max: 1}, noopEmit)
-			if err != nil || calls != 1 || provider.ValidateDealbreakersCalls != 1 {
-				t.Fatalf("runtime-version miss calls=%d provider-calls=%d err=%v, want 1/1/nil", calls, provider.ValidateDealbreakersCalls, err)
+			summary, err := srv.validateDealbreakers(ctx, userID, []scraper.Posting{p}, prof, newRuntime, srv.newAIBudget(ctx, userID, newRuntime), &callCap{max: 1}, noopEmit)
+			if err != nil || summary.ProviderCalls != 1 || provider.ValidateDealbreakersCalls != 1 {
+				t.Fatalf("runtime-version miss summary=%+v provider-calls=%d err=%v, want 1/1/nil", summary, provider.ValidateDealbreakersCalls, err)
 			}
 		})
 	}

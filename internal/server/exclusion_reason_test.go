@@ -192,14 +192,21 @@ func TestDailyAndArchiveRenderExclusionReasons(t *testing.T) {
 func TestRerateHintCoversPendingContextualValidation(t *testing.T) {
 	srv, _ := newTestServer(t, &fakeScraper{})
 	var out bytes.Buffer
-	if err := srv.tmpl.ExecuteTemplate(&out, "rerateButton", &rerateInfo{StaleCount: 2}); err != nil {
+	if err := srv.tmpl.ExecuteTemplate(&out, "rerateButton", &rerateInfo{
+		PendingCount:        3,
+		PendingContextCount: 2,
+		PendingScoreCount:   1,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	body := out.String()
+	if !strings.Contains(body, "AI 평가 ·3") {
+		t.Fatalf("rerate button = %s, want unique pending posting count", body)
+	}
 	if !strings.Contains(body, "AI 문맥 확인이 필요한 공고 2개") {
 		t.Fatalf("rerate hint = %s", body)
 	}
-	if strings.Contains(body, "프로필이 바뀐 공고") {
-		t.Fatalf("rerate hint kept stale-only wording: %s", body)
+	if !strings.Contains(body, "다시 평가할 공고 1개") {
+		t.Fatalf("rerate hint = %s, want separate Stage-2 pending count", body)
 	}
 }

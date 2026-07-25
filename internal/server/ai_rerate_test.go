@@ -547,7 +547,10 @@ func TestRerateButtonShowsStaleCount(t *testing.T) {
 		t.Fatal(err)
 	}
 	info := srv.buildRerateInfo(ctx, 1, runtime, prof, "today", b.Today)
-	if info == nil || info.StaleCount != 1 {
+	if info == nil ||
+		info.PendingCount != 1 ||
+		info.PendingContextCount != 0 ||
+		info.PendingScoreCount != 1 {
 		t.Fatalf("rerate info = %+v, want one stale row", info)
 	}
 }
@@ -668,6 +671,75 @@ func TestRerateDoneMessage(t *testing.T) {
 	got := rerateDoneMessage(rerateSummary{Analyzed: 3, Visible: 7, ProviderCalls: 3})
 	if !strings.Contains(got, "3/7") || !strings.Contains(got, "다시 눌러") {
 		t.Errorf("partial copy missing N/M or the press-again cue: %q", got)
+	}
+}
+
+func TestRerateDoneReportsNoContextProgress(t *testing.T) {
+	summary := rerateSummary{
+		Analyzed:               21,
+		Visible:                21,
+		ProviderCalls:          8,
+		ContextPendingBefore:   8,
+		ContextPendingAfter:    8,
+		ContextAttemptedChecks: 12,
+		ContextAcceptedChecks:  0,
+	}
+	if got := rerateDoneOutcome(summary); got != rerateOutcomeNoProgress {
+		t.Fatalf("outcome = %q, want %q", got, rerateOutcomeNoProgress)
+	}
+	if got := rerateDoneMessage(summary); got != "8개는 AI가 근거를 확인하지 못했어요. 지금 다시 눌러도 같은 결과일 수 있어요." {
+		t.Fatalf("message = %q", got)
+	}
+}
+
+func TestRerateDoneExplainsContextBlocker(t *testing.T) {
+	tests := []struct {
+		name    string
+		summary rerateSummary
+		want    string
+	}{
+		{
+			name: "provider",
+			summary: rerateSummary{
+				ContextPendingBefore:  8,
+				ContextPendingAfter:   8,
+				ContextFailureMessage: "AI 키를 확인해주세요.",
+			},
+			want: "AI 키를 확인해주세요. AI 문맥 확인 8개가 남았어요.",
+		},
+		{
+			name: "budget",
+			summary: rerateSummary{
+				ContextPendingBefore: 8,
+				ContextPendingAfter:  8,
+				ContextBudgetBlocked: true,
+			},
+			want: "오늘 AI 예산을 다 써서 8개를 확인하지 못했어요 — 프로필 설정에서 한도를 바꿀 수 있어요.",
+		},
+		{
+			name: "per-call cap",
+			summary: rerateSummary{
+				ContextPendingBefore:  8,
+				ContextPendingAfter:   8,
+				ContextCallCapBlocked: true,
+			},
+			want: "이번에는 AI 문맥 확인 8개가 남았어요. 더 보려면 다시 눌러주세요.",
+		},
+		{
+			name: "partial progress",
+			summary: rerateSummary{
+				ContextPendingBefore: 8,
+				ContextPendingAfter:  5,
+			},
+			want: "공고 3개의 AI 문맥을 확인했고 5개가 남았어요.",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rerateDoneMessage(tc.summary); got != tc.want {
+				t.Fatalf("message = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -7,7 +7,7 @@ Optional AI calls extract global eligibility facts, validate user-specific dealb
 context, and enrich score explanations. The deterministic scoring path remains complete when AI
 is disabled or unavailable.
 
-This document describes the implemented architecture as of 2026-07-24. Approved future work is
+This document describes the implemented architecture as of 2026-07-25. Approved future work is
 listed separately so it is not mistaken for current behavior.
 
 ## System at a glance
@@ -251,6 +251,13 @@ rerate also evaluates currently excluded candidates before rebuilding the eligib
 Profile save and startup rescoring are provider-free: they reuse caches and mark missing validation
 as pending instead of making surprise paid calls. Stage 1B and Stage 2 share the user's run budget
 and call cap.
+
+Each rerate records contextual postings pending before and after the run plus attempted, accepted,
+and unresolved checks. A successful provider response that produces no citation-gated validations
+ends as `no_progress`, not as a successful evaluation. The existing terminal rerate tracker carries
+the concise blocker message across the automatic browser reload. The UI reports pending contextual
+validation separately from stale Stage 2 scores while keeping one unique-posting count on the
+button.
 
 Scoring persists the exact decision in `ScoreResult.ExclusionReasons` inside
 `scores.breakdown_json`. Rendering therefore explains the score that actually caused exclusion

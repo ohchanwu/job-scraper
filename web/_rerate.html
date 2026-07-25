@@ -9,8 +9,8 @@
 */}}
 {{define "rerateButton"}}{{with .}}
 <div class="rerate-row">
-  <button id="rerate" type="button" class="btn-ghost{{if .StaleCount}} has-stale{{end}}" data-surface="{{.Surface}}">AI 평가{{if .StaleCount}} ·{{.StaleCount}}{{end}}</button>
-  <span class="rerate-hint">AI로 화면에 보이는 공고를 분석해요{{if .StaleCount}} · AI 문맥 확인이 필요한 공고 {{.StaleCount}}개{{end}}</span>
+  <button id="rerate" type="button" class="btn-ghost{{if .PendingCount}} has-stale{{end}}" data-surface="{{.Surface}}">AI 평가{{if .PendingCount}} ·{{.PendingCount}}{{end}}</button>
+  <span class="rerate-hint">AI로 화면에 보이는 공고를 분석해요{{if .PendingContextCount}} · AI 문맥 확인이 필요한 공고 {{.PendingContextCount}}개{{end}}{{if .PendingScoreCount}} · 다시 평가할 공고 {{.PendingScoreCount}}개{{end}}</span>
   {{if .Visible}}<span class="rerate-count{{if ge .Analyzed .Visible}} complete{{end}}" title="화면에 보이는 공고 {{.Visible}}개 중 {{.Analyzed}}개를 AI로 분석했어요. 토큰을 아끼려고 한 번에 일정 개수만 분석하고, 더 보려면 AI 평가를 다시 누르면 돼요.">AI 분석 {{.Analyzed}}/{{.Visible}}</span>{{end}}
 </div>
 <div class="rerate-feedback">

@@ -375,6 +375,21 @@ async function main() {
   const partialReload = makePage({ storage, state: initiating.history.state, navigationType: 'reload' });
   assert.equal(partialReload.text('rerate-status'), partialCopy);
 
+  const noProgressCopy = '8개는 AI가 근거를 확인하지 못했어요. 지금 다시 눌러도 같은 결과일 수 있어요.';
+  const noProgressStatus = {
+    ...doneStatus,
+    run_token: 'process-a-run-no-progress',
+    outcome: 'no_progress',
+    message: noProgressCopy
+  };
+  const noProgressOwner = makePage({ storage, state: initiating.history.state, navigationType: 'back_forward' });
+  noProgressOwner.queueStatus(noProgressStatus);
+  noProgressOwner.dispatchWindow('pageshow');
+  await flush();
+  assert.equal(noProgressOwner.location.reloads, 1);
+  const noProgressReload = makePage({ storage, state: initiating.history.state, navigationType: 'reload' });
+  assert.equal(noProgressReload.text('rerate-status'), noProgressCopy);
+
   const emptyCopy = '지금 화면에 분석할 공고가 없어요.';
   const emptyStatus = {
     ...doneStatus,
