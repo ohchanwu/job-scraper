@@ -82,13 +82,16 @@ func TestInjectionNoKeyInModelInput(t *testing.T) {
 
 func TestInjectionDealbreakerGateRejectsFabricatedEvidence(t *testing.T) {
 	sent, _, _ := ModelInput(scraperPostingFromJD(injectedJD))
-	raw := []byte(`{"checks":[{"candidate_id":"overtime","verdict":"applies","evidence":"야근 업무를 수행합니다"}]}`)
+	// The model cannot forge match provenance: the server owns the match, and
+	// this candidate has no valid server match for a phrase absent from the JD.
+	// An "applies" verdict therefore leaves the candidate unresolved.
+	raw := []byte(`{"checks":[{"candidate_id":"overtime","verdict":"applies","reason_code":"requirement","reason_evidence":"야근 업무를 수행합니다"}]}`)
 	got, err := parseDealbreakerValidations(raw, sent, []DealbreakerCandidate{{ID: "overtime", Phrase: "야근"}})
 	if err != nil {
 		t.Fatalf("parseDealbreakerValidations: %v", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("fabricated dealbreaker evidence survived: %+v", got)
+		t.Fatalf("a verdict without a valid server match survived: %+v", got)
 	}
 }
 

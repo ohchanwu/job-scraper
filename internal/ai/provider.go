@@ -70,11 +70,31 @@ const (
 	DealbreakerUncertain     DealbreakerVerdict = "uncertain"
 )
 
-// DealbreakerValidation is one independently validated contextual judgment.
+// DealbreakerReasonCode classifies why a verdict holds. Each verdict admits a
+// fixed set of codes (see reasonCodesByVerdict); an incompatible pair is
+// discarded. The reason is the model's own responsibility — the server never
+// derives it — and it never replaces the deterministic server match.
+type DealbreakerReasonCode string
+
+const (
+	DealbreakerReasonRequirement          DealbreakerReasonCode = "requirement"
+	DealbreakerReasonResponsibility       DealbreakerReasonCode = "responsibility"
+	DealbreakerReasonExpectedCondition    DealbreakerReasonCode = "expected_condition"
+	DealbreakerReasonBenefitOrEligibility DealbreakerReasonCode = "benefit_or_eligibility"
+	DealbreakerReasonExplicitlyNegated    DealbreakerReasonCode = "explicitly_negated"
+	DealbreakerReasonIncidentalOrMetadata DealbreakerReasonCode = "incidental_or_metadata"
+	DealbreakerReasonInsufficientContext  DealbreakerReasonCode = "insufficient_context"
+)
+
+// DealbreakerValidation is one independently validated contextual judgment. The
+// server-owned match (carried on the candidate) is the provenance; this struct
+// holds only the model's verdict, its compatible reason code, and optional
+// grounded reason evidence (empty when ungrounded, overlong, or uncertain).
 type DealbreakerValidation struct {
-	CandidateID string
-	Verdict     DealbreakerVerdict
-	Evidence    string
+	CandidateID    string
+	Verdict        DealbreakerVerdict
+	ReasonCode     DealbreakerReasonCode
+	ReasonEvidence string
 }
 
 // Extraction is the validated Stage-1 result, mirroring the ai_extractions

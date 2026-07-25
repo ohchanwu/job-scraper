@@ -8,7 +8,7 @@ import (
 
 const (
 	extractionContractRevision = "1"
-	DealbreakerPromptVersion   = "1"
+	DealbreakerPromptVersion   = "2"
 	ScorePromptVersion         = "1"
 )
 

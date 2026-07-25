@@ -13,7 +13,7 @@ func TestHTTPProviderValidateDealbreakers(t *testing.T) {
 	var calls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		io.WriteString(w, `{"content":[{"type":"text","text":"{\"checks\":[{\"candidate_id\":\"research\",\"verdict\":\"not_applicable\",\"evidence\":\"리서치 아님\"}]}"}],"usage":{"input_tokens":12,"output_tokens":6}}`)
+		io.WriteString(w, `{"content":[{"type":"text","text":"{\"checks\":[{\"candidate_id\":\"research\",\"verdict\":\"not_applicable\",\"reason_code\":\"explicitly_negated\",\"reason_evidence\":\"리서치 아님\"}]}"}],"usage":{"input_tokens":12,"output_tokens":6}}`)
 	}))
 	defer srv.Close()
 
@@ -21,7 +21,7 @@ func TestHTTPProviderValidateDealbreakers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newHTTPProvider: %v", err)
 	}
-	got, usage, err := p.ValidateDealbreakers(context.Background(), "리서치 아님", []DealbreakerCandidate{{ID: "research", Phrase: "리서치"}})
+	got, usage, err := p.ValidateDealbreakers(context.Background(), "리서치 아님", []DealbreakerCandidate{{ID: "research", Phrase: "리서치", Match: DealbreakerMatch{Evidence: "리서치 아님", Source: DealbreakerMatchDescription}}})
 	if err != nil {
 		t.Fatalf("ValidateDealbreakers: %v", err)
 	}
