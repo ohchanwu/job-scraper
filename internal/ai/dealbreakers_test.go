@@ -233,6 +233,24 @@ func TestParseDealbreakerValidationsStructurallyInvalidRowKeepsSiblings(t *testi
 	}
 }
 
+func TestParseDealbreakerValidationsMalformedDuplicateVoidsValidTwin(t *testing.T) {
+	// research appears twice — one row structurally malformed. candidate_id must
+	// still count as appearing more than once, so BOTH are unresolved; an
+	// unrelated valid sibling is unaffected.
+	raw := []byte(`{"checks":[
+		{"candidate_id":"research","verdict":"applies","reason_code":"requirement","reason_evidence":""},
+		{"candidate_id":"research","verdict":"applies","reason_code":"requirement","reason_evidence":123},
+		{"candidate_id":"research-duties","verdict":"applies","reason_code":"requirement","reason_evidence":""}
+	]}`)
+	got, err := parseDealbreakerValidations(raw, validationModelText, dealbreakerCandidates[:2])
+	if err != nil {
+		t.Fatalf("parseDealbreakerValidations: %v", err)
+	}
+	if len(got) != 1 || got[0].CandidateID != "research-duties" {
+		t.Fatalf("a malformed duplicate must void its valid twin while the sibling survives: %+v", got)
+	}
+}
+
 func TestParseDealbreakerValidationsChecksNotArrayIsOperationError(t *testing.T) {
 	if _, err := parseDealbreakerValidations([]byte(`{"checks":{"candidate_id":"research"}}`), validationModelText, dealbreakerCandidates[:1]); err == nil {
 		t.Fatal("a checks value that is not an array must be an operation-level error")

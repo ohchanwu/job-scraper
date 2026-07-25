@@ -131,12 +131,23 @@ func parseDealbreakerValidations(raw []byte, modelText string, candidates []Deal
 	}
 	// Decode each row independently: one structurally invalid row (e.g. a
 	// non-string reason_evidence) is dropped and left unresolved, never
-	// rejecting the whole operation and losing its valid siblings.
+	// rejecting the whole operation and losing its valid siblings. But its
+	// candidate_id is still counted from a minimal decode, so a malformed
+	// duplicate still voids its valid twin (candidate_id appears exactly once).
 	checks := make([]dealbreakerCheckWire, 0, len(rawRows))
+	counts := make(map[string]int, len(rawRows))
 	for _, rawRow := range rawRows {
+		var idOnly struct {
+			CandidateID string `json:"candidate_id"`
+		}
+		if err := json.Unmarshal(rawRow, &idOnly); err != nil {
+			continue // not object-like: drop, and do not count
+		}
+		counts[idOnly.CandidateID]++
+
 		var check dealbreakerCheckWire
 		if err := json.Unmarshal(rawRow, &check); err != nil {
-			continue
+			continue // counted above; left unresolved for validation
 		}
 		checks = append(checks, check)
 	}
@@ -146,10 +157,6 @@ func parseDealbreakerValidations(raw []byte, modelText string, candidates []Deal
 		if candidate.ID != "" && len(tokenmatch.Tokenize(candidate.Phrase)) > 0 {
 			known[candidate.ID] = candidate
 		}
-	}
-	counts := make(map[string]int, len(checks))
-	for _, check := range checks {
-		counts[check.CandidateID]++
 	}
 	normalizedText := norm.NFC.String(modelText)
 	valid := make([]DealbreakerValidation, 0, len(checks))
