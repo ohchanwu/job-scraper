@@ -1018,7 +1018,7 @@ No Git commit is required.
 - Consumes: verified `jobcron-admin`, reviewed HCL, and private bucket name
 - Produces: one exact saved plan approved for bootstrap apply
 
-- [ ] **Step 1: Create the ignored private values file**
+- [x] **Step 1: Create the ignored private values file**
 
 ```bash
 cp infra/terraform/bootstrap/terraform.tfvars.example \
@@ -1034,7 +1034,7 @@ Mayor then confirms ignore status:
 git check-ignore infra/terraform/bootstrap/terraform.tfvars
 ```
 
-- [ ] **Step 2: Inventory the GitHub OIDC provider privately**
+- [x] **Step 2: Inventory the GitHub OIDC provider privately**
 
 Run without printing an ARN:
 
@@ -1103,7 +1103,7 @@ unset JOBCRON_GITHUB_OIDC_COUNT JOBCRON_GITHUB_OIDC_ARN
 
 Stop when more than one GitHub provider exists.
 
-- [ ] **Step 3: Initialize local bootstrap state**
+- [x] **Step 3: Initialize local bootstrap state**
 
 ```bash
 terraform -chdir=infra/terraform/bootstrap init -input=false
@@ -1111,7 +1111,7 @@ terraform -chdir=infra/terraform/bootstrap init -input=false
 
 Expected: local backend initialization and the already committed provider lock.
 
-- [ ] **Step 4: Create the exact saved plan without publishing it**
+- [x] **Step 4: Create the exact saved plan without publishing it**
 
 ```bash
 terraform -chdir=infra/terraform/bootstrap plan \
@@ -1122,7 +1122,7 @@ terraform -chdir=infra/terraform/bootstrap plan \
 Do not redirect, upload, commit, or paste the plan. Review it in the human's
 private terminal.
 
-- [ ] **Step 5: Present the saved plan for human approval**
+- [x] **Step 5: Present the saved plan for human approval**
 
 Mayor privately renders and reviews the plan, explains its action summary and
 stop conditions, and presents it to the human. The human approves only when it
@@ -1139,7 +1139,7 @@ contains:
 Stop if the plan contains any replacement, destruction, existing network or
 compute resource, broad edge permissions, access keys, or unexpected IAM trust.
 
-- [ ] **Step 6: Record the human's approval privately**
+- [x] **Step 6: Record the human's approval privately**
 
 Mayor records the plan file SHA-256 and the human's explicit approval:
 
