@@ -529,6 +529,14 @@ gitleaks git --staged --redact --no-banner
 git commit -m "infra: define protected Terraform state"
 ```
 
+**Local completion evidence:** Task 2 was initially implemented at `3ab6ff1`.
+The final whole-range review found false-pass checks around public access,
+destroy protection, TLS policy semantics, and input validation. Fixes
+`8b95131` and `e1159a0` bound those checks to the named resources and exact
+rendered ARN set, added constrained S3/GitHub input validation, and added
+negative native tests. The scoped independent re-review marked every finding
+addressed. Nothing was pushed and no AWS operation ran.
+
 ### Task 3: Implement GitHub OIDC Trust And State-Only Roles
 
 **Owner:** Mayor/Gas Town
@@ -1583,11 +1591,14 @@ git commit -m "ci: add Terraform plan-only checks"
 **Local completion evidence:** Task 7 was implemented at `bf78f91`, then an
 independent review found two Important false-pass cases in the workflow guards.
 Fix `e491f37` added positive full-SHA validation, flag-aware apply detection,
-and executable mutation fixtures. The scoped independent re-review marked both
-findings addressed and found no new Critical or Important issue. Native ARM64
-Terraform 1.15.8, Go build/test/vet/format, YAML parsing, diff checks, and
-exact-range Gitleaks passed. Nothing was pushed; no workflow or AWS operation
-ran.
+and executable mutation fixtures. The final whole-range review then found that
+the plan-only gate still allowed other mutating Terraform subcommands.
+`8b95131` replaced that blacklist with an exact `init`/`plan` allowlist and
+expanded mutation coverage for state commands, security settings, and action
+pins. The scoped independent re-review marked every Task 7 finding addressed.
+Native ARM64 Terraform 1.15.8, Go build/test/vet/format, YAML parsing, diff
+checks, and exact-range Gitleaks passed. Nothing was pushed; no workflow or AWS
+operation ran.
 
 ### Task 8: Human GitHub Environment And OIDC Verification
 
