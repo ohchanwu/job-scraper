@@ -1,6 +1,6 @@
 # Terraform-First Production Launch Implementation Roadmap
 
-**Status:** Active; Slice 1 is planned, Slices 2 through 6 await their own plans
+**Status:** Active; Slice 1 is complete and Slice 2 is ready for plan authoring
 
 **Recorded:** 2026-07-26
 
@@ -67,7 +67,9 @@ state-changing task may run before its dependency passes its exit checkpoint.
 
 **Plan:** [Slice 1 implementation plan][slice-1-plan]
 
-**Status:** Ready for review
+**Verification:** [Slice 1 verification][slice-1-verification]
+
+**Status:** Complete at implementation baseline `fa4cd818129f`
 
 Delivers:
 
@@ -82,7 +84,8 @@ Delivers:
 
 ### Slice 2: Canonical VPC And EIP Adoption
 
-**Status:** Plan only after Slice 1 state recovery and OIDC checks pass
+**Status:** Ready for plan authoring; authenticated inventory and human resource
+selection remain required before adoption
 
 Will inventory the existing network privately, select the canonical VPC, and
 adopt only the approved VPC, public networking, and EIP without replacement or
@@ -142,6 +145,8 @@ the rollback window.
 [human-spec]:
   ../specs/260726-terraform-first-production-launch-human-blocked-steps.md
 [slice-1-plan]:
-  260726-terraform-slice-1-identity-state-bootstrap-ci.md
+  ../archive/2026-07-26-terraform-slice-1/260726-terraform-slice-1-identity-state-bootstrap-ci.md
+[slice-1-verification]:
+  ../archive/2026-07-26-terraform-slice-1/260726-terraform-slice-1-verification.md
 [terraform-spec]:
   ../specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md

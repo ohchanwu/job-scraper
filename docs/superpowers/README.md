@@ -9,11 +9,13 @@ decision records needed for the current task.
 - [Terraform AWS foundation and Cloudflare ingress automation][terraform-aws-foundation]
 - [Terraform-first production launch human-blocked steps][terraform-launch-human-steps]
 - [Terraform-first production launch roadmap][terraform-launch-roadmap]
-- [Terraform Slice 1: identity, state bootstrap, and CI][terraform-slice-1-plan]
+- [Terraform Slice 2: canonical VPC and EIP adoption planning][terraform-slice-2-roadmap]
 - [PostgreSQL local convergence and per-user AI credentials](specs/260714-postgresql-local-convergence-user-ai-credentials.md)
 
 ## Recently Archived
 
+- [Terraform Slice 1: identity, state bootstrap, and CI][terraform-slice-1-plan]
+- [Terraform Slice 1 verification][terraform-slice-1-verification]
 - [Superseded first production human steps][archived-first-production-human-steps]
 - [PostgreSQL account-mutation clock source][account-mutation-clock-plan]
 - [Contextual dealbreaker match-provenance contract][dealbreaker-match-provenance-spec]
@@ -95,8 +97,12 @@ decision records needed for the current task.
   specs/260726-terraform-first-production-launch-human-blocked-steps.md
 [terraform-launch-roadmap]:
   plans/260726-terraform-first-production-launch-roadmap.md
+[terraform-slice-2-roadmap]:
+  plans/260726-terraform-first-production-launch-roadmap.md#slice-2-canonical-vpc-and-eip-adoption
 [terraform-slice-1-plan]:
-  plans/260726-terraform-slice-1-identity-state-bootstrap-ci.md
+  archive/2026-07-26-terraform-slice-1/260726-terraform-slice-1-identity-state-bootstrap-ci.md
+[terraform-slice-1-verification]:
+  archive/2026-07-26-terraform-slice-1/260726-terraform-slice-1-verification.md
 [archived-first-production-human-steps]:
   archive/2026-07-26-first-production-launch-human-blocked-steps/260716-first-production-launch-human-blocked-steps.md
 [multi-user-account-spec]:

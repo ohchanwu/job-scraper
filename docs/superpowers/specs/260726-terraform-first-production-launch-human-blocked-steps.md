@@ -48,10 +48,13 @@ As recorded in the Terraform infrastructure specification:
 
 - the existing EC2 and RDS resources are disconnected and are not a functional
   production stack;
-- bootstrap, production, and edge Terraform roots plus their OIDC role
-  configurations now exist locally, but no remote state, state locking, applied
-  cloud roles, replacement host, or automated Cloudflare prefix-list path
-  exists yet;
+- bootstrap, production, and edge Terraform roots now use separate protected
+  state keys; the bootstrap state is remote, native locking and version
+  recovery are verified, and the applied production and edge OIDC roles remain
+  state-only;
+- static Terraform CI and the protected production plan-only workflow are
+  verified, but no replacement host, private RDS tier, canonical-network
+  adoption, or automated Cloudflare prefix-list path exists yet;
 - the old EC2, old VPC, and old RDS are retained rollback resources, not the
   target architecture;
 - the replacement architecture uses a canonical VPC, private PostgreSQL RDS,
@@ -106,15 +109,15 @@ access-controlled operator log, not in this public file.
 
 ### Identity And Approval
 
-- [ ] Authenticated `jobcron-admin` AWS CLI profile backed by IAM Identity
+- [x] Authenticated `jobcron-admin` AWS CLI profile backed by IAM Identity
       Center and MFA
-- [ ] Expected AWS account, role, and region, checked without publishing their
+- [x] Expected AWS account, role, and region, checked without publishing their
       exact values
 - [ ] Cloudflare account and zone access
 - [ ] OCI registry repository and credentials for image publication and host
       pulls
 - [ ] Approval limits for infrastructure spending
-- [ ] Access-controlled operator-log location
+- [x] Access-controlled operator-log location
 - [ ] Private rollback decision owner and rollback-window end condition
 
 ### Application And Data
@@ -152,16 +155,16 @@ earlier slice.
 
 Human actions and approvals:
 
-- [ ] Configure and authenticate `jobcron-admin` through IAM Identity Center.
-- [ ] Confirm the caller identity, expected role, and expected region without
+- [x] Configure and authenticate `jobcron-admin` through IAM Identity Center.
+- [x] Confirm the caller identity, expected role, and expected region without
       publishing exact values.
-- [ ] Review and approve the bootstrap resource names, access boundaries,
+- [x] Review and approve the bootstrap resource names, access boundaries,
       encryption, versioning, and lock strategy.
-- [ ] Review and approve the exact local bootstrap plan before its apply.
-- [ ] Confirm state migrated to the protected S3 backend and test recovery from
+- [x] Review and approve the exact local bootstrap plan before its apply.
+- [x] Confirm state migrated to the protected S3 backend and test recovery from
       an object version.
-- [ ] Review the production and edge GitHub OIDC trust boundaries.
-- [ ] Confirm CI is plan-only for production and that no long-lived AWS access
+- [x] Review the production and edge GitHub OIDC trust boundaries.
+- [x] Confirm CI is plan-only for production and that no long-lived AWS access
       keys were added.
 
 Exit evidence:

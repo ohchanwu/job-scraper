@@ -404,10 +404,20 @@ Local development runs the same application and PostgreSQL storage contract. Com
 the local database lifecycle; the application remains a normal host process unless the operator
 explicitly chooses another setup.
 
-The Terraform bootstrap root owns the protected S3 state bucket and GitHub's OIDC provider. It
-exposes separate production and edge roles whose trust policies require the matching GitHub
-environment. These roles can read and write only their approved state and lock-file keys;
-`DeleteObject` is limited to lock files. They intentionally have no application-deployment
+Terraform has three ownership roots. `bootstrap` owns the protected S3 state bucket, GitHub's OIDC
+provider, and the automation roles. `production` owns future AWS application infrastructure, while
+`edge` owns future Cloudflare ingress automation; neither future root currently declares
+application, network, database, or edge resources.
+
+The bootstrap root was first applied with local state and then migrated into the protected S3
+backend. All roots use separate state keys and native S3 lock files. Bucket versioning supports
+recovery from an earlier state-object version, and that retrieval path has been rehearsed without
+replacing live state. Human administration uses the `jobcron-admin` IAM Identity Center profile
+rather than long-lived access keys.
+
+The bootstrap root exposes separate production and edge roles whose trust policies require the
+matching GitHub environment. These roles can read and write only their approved state and lock-file
+keys; `DeleteObject` is limited to lock files. They intentionally have no application-deployment
 permissions.
 
 Static Terraform CI runs without AWS credentials. A separate manually dispatched production

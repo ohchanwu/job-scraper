@@ -1650,12 +1650,12 @@ Human creates or reviews the `edge` environment:
 
 The edge role remains state-only until Slice 5.
 
-- [ ] **Step 3: Publish only when the human authorizes it**
+- [x] **Step 3: Publish only when the human authorizes it**
 
 The repository rule forbids autonomous pushes. The human reviews the local
 commits and decides when to push them so GitHub can run the workflows.
 
-- [ ] **Step 4: Run static CI**
+- [x] **Step 4: Run static CI**
 
 Expected:
 
@@ -1663,7 +1663,7 @@ Expected:
 - format, validate, and Terraform tests pass; and
 - no AWS credential is requested.
 
-- [ ] **Step 5: Manually dispatch the production plan**
+- [x] **Step 5: Manually dispatch the production plan**
 
 Human approves the protected environment run.
 
@@ -1681,7 +1681,7 @@ Terraform production plan: changes detected; review locally
 
 No plan body, ARN, account ID, bucket name, or state content appears in logs.
 
-- [ ] **Step 6: Verify the permission ceiling**
+- [x] **Step 6: Verify the permission ceiling**
 
 Confirm through a reviewed IAM policy inspection that:
 
@@ -1718,7 +1718,7 @@ represented
 - Produces: sanitized architecture, completion evidence, and the Slice 2 planning
   handoff
 
-- [ ] **Step 1: Update implemented architecture**
+- [x] **Step 1: Update implemented architecture**
 
 Document:
 
@@ -1732,12 +1732,12 @@ Document:
 
 Do not describe future VPC/RDS/EC2 resources as implemented.
 
-- [ ] **Step 2: Update the human checkpoint**
+- [x] **Step 2: Update the human checkpoint**
 
 Mark Slice 1 human inputs/checkpoints complete only when their private evidence
 exists. Preserve the user's completed signup-code and Anthropic-key OF notes.
 
-- [ ] **Step 3: Write sanitized verification evidence**
+- [x] **Step 3: Write sanitized verification evidence**
 
 Record only:
 
@@ -1750,7 +1750,7 @@ Record only:
 - workflow names and safe result states; and
 - the exact implementation commit SHA.
 
-- [ ] **Step 4: Run the complete local gate**
+- [x] **Step 4: Run the complete local gate**
 
 ```bash
 ./scripts/check-terraform.sh
@@ -1761,18 +1761,18 @@ gitleaks git --redact --no-banner --log-opts="-1"
 Manually inspect the complete tracked diff for identifiers, credentials, private
 topology, or raw plan output.
 
-- [ ] **Step 5: Verify Slice 1 completion line by line**
+- [x] **Step 5: Verify Slice 1 completion line by line**
 
 Re-read the Slice Completion Contract at the top of this plan. Stop if any item
 cannot be tied to fresh evidence.
 
-- [ ] **Step 6: Archive Slice 1 and activate Slice 2 planning**
+- [x] **Step 6: Archive Slice 1 and activate Slice 2 planning**
 
 Move this completed plan and its verification into a dated archive directory.
 Update the roadmap and Superpowers index so only the Terraform architecture,
 human launch spec, roadmap, and next active slice remain in Active Work.
 
-- [ ] **Step 7: Commit the completion record**
+- [x] **Step 7: Commit the completion record**
 
 ```bash
 git add \
@@ -1833,4 +1833,4 @@ be rotated or renamed before rerunning.
 - [GitHub Actions OIDC for AWS](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws)
 - [Pinning GitHub Actions to full commit SHAs](https://docs.github.com/en/actions/how-tos/administering-github-actions/managing-custom-actions)
 
-[roadmap]: 260726-terraform-first-production-launch-roadmap.md
+[roadmap]: ../../plans/260726-terraform-first-production-launch-roadmap.md
