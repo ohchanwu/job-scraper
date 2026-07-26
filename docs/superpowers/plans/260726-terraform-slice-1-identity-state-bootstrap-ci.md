@@ -1371,7 +1371,7 @@ Task 8
   change detector with no apply path; runtime credentials and protected
   settings arrive later in Task 8
 
-- [ ] **Step 1: Pin the reviewed action commits**
+- [x] **Step 1: Pin the reviewed action commits**
 
 Before implementation, use `git ls-remote` against each official repository to
 confirm each major tag still resolves to the public Git commit pinned in the
@@ -1397,7 +1397,7 @@ test "$(
 
 No output means all three provenance checks passed.
 
-- [ ] **Step 2: Create public-safe backend examples**
+- [x] **Step 2: Create public-safe backend examples**
 
 Create one example per future root:
 
@@ -1409,7 +1409,7 @@ region = "ap-northeast-2"
 The production and edge keys remain tracked in their respective `backend.tf`
 files.
 
-- [ ] **Step 3: Create static Terraform CI**
+- [x] **Step 3: Create static Terraform CI**
 
 Create `terraform-check.yml`:
 
@@ -1444,7 +1444,7 @@ jobs:
 
 It must not request an OIDC token or AWS credential.
 
-- [ ] **Step 4: Create the manual production plan-only workflow**
+- [x] **Step 4: Create the manual production plan-only workflow**
 
 Create `terraform-production-plan.yml`:
 
@@ -1520,33 +1520,28 @@ Do not upload `production.tfplan` or the raw log.
 On plan failure, instruct the operator to rerun locally for private diagnostics.
 Do not print the raw error file because provider errors may contain identifiers.
 
-- [ ] **Step 5: Add workflow contract checks**
+- [x] **Step 5: Add workflow contract checks**
 
-Extend `scripts/check-terraform.sh` to fail unless:
+The final implementation is stricter than the original illustrative
+blacklists. `scripts/check-terraform.sh` now:
 
-```bash
-grep -Fq 'id-token: write' \
-  "$repo_root/.github/workflows/terraform-production-plan.yml"
-grep -Fq 'mask-aws-account-id: true' \
-  "$repo_root/.github/workflows/terraform-production-plan.yml"
+- requires OIDC permission and AWS account-ID masking;
+- rejects `apply` after optional Terraform global flags and variable
+  whitespace;
+- positively requires every step-level or job-level remote `uses:` ref to end
+  in exactly 40 lowercase hexadecimal characters;
+- requires the reviewed checkout, setup-Terraform, and AWS-credentials pins at
+  their exact expected occurrence counts; and
+- runs `scripts/check-terraform-workflows_test.sh`, whose isolated fixtures
+  prove the safe baseline passes and the four reviewed bypasses fail for the
+  intended reason.
 
-if grep -Fq 'terraform apply' \
-  "$repo_root/.github/workflows/terraform-production-plan.yml"; then
-  printf 'production workflow must remain plan-only\n' >&2
-  exit 1
-fi
-
-if grep -Eq 'uses: [^@]+@(v[0-9]+|main|master)$' \
-  "$repo_root/.github/workflows/"terraform-*.yml; then
-  printf 'Terraform workflows must pin actions by full commit SHA\n' >&2
-  exit 1
-fi
-```
-
-- [ ] **Step 6: Verify locally**
+- [x] **Step 6: Verify locally**
 
 ```bash
 bash -n scripts/check-terraform.sh
+bash -n scripts/check-terraform-workflows_test.sh
+./scripts/check-terraform-workflows_test.sh
 ./scripts/check-terraform.sh
 git diff --check
 ```
@@ -1554,7 +1549,7 @@ git diff --check
 Expected: static checks pass and the workflow contract rejects any apply command
 or floating action tag.
 
-- [ ] **Step 7: Commit the automation**
+- [x] **Step 7: Commit the automation**
 
 ```bash
 git add \
@@ -1562,11 +1557,22 @@ git add \
   .github/workflows/terraform-production-plan.yml \
   infra/terraform/production/backend.example.hcl \
   infra/terraform/edge/backend.example.hcl \
-  scripts/check-terraform.sh
+  scripts/check-terraform.sh \
+  scripts/check-terraform-workflows_test.sh \
+  docs/architecture.md
 git diff --cached --check
 gitleaks git --staged --redact --no-banner
 git commit -m "ci: add Terraform plan-only checks"
 ```
+
+**Local completion evidence:** Task 7 was implemented at `bf78f91`, then an
+independent review found two Important false-pass cases in the workflow guards.
+Fix `e491f37` added positive full-SHA validation, flag-aware apply detection,
+and executable mutation fixtures. The scoped independent re-review marked both
+findings addressed and found no new Critical or Important issue. Native ARM64
+Terraform 1.15.8, Go build/test/vet/format, YAML parsing, diff checks, and
+exact-range Gitleaks passed. Nothing was pushed; no workflow or AWS operation
+ran.
 
 ### Task 8: Human GitHub Environment And OIDC Verification
 
