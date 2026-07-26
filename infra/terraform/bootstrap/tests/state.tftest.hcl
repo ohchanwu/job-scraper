@@ -18,7 +18,7 @@ run "state_contract" {
   }
 
   assert {
-    condition     = aws_s3_bucket_server_side_encryption_configuration.state.rule[0].apply_server_side_encryption_by_default[0].sse_algorithm == "AES256"
+    condition     = one(aws_s3_bucket_server_side_encryption_configuration.state.rule).apply_server_side_encryption_by_default[0].sse_algorithm == "AES256"
     error_message = "State bucket must enable default encryption."
   }
 }
