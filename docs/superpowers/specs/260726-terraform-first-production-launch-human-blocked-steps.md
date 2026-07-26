@@ -122,12 +122,14 @@ access-controlled operator log, not in this public file.
 - [ ] Approved release commit SHA
 - [ ] Immutable `linux/arm64` image reference and digest
 - [ ] Owner identity and password
-- [ ] Cohort signup access code for `JOBCRON_SIGNUP_ACCESS_CODE`
+- [x] Cohort signup access code for `JOBCRON_SIGNUP_ACCESS_CODE`
+  - **OF** already exists
 - [ ] Sponsor user ID for `JOBCRON_STAGE1_SPONSOR_USER_ID`
 - [ ] Production session secret
 - [ ] Credential-encryption master key, plus a separately stored recovery copy
 - [ ] Immutable SQLite snapshot with its matching durable `-wal` file
-- [ ] Human-approved provider credentials for the minimal paid AI checks
+- [x] Human-approved provider credentials for the minimal paid AI checks
+  - **OF** use the existing Anthropic API key
 
 ### Infrastructure And Edge
 
@@ -408,7 +410,5 @@ This human-blocked specification is complete only when:
 - Storing real operational values in tracked documentation
 - Treating this checklist as authorization to apply or cut over
 
-[archived-spec]:
-  ../archive/2026-07-26-first-production-launch-human-blocked-steps/260716-first-production-launch-human-blocked-steps.md
-[terraform-spec]:
-  260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md
+[archived-spec]: ../archive/2026-07-26-first-production-launch-human-blocked-steps/260716-first-production-launch-human-blocked-steps.md
+[terraform-spec]: 260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md

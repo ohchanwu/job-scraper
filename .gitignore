@@ -28,6 +28,7 @@ deploy/demo/.env
 
 # Claude Code local config (settings, session state, skills)
 /.claude/
+/.beads/
 
 # Playwright MCP screenshots (Tier C UI verification runs)
 /.playwright-mcp/
