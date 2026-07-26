@@ -58,6 +58,31 @@ Gitleaks.
   this path is ignored and must use mode `600`.
 - Commit locally at meaningful checkpoints. Never push or create a pull request.
 
+## Ownership And Execution Order
+
+**Mayor/Gas Town owns:** tracked implementation, local private-file
+preparation, read-only inventory, CLI execution, saved-plan generation, tests,
+local commits, approved Terraform applies, state migration, verification, and
+documentation.
+
+**Human owns only:** private Identity Center enrollment and MFA, confirmation of
+private production inputs, approval of saved plans immediately before mutation,
+GitHub protected-environment settings, review of local commits before
+publication, and protected-environment workflow approvals.
+
+An instruction that says “human approves” does not mean the human types the
+following command. Mayor presents the decision and expected effects; after the
+human approves, Mayor runs the command and records sanitized evidence.
+
+Execute the slice in two phases:
+
+1. **Autonomous local batch now:** Tasks 1, 2, 3, and 7, in that order. These
+   tasks create only tracked files, tests, and local commits. Task 7 may be
+   implemented before Tasks 4–6; its remote workflow cannot run until the later
+   identity and environment gates exist.
+2. **Human-gated continuation:** Task 4, then Tasks 5, 6, 8, and 9. Mayor
+   resumes execution after each required identity action or explicit approval.
+
 ## Educational Model
 
 **Terraform root:** a directory with its own configuration and state. The three
@@ -101,6 +126,12 @@ Slice 1 is complete only when:
 ---
 
 ### Task 1: Lock The Toolchain And Root Ownership
+
+**Owner:** Mayor/Gas Town
+
+**Human action:** None
+
+**Execution:** Autonomous local batch
 
 **Files:**
 
@@ -248,6 +279,12 @@ git commit -m "infra: establish Terraform root contracts"
 ```
 
 ### Task 2: Implement The Protected State Bucket
+
+**Owner:** Mayor/Gas Town
+
+**Human action:** None
+
+**Execution:** Autonomous local batch after Task 1
 
 **Files:**
 
@@ -481,6 +518,12 @@ git commit -m "infra: define protected Terraform state"
 ```
 
 ### Task 3: Implement GitHub OIDC Trust And State-Only Roles
+
+**Owner:** Mayor/Gas Town
+
+**Human action:** None
+
+**Execution:** Autonomous local batch after Task 2
 
 **Files:**
 
@@ -772,6 +815,13 @@ git commit -m "infra: define Terraform OIDC boundaries"
 
 ### Task 4: Human Identity Center Configuration And Value-Blind Preflight
 
+**Owner:** Human for enrollment, private selections, and MFA; Mayor assists with
+value-blind verification
+
+**Human action:** Required; this is the first genuine human gate
+
+**Execution:** Stop the autonomous batch here
+
 **Files:**
 
 - Private only: `~/.aws/config`
@@ -901,6 +951,12 @@ No Git commit is required.
 
 ### Task 5: Create And Review The Local Bootstrap Plan
 
+**Owner:** Mayor/Gas Town
+
+**Human action:** Confirm private inputs and approve or reject the saved plan
+
+**Execution:** Mayor resumes after Task 4 succeeds
+
 **Files:**
 
 - Private: `infra/terraform/bootstrap/terraform.tfvars`
@@ -922,7 +978,9 @@ cp infra/terraform/bootstrap/terraform.tfvars.example \
 chmod 600 infra/terraform/bootstrap/terraform.tfvars
 ```
 
-Edit the bucket name privately. Confirm ignore status:
+Mayor generates a private bucket-name candidate and writes it to the ignored
+file. The human confirms or replaces that value before any plan is approved.
+Mayor then confirms ignore status:
 
 ```bash
 git check-ignore infra/terraform/bootstrap/terraform.tfvars
@@ -1016,9 +1074,11 @@ terraform -chdir=infra/terraform/bootstrap plan \
 Do not redirect, upload, commit, or paste the plan. Review it in the human's
 private terminal.
 
-- [ ] **Step 5: Human plan review**
+- [ ] **Step 5: Present the saved plan for human approval**
 
-The human verifies that the plan contains only:
+Mayor privately renders and reviews the plan, explains its action summary and
+stop conditions, and presents it to the human. The human approves only when it
+contains:
 
 - one state bucket;
 - its public-access block, versioning, AES256 default encryption, and TLS-only
@@ -1031,9 +1091,9 @@ The human verifies that the plan contains only:
 Stop if the plan contains any replacement, destruction, existing network or
 compute resource, broad edge permissions, access keys, or unexpected IAM trust.
 
-- [ ] **Step 6: Record approval privately**
+- [ ] **Step 6: Record the human's approval privately**
 
-The human records the plan file SHA-256 and explicit approval:
+Mayor records the plan file SHA-256 and the human's explicit approval:
 
 ```bash
 shasum -a 256 infra/terraform/bootstrap/slice1-bootstrap.tfplan
@@ -1042,6 +1102,13 @@ shasum -a 256 infra/terraform/bootstrap/slice1-bootstrap.tfplan
 The hash is private operational evidence and is not committed.
 
 ### Task 6: Apply Bootstrap And Migrate State
+
+**Owner:** Mayor/Gas Town
+
+**Human action:** Approve the exact saved apply, backend migration, and
+refresh-only apply at their stated checkpoints
+
+**Execution:** Mayor runs every command after approval
 
 **Files:**
 
@@ -1254,6 +1321,13 @@ unset AWS_PROFILE
 
 ### Task 7: Add Static CI And Production Plan-Only Automation
 
+**Owner:** Mayor/Gas Town
+
+**Human action:** None during local implementation
+
+**Execution:** Autonomous local batch after Task 3; remote execution waits for
+Task 8
+
 **Files:**
 
 - Create: `.github/workflows/terraform-check.yml`
@@ -1263,10 +1337,11 @@ unset AWS_PROFILE
 
 **Interfaces:**
 
-- Consumes: committed roots, provider locks, production role, and protected
-  environment settings
+- Consumes: committed roots, provider locks, and the tracked production-role
+  trust contract from Task 3
 - Produces: public-safe static checks and a manually dispatched production
-  change detector with no apply path
+  change detector with no apply path; runtime credentials and protected
+  settings arrive later in Task 8
 
 - [ ] **Step 1: Pin the reviewed action commits**
 
@@ -1467,6 +1542,13 @@ git commit -m "ci: add Terraform plan-only checks"
 
 ### Task 8: Human GitHub Environment And OIDC Verification
 
+**Owner:** Human for protected settings, publication, and workflow approval;
+Mayor assists with value-blind verification
+
+**Human action:** Required
+
+**Execution:** After Tasks 4–7 complete
+
 **Files:**
 
 - External: GitHub `production` and `edge` environment settings
@@ -1544,6 +1626,13 @@ Confirm through a reviewed IAM policy inspection that:
 Record pass/fail privately.
 
 ### Task 9: Complete Slice 1 Documentation And Handoff
+
+**Owner:** Mayor/Gas Town
+
+**Human action:** Confirm that private evidence and approvals are accurately
+represented
+
+**Execution:** After Task 8 passes
 
 **Files:**
 
