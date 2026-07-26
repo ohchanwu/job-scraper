@@ -1629,7 +1629,7 @@ Mayor assists with value-blind verification
   the committed workflows
 - Produces: verified short-lived OIDC sessions with no stored AWS access key
 
-- [ ] **Step 1: Configure the production environment**
+- [x] **Step 1: Configure the production environment**
 
 Human creates or reviews the `production` environment:
 
@@ -1639,7 +1639,7 @@ Human creates or reviews the `production` environment:
 - protected secret `TF_STATE_BUCKET`; and
 - no AWS access key ID or secret access key.
 
-- [ ] **Step 2: Configure the edge environment**
+- [x] **Step 2: Configure the edge environment**
 
 Human creates or reviews the `edge` environment:
 
