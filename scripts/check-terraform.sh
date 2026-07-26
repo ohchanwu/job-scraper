@@ -68,17 +68,58 @@ if [[ "$actual_policy_tokens" != "$expected_policy_tokens" ]]; then
 fi
 
 production_workflow="$repo_root/.github/workflows/terraform-production-plan.yml"
+workflow_files=("$repo_root/.github/workflows/"terraform-*.yml)
 
 grep -Fq 'id-token: write' "$production_workflow"
 grep -Fq 'mask-aws-account-id: true' "$production_workflow"
 
-if grep -Fq 'terraform apply' "$production_workflow"; then
+if grep -Eq \
+  '(^|[[:space:];|&])terraform([[:space:]]+-[^[:space:]]+)*[[:space:]]+apply([[:space:]]|$)' \
+  "$production_workflow"; then
   printf 'production workflow must remain plan-only\n' >&2
   exit 1
 fi
 
-if grep -Eq 'uses: [^@]+@(v[0-9]+|main|master)$' \
-  "$repo_root/.github/workflows/"terraform-*.yml; then
+if grep -Eh \
+  '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+[^[:space:]]+@' \
+  "${workflow_files[@]}" |
+  grep -Ev \
+    '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+[^@[:space:]]+@[0-9a-f]{40}[[:space:]]*$'; then
   printf 'Terraform workflows must pin actions by full commit SHA\n' >&2
   exit 1
+fi
+
+require_action_pin() {
+  local expected_count="$1"
+  local pin="$2"
+  local actual_count
+
+  actual_count="$(
+    awk -v pin="uses: $pin" '
+      /^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+/ {
+        line = $0
+        sub(/^[[:space:]]*(-[[:space:]]+)?/, "", line)
+        sub(/[[:space:]]*$/, "", line)
+        if (line == pin) {
+          count++
+        }
+      }
+      END { print count + 0 }
+    ' "${workflow_files[@]}"
+  )"
+  if [[ "$actual_count" -ne "$expected_count" ]]; then
+    printf 'Terraform workflows changed reviewed action pin: %s\n' "$pin" >&2
+    exit 1
+  fi
+}
+
+require_action_pin \
+  2 "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803"
+require_action_pin \
+  2 "hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e"
+require_action_pin \
+  1 "aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708"
+
+if [[ "${CHECK_TERRAFORM_FIXTURE_MODE:-0}" != 1 ]]; then
+  "$repo_root/scripts/check-terraform-workflows_test.sh"
 fi
