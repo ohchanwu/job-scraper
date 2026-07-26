@@ -883,7 +883,7 @@ value-blind verification
   account ID, `JobcronAdministratorAccess` assignment, and FIDO2 authenticators
 - Produces: a verified short-lived `jobcron-admin` CLI session
 
-- [ ] **Step 1: Confirm the human prerequisites**
+- [x] **Step 1: Confirm the human prerequisites**
 
 The human confirms privately:
 
@@ -895,7 +895,7 @@ The human confirms privately:
 - primary and recovery FIDO2 authenticators are registered; and
 - root remains reserved for billing and account recovery.
 
-- [ ] **Step 2: Configure the named profile without opening the default browser**
+- [x] **Step 2: Configure the named profile without opening the default browser**
 
 Run in the human's terminal:
 
@@ -917,7 +917,7 @@ Enter privately:
 
 The human opens the displayed verification URL themselves and completes MFA.
 
-- [ ] **Step 3: Start the short-lived session**
+- [x] **Step 3: Start the short-lived session**
 
 ```bash
 aws sso login --profile jobcron-admin --no-browser --use-device-code
@@ -928,7 +928,7 @@ Expected: `Successfully logged into Start URL` without an access key or secret
 key being created. `AWS_PROFILE` makes the Terraform AWS provider use this
 verified short-lived session instead of an ambient default profile.
 
-- [ ] **Step 4: Verify identity without printing identifiers**
+- [x] **Step 4: Verify identity without printing identifiers**
 
 Run:
 
@@ -974,7 +974,7 @@ AWS identity, role, and region verified
 Stop on any mismatch. Do not paste the raw `get-caller-identity` response into
 chat or tracked logs; it contains the account ID, user ID, and ARN.
 
-- [ ] **Step 5: Record private evidence**
+- [x] **Step 5: Record private evidence**
 
 Create the ignored log safely if it does not exist:
 
