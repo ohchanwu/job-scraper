@@ -66,3 +66,19 @@ if [[ "$actual_policy_tokens" != "$expected_policy_tokens" ]]; then
   printf 'Slice 1 identity policy actions differ from the approved ceiling.\n' >&2
   exit 1
 fi
+
+production_workflow="$repo_root/.github/workflows/terraform-production-plan.yml"
+
+grep -Fq 'id-token: write' "$production_workflow"
+grep -Fq 'mask-aws-account-id: true' "$production_workflow"
+
+if grep -Fq 'terraform apply' "$production_workflow"; then
+  printf 'production workflow must remain plan-only\n' >&2
+  exit 1
+fi
+
+if grep -Eq 'uses: [^@]+@(v[0-9]+|main|master)$' \
+  "$repo_root/.github/workflows/"terraform-*.yml; then
+  printf 'Terraform workflows must pin actions by full commit SHA\n' >&2
+  exit 1
+fi
