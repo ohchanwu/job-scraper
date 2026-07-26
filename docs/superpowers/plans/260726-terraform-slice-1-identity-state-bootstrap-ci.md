@@ -528,8 +528,10 @@ git commit -m "infra: define protected Terraform state"
 **Files:**
 
 - Create: `infra/terraform/bootstrap/identity.tf`
+- Create: `infra/terraform/bootstrap/tests/identity.tftest.hcl`
 - Modify: `infra/terraform/bootstrap/outputs.tf`
 - Modify: `scripts/check-terraform.sh`
+- Modify: `docs/architecture.md`
 
 **Interfaces:**
 
@@ -537,7 +539,7 @@ git commit -m "infra: define protected Terraform state"
 - Produces: `aws_iam_openid_connect_provider.github`,
   `aws_iam_role.production`, and `aws_iam_role.edge`
 
-- [ ] **Step 1: Declare GitHub's OIDC provider**
+- [x] **Step 1: Declare GitHub's OIDC provider**
 
 Create `identity.tf` beginning with:
 
@@ -557,6 +559,10 @@ resource "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
 
   client_id_list = ["sts.amazonaws.com"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 ```
 
@@ -569,7 +575,7 @@ Do not hard-code a certificate thumbprint. In AWS provider 6.33.0,
 `thumbprint_list` is optional and computed, and AWS validates GitHub through its
 trusted root CA library.
 
-- [ ] **Step 2: Define the production trust document**
+- [x] **Step 2: Define the production trust document**
 
 Add:
 
@@ -603,7 +609,7 @@ resource "aws_iam_role" "production" {
 }
 ```
 
-- [ ] **Step 3: Define the edge trust document**
+- [x] **Step 3: Define the edge trust document**
 
 Repeat the production trust structure as `data.aws_iam_policy_document.edge_assume`
 and `aws_iam_role.edge`, changing only:
@@ -621,18 +627,16 @@ name = "JobcronTerraformEdge"
 Because an environment appears in the OIDC subject, branch is not also encoded
 in that subject. Task 8 restricts the `edge` environment to `main`.
 
-- [ ] **Step 4: Give each role access only to its approved state keys**
+- [x] **Step 4: Give each role access only to its approved state keys**
 
 Add:
 
 ```hcl
 locals {
   production_state_keys = [
-    "bootstrap/terraform.tfstate",
     "production/terraform.tfstate",
   ]
   production_lock_keys = [
-    "bootstrap/terraform.tfstate.tflock",
     "production/terraform.tfstate.tflock",
   ]
 
@@ -646,10 +650,12 @@ locals {
 
 data "aws_iam_policy_document" "production_state" {
   statement {
-    actions = [
-      "s3:GetBucketLocation",
-      "s3:ListBucket",
-    ]
+    actions   = ["s3:GetBucketLocation"]
+    resources = [aws_s3_bucket.state.arn]
+  }
+
+  statement {
+    actions   = ["s3:ListBucket"]
     resources = [aws_s3_bucket.state.arn]
 
     condition {
@@ -697,10 +703,12 @@ resource "aws_iam_role_policy_attachment" "production_state" {
 
 data "aws_iam_policy_document" "edge_state" {
   statement {
-    actions = [
-      "s3:GetBucketLocation",
-      "s3:ListBucket",
-    ]
+    actions   = ["s3:GetBucketLocation"]
+    resources = [aws_s3_bucket.state.arn]
+  }
+
+  statement {
+    actions   = ["s3:ListBucket"]
     resources = [aws_s3_bucket.state.arn]
 
     condition {
@@ -748,10 +756,13 @@ resource "aws_iam_role_policy_attachment" "edge_state" {
 ```
 
 `DeleteObject` is limited to `.tflock` objects because Terraform deletes lock
-files when an operation ends; the roles cannot delete state objects. Do not add
-another policy or action in this slice.
+files when an operation ends; the roles cannot delete state objects. The
+production role cannot read or write bootstrap state: bootstrap remains under
+the human Identity Center administrator. `GetBucketLocation` must remain
+unconditional because that request has no `s3:prefix`; only `ListBucket` carries
+the exact prefix condition. Do not add another policy or action in this slice.
 
-- [ ] **Step 5: Add sensitive role outputs**
+- [x] **Step 5: Add sensitive role outputs**
 
 Append:
 
@@ -767,35 +778,45 @@ output "edge_role_arn" {
 }
 ```
 
-- [ ] **Step 6: Test the exact OIDC subjects and permission ceiling**
+- [x] **Step 6: Test the exact OIDC subjects and permission ceiling**
 
-Append these source-contract checks to `scripts/check-terraform.sh`:
+Create `tests/identity.tftest.hcl` with mocked plan assertions for:
+
+- the exact audience, environment subjects, federated principal, and assume
+  action;
+- the exact four S3 statement groups for each role;
+- unconditional `GetBucketLocation` and prefix-scoped `ListBucket`;
+- matching state and lock resources with lock-only deletion;
+- matching role-policy attachments; and
+- the non-null existing-provider configuration path.
+
+Append source-contract checks to `scripts/check-terraform.sh` for the exact
+subjects, import wiring, role wiring, provider `prevent_destroy`, absence of the
+bootstrap state key, and the exact allowed action-token multiset. The check must
+fail on any wildcard or additional IAM action, not only on a service denylist.
+The resulting ceiling is:
 
 ```bash
-identity_file="$repo_root/infra/terraform/bootstrap/identity.tf"
-
-grep -Fq \
-  'repo:${var.github_repository}:environment:production' \
-  "$identity_file"
-grep -Fq \
-  'repo:${var.github_repository}:environment:edge' \
-  "$identity_file"
-grep -Fq '"sts.amazonaws.com"' "$identity_file"
-
-for forbidden in '"ec2:' '"rds:' '"iam:' '"secretsmanager:'; do
-  if grep -Fiq "$forbidden" "$identity_file"; then
-    printf 'Slice 1 identity policy contains forbidden action: %s\n' \
-      "$forbidden" >&2
-    exit 1
-  fi
-done
+expected_policy_tokens="$(printf '%s\n' \
+  '"s3:DeleteObject"' '"s3:DeleteObject"' \
+  '"s3:GetBucketLocation"' '"s3:GetBucketLocation"' \
+  '"s3:GetObject"' '"s3:GetObject"' \
+  '"s3:ListBucket"' '"s3:ListBucket"' \
+  '"s3:prefix"' '"s3:prefix"' \
+  '"s3:PutObject"' '"s3:PutObject"' \
+  '"sts:AssumeRoleWithWebIdentity"' '"sts:AssumeRoleWithWebIdentity"' |
+  sort)"
+actual_policy_tokens="$(
+  grep -Eo '"[a-z0-9]+:[A-Za-z*]+"' "$identity_file" | sort
+)"
+test "$actual_policy_tokens" = "$expected_policy_tokens"
 ```
 
-This source check complements `terraform validate`: it prevents later edits
-from silently widening the Slice 1 edge or production policy before a later
-slice explicitly changes the contract.
+The native test is the semantic contract. The shell check is a cheap
+defense-in-depth guard for CI and prevents a later action or wildcard from
+silently widening Slice 1 before a later slice explicitly changes the contract.
 
-- [ ] **Step 7: Run static and mocked verification**
+- [x] **Step 7: Run static and mocked verification**
 
 ```bash
 ./scripts/check-terraform.sh
@@ -804,14 +825,21 @@ git diff --check
 
 Expected: both trust subjects and all state-only boundaries pass.
 
-- [ ] **Step 8: Commit the identity boundary**
+- [x] **Step 8: Commit the identity boundary**
 
 ```bash
-git add infra/terraform/bootstrap
+git add \
+  docs/architecture.md \
+  infra/terraform/bootstrap \
+  scripts/check-terraform.sh
 git diff --cached --check
 gitleaks git --staged --redact --no-banner
 git commit -m "infra: define Terraform OIDC boundaries"
 ```
+
+Automatic local checkpoints may split this task across multiple commits. The
+review and integration boundary is the exact base-to-tip range, not a
+one-commit-per-task rule.
 
 ### Task 4: Human Identity Center Configuration And Value-Blind Preflight
 
