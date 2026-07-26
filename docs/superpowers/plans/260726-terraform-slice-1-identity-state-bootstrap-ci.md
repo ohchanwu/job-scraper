@@ -150,7 +150,7 @@ Slice 1 is complete only when:
 - Produces: three independently validated roots and the repository-wide
   `scripts/check-terraform.sh` verification entry point
 
-- [ ] **Step 1: Write the pinned Terraform version**
+- [x] **Step 1: Write the pinned Terraform version**
 
 Create `.terraform-version`:
 
@@ -158,7 +158,7 @@ Create `.terraform-version`:
 1.15.8
 ```
 
-- [ ] **Step 2: Extend the Terraform ignore contract**
+- [x] **Step 2: Extend the Terraform ignore contract**
 
 Keep the existing Terraform ignore rules and add:
 
@@ -168,7 +168,7 @@ Keep the existing Terraform ignore rules and add:
 
 Do not ignore `.terraform.lock.hcl`.
 
-- [ ] **Step 3: Create the root version contracts**
+- [x] **Step 3: Create the root version contracts**
 
 Create the same `versions.tf` in all three roots:
 
@@ -192,7 +192,7 @@ provider "aws" {
 Do not create `bootstrap/backend.tf` yet. Bootstrap must use local state for its
 first apply.
 
-- [ ] **Step 4: Declare partial remote backends for future roots**
+- [x] **Step 4: Declare partial remote backends for future roots**
 
 Create `production/backend.tf`:
 
@@ -221,7 +221,7 @@ terraform {
 Bucket and Region are supplied from ignored backend files or protected GitHub
 environment settings.
 
-- [ ] **Step 5: Write the minimal repository check**
+- [x] **Step 5: Write the minimal repository check**
 
 Create executable `scripts/check-terraform.sh`:
 
@@ -241,7 +241,7 @@ for root in bootstrap production edge; do
 done
 ```
 
-- [ ] **Step 6: Generate and normalize the provider locks**
+- [x] **Step 6: Generate and normalize the provider locks**
 
 Run once in each root:
 
@@ -256,7 +256,7 @@ done
 Expected: each root contains a tracked `.terraform.lock.hcl` selecting AWS
 provider 6.33.0 with checksums for the trusted Mac and GitHub's Linux runner.
 
-- [ ] **Step 7: Run the root checks**
+- [x] **Step 7: Run the root checks**
 
 ```bash
 chmod +x scripts/check-terraform.sh
@@ -269,7 +269,7 @@ test "$(git check-ignore infra/terraform/bootstrap/.terraform.lock.hcl || true)"
 Expected: checks pass, the synthetic plan path is ignored, and provider lock
 files are not ignored.
 
-- [ ] **Step 8: Commit the root contract**
+- [x] **Step 8: Commit the root contract**
 
 ```bash
 git add .terraform-version .gitignore scripts/check-terraform.sh infra/terraform
