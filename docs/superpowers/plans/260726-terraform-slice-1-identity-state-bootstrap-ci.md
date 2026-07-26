@@ -300,7 +300,7 @@ git commit -m "infra: establish Terraform root contracts"
 - Produces: `aws_s3_bucket.state` and its encryption, versioning,
   public-access, TLS, and destroy-protection contract
 
-- [ ] **Step 1: Define the bootstrap inputs**
+- [x] **Step 1: Define the bootstrap inputs**
 
 Create `variables.tf`:
 
@@ -344,7 +344,7 @@ variable "existing_github_oidc_provider_arn" {
 }
 ```
 
-- [ ] **Step 2: Provide a publication-safe input example**
+- [x] **Step 2: Provide a publication-safe input example**
 
 Create `terraform.tfvars.example`:
 
@@ -357,7 +357,7 @@ existing_github_oidc_provider_arn = null
 The real file is `terraform.tfvars`, is ignored, and must never be printed or
 committed.
 
-- [ ] **Step 3: Define the bucket and safeguards**
+- [x] **Step 3: Define the bucket and safeguards**
 
 Create `state.tf` with:
 
@@ -439,7 +439,7 @@ The bucket, versioning configuration, and encryption configuration are the
 three destroy-protected state resources. The access block and TLS policy remain
 reconcilable controls; replacing either does not delete stored state objects.
 
-- [ ] **Step 4: Add sensitive operator outputs**
+- [x] **Step 4: Add sensitive operator outputs**
 
 Create `outputs.tf`:
 
@@ -453,7 +453,7 @@ output "state_bucket_name" {
 `sensitive` suppresses ordinary CLI display but does not remove the value from
 state. The bucket name must still be treated as private.
 
-- [ ] **Step 5: Write the mocked state tests**
+- [x] **Step 5: Write the mocked state tests**
 
 Create `tests/state.tftest.hcl`:
 
@@ -478,13 +478,13 @@ run "state_contract" {
   }
 
   assert {
-    condition     = aws_s3_bucket_server_side_encryption_configuration.state.rule[0].apply_server_side_encryption_by_default[0].sse_algorithm == "AES256"
+    condition     = one(aws_s3_bucket_server_side_encryption_configuration.state.rule).apply_server_side_encryption_by_default[0].sse_algorithm == "AES256"
     error_message = "State bucket must enable default encryption."
   }
 }
 ```
 
-- [ ] **Step 6: Verify the state contract**
+- [x] **Step 6: Verify the state contract**
 
 Append these lifecycle and TLS source-contract checks to
 `scripts/check-terraform.sh`:
@@ -508,7 +508,7 @@ Expected: all three roots validate, the bootstrap mock plan passes without AWS
 credentials, all three state safeguards are destroy-protected, and the TLS-only
 policy remains present.
 
-- [ ] **Step 7: Commit the state bucket**
+- [x] **Step 7: Commit the state bucket**
 
 ```bash
 git add infra/terraform/bootstrap
