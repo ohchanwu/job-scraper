@@ -48,8 +48,10 @@ As recorded in the Terraform infrastructure specification:
 
 - the existing EC2 and RDS resources are disconnected and are not a functional
   production stack;
-- no production Terraform roots, remote state, state locking, GitHub OIDC
-  roles, replacement host, or automated Cloudflare prefix-list path exist yet;
+- bootstrap, production, and edge Terraform roots plus their OIDC role
+  configurations now exist locally, but no remote state, state locking, applied
+  cloud roles, replacement host, or automated Cloudflare prefix-list path
+  exists yet;
 - the old EC2, old VPC, and old RDS are retained rollback resources, not the
   target architecture;
 - the replacement architecture uses a canonical VPC, private PostgreSQL RDS,

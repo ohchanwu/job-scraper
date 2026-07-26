@@ -22,9 +22,13 @@ exit 0
 EOF
 chmod +x "$fixture_root/bin/terraform"
 
-reset_workflows() {
+reset_fixtures() {
   cp "$repo_root/.github/workflows/"terraform-*.yml \
     "$fixture_root/repo/.github/workflows/"
+  cp "$repo_root/infra/terraform/bootstrap/state.tf" \
+    "$fixture_root/repo/infra/terraform/bootstrap/"
+  cp "$repo_root/infra/terraform/bootstrap/identity.tf" \
+    "$fixture_root/repo/infra/terraform/bootstrap/"
 }
 
 replace_once() {
@@ -54,7 +58,7 @@ expect_rejected() {
   local message="$2"
   shift 2
 
-  reset_workflows
+  reset_fixtures
   "$@"
   if run_checker; then
     printf 'FAIL: accepted %s\n' "$name" >&2
@@ -70,9 +74,10 @@ expect_rejected() {
 checkout_sha="d23441a48e516b6c34aea4fa41551a30e30af803"
 static_workflow="$fixture_root/repo/.github/workflows/terraform-check.yml"
 production_workflow="$fixture_root/repo/.github/workflows/terraform-production-plan.yml"
+state_file="$fixture_root/repo/infra/terraform/bootstrap/state.tf"
 failures=0
 
-reset_workflows
+reset_fixtures
 if ! run_checker; then
   printf 'FAIL: rejected the unmodified workflows\n' >&2
   cat "$fixture_root/checker.out" >&2
@@ -85,6 +90,20 @@ expect_rejected "semantic action tag" \
 expect_rejected "symbolic action ref" \
   "Terraform workflows must pin actions by full commit SHA" \
   replace_once "$static_workflow" "$checkout_sha" "latest" || failures=$((failures + 1))
+expect_rejected "different full action SHA" \
+  "Terraform workflows changed reviewed action pin" \
+  replace_once "$static_workflow" "$checkout_sha" \
+  "0000000000000000000000000000000000000000" || failures=$((failures + 1))
+expect_rejected "missing OIDC permission" \
+  "production workflow must request an OIDC id-token" \
+  replace_once "$production_workflow" \
+  "id-token: write" \
+  "id-token: read" || failures=$((failures + 1))
+expect_rejected "disabled account ID masking" \
+  "production workflow must mask the AWS account ID" \
+  replace_once "$production_workflow" \
+  "mask-aws-account-id: true" \
+  "mask-aws-account-id: false" || failures=$((failures + 1))
 expect_rejected "apply after -chdir" \
   "production workflow must remain plan-only" \
   sh -c 'printf "\n          terraform -chdir=infra/terraform/production apply\n" >>"$1"' \
@@ -93,5 +112,27 @@ expect_rejected "apply after double space" \
   "production workflow must remain plan-only" \
   sh -c 'printf "\n          terraform  apply\n" >>"$1"' \
   sh "$production_workflow" || failures=$((failures + 1))
+expect_rejected "state rm" \
+  "production workflow must remain plan-only" \
+  sh -c 'printf "\n          terraform -chdir=infra/terraform/production state rm aws_instance.app\n" >>"$1"' \
+  sh "$production_workflow" || failures=$((failures + 1))
+expect_rejected "force unlock" \
+  "production workflow must remain plan-only" \
+  sh -c 'printf "\n          terraform -chdir=infra/terraform/production force-unlock -force example-lock\n" >>"$1"' \
+  sh "$production_workflow" || failures=$((failures + 1))
+expect_rejected "full destroy command" \
+  "production workflow must remain plan-only" \
+  sh -c 'printf "\n          terraform -chdir=infra/terraform/production destroy -auto-approve\n" >>"$1"' \
+  sh "$production_workflow" || failures=$((failures + 1))
+expect_rejected "misbound destroy protection" \
+  "State resource is missing bound destroy protection" \
+  replace_once "$state_file" \
+  'resource "aws_s3_bucket_versioning" "state" {' \
+  'resource "aws_s3_bucket_versioning" "unprotected" {' || failures=$((failures + 1))
+expect_rejected "TLS allow policy" \
+  "State bucket TLS policy contract is incomplete" \
+  replace_once "$state_file" \
+  'effect = "Deny"' \
+  'effect = "Allow"' || failures=$((failures + 1))
 
 test "$failures" -eq 0

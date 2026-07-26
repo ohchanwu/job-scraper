@@ -293,6 +293,7 @@ git commit -m "infra: establish Terraform root contracts"
 - Create: `infra/terraform/bootstrap/outputs.tf`
 - Create: `infra/terraform/bootstrap/terraform.tfvars.example`
 - Create: `infra/terraform/bootstrap/tests/state.tftest.hcl`
+- Create: `infra/terraform/bootstrap/tests/variables.tftest.hcl`
 
 **Interfaces:**
 
@@ -310,8 +311,13 @@ variable "state_bucket_name" {
   type        = string
 
   validation {
-    condition     = length(var.state_bucket_name) >= 3
-    error_message = "state_bucket_name must be a valid non-empty S3 bucket name."
+    condition = (
+      length(var.state_bucket_name) >= 3 &&
+      length(var.state_bucket_name) <= 63 &&
+      can(regex("^[a-z0-9][a-z0-9.-]*[a-z0-9]$", var.state_bucket_name)) &&
+      !strcontains(var.state_bucket_name, "..")
+    )
+    error_message = "state_bucket_name must satisfy the S3 general-purpose bucket naming rules."
   }
 }
 
@@ -343,6 +349,10 @@ variable "existing_github_oidc_provider_arn" {
   }
 }
 ```
+
+The implementation also rejects IP-address-shaped names and AWS-reserved bucket
+prefixes/suffixes. `github_repository` accepts only a constrained GitHub
+`owner/name` slug so an invalid subject cannot reach a partial bootstrap apply.
 
 - [x] **Step 2: Provide a publication-safe input example**
 
@@ -468,8 +478,13 @@ run "state_contract" {
   command = plan
 
   assert {
-    condition     = aws_s3_bucket_public_access_block.state.block_public_policy
-    error_message = "State bucket must block public bucket policies."
+    condition = (
+      aws_s3_bucket_public_access_block.state.block_public_acls &&
+      aws_s3_bucket_public_access_block.state.block_public_policy &&
+      aws_s3_bucket_public_access_block.state.ignore_public_acls &&
+      aws_s3_bucket_public_access_block.state.restrict_public_buckets
+    )
+    error_message = "State bucket must enable all four public-access blocks."
   }
 
   assert {
@@ -484,18 +499,15 @@ run "state_contract" {
 }
 ```
 
+The native tests also assert the rendered TLS-deny statement and reject invalid
+bucket and GitHub repository inputs through `expect_failures`.
+
 - [x] **Step 6: Verify the state contract**
 
-Append these lifecycle and TLS source-contract checks to
-`scripts/check-terraform.sh`:
-
-```bash
-state_file="$repo_root/infra/terraform/bootstrap/state.tf"
-
-test "$(grep -Fc 'prevent_destroy = true' "$state_file")" -eq 3
-grep -Fq 'variable = "aws:SecureTransport"' "$state_file"
-grep -Fq 'values   = ["false"]' "$state_file"
-```
+Extend `scripts/check-terraform.sh` so each `prevent_destroy` guard is bound to
+its named bucket, versioning, or encryption resource instead of counted
+globally. Require every element of the TLS-deny source contract, while the
+native Terraform test verifies the rendered statement shape.
 
 Then run:
 
@@ -506,7 +518,7 @@ git diff --check
 
 Expected: all three roots validate, the bootstrap mock plan passes without AWS
 credentials, all three state safeguards are destroy-protected, and the TLS-only
-policy remains present.
+policy remains complete.
 
 - [x] **Step 7: Commit the state bucket**
 
@@ -1362,6 +1374,9 @@ Task 8
 - Create: `.github/workflows/terraform-production-plan.yml`
 - Create: `infra/terraform/production/backend.example.hcl`
 - Create: `infra/terraform/edge/backend.example.hcl`
+- Modify: `scripts/check-terraform.sh`
+- Create: `scripts/check-terraform-workflows_test.sh`
+- Modify: `docs/architecture.md`
 
 **Interfaces:**
 
@@ -1526,8 +1541,8 @@ The final implementation is stricter than the original illustrative
 blacklists. `scripts/check-terraform.sh` now:
 
 - requires OIDC permission and AWS account-ID masking;
-- rejects `apply` after optional Terraform global flags and variable
-  whitespace;
+- allowlists only the exact reviewed `init` and `plan` Terraform command
+  shapes in the production workflow;
 - positively requires every step-level or job-level remote `uses:` ref to end
   in exactly 40 lowercase hexadecimal characters;
 - requires the reviewed checkout, setup-Terraform, and AWS-credentials pins at
@@ -1546,8 +1561,8 @@ bash -n scripts/check-terraform-workflows_test.sh
 git diff --check
 ```
 
-Expected: static checks pass and the workflow contract rejects any apply command
-or floating action tag.
+Expected: static checks pass and the workflow contract rejects every unreviewed
+Terraform command or action pin.
 
 - [x] **Step 7: Commit the automation**
 

@@ -14,9 +14,62 @@ done
 
 state_file="$repo_root/infra/terraform/bootstrap/state.tf"
 
-test "$(grep -Fc 'prevent_destroy = true' "$state_file")" -eq 3
-grep -Fq 'variable = "aws:SecureTransport"' "$state_file"
-grep -Fq 'values   = ["false"]' "$state_file"
+require_resource_prevent_destroy() {
+  local resource_type="$1"
+  local resource_name="$2"
+
+  if ! awk -v header="resource \"$resource_type\" \"$resource_name\" {" '
+    $0 == header {
+      found_resource = 1
+      depth = 1
+      next
+    }
+    found_resource && depth > 0 {
+      line = $0
+      opens = gsub(/\{/, "{", line)
+      closes = gsub(/\}/, "}", line)
+      if ($0 ~ /^[[:space:]]*prevent_destroy[[:space:]]*=[[:space:]]*true[[:space:]]*$/) {
+        found_guard = 1
+      }
+      depth += opens - closes
+      if (depth == 0) {
+        exit(found_guard ? 0 : 1)
+      }
+    }
+    END {
+      if (!found_resource || depth > 0) {
+        exit 1
+      }
+    }
+  ' "$state_file"; then
+    printf 'State resource is missing bound destroy protection: %s.%s\n' \
+      "$resource_type" "$resource_name" >&2
+    exit 1
+  fi
+}
+
+require_resource_prevent_destroy aws_s3_bucket state
+require_resource_prevent_destroy aws_s3_bucket_versioning state
+require_resource_prevent_destroy \
+  aws_s3_bucket_server_side_encryption_configuration state
+
+for policy_token in \
+  'sid    = "DenyInsecureTransport"' \
+  'effect = "Deny"' \
+  'type        = "*"' \
+  'identifiers = ["*"]' \
+  'actions = ["s3:*"]' \
+  'aws_s3_bucket.state.arn' \
+  '"${aws_s3_bucket.state.arn}/*"' \
+  'test     = "Bool"' \
+  'variable = "aws:SecureTransport"' \
+  'values   = ["false"]'; do
+  if ! grep -Fq "$policy_token" "$state_file"; then
+    printf 'State bucket TLS policy contract is incomplete: %s\n' \
+      "$policy_token" >&2
+    exit 1
+  fi
+done
 
 identity_file="$repo_root/infra/terraform/bootstrap/identity.tf"
 
@@ -70,12 +123,40 @@ fi
 production_workflow="$repo_root/.github/workflows/terraform-production-plan.yml"
 workflow_files=("$repo_root/.github/workflows/"terraform-*.yml)
 
-grep -Fq 'id-token: write' "$production_workflow"
-grep -Fq 'mask-aws-account-id: true' "$production_workflow"
+if ! grep -Fq 'id-token: write' "$production_workflow"; then
+  printf 'production workflow must request an OIDC id-token\n' >&2
+  exit 1
+fi
+if ! grep -Fq 'mask-aws-account-id: true' "$production_workflow"; then
+  printf 'production workflow must mask the AWS account ID\n' >&2
+  exit 1
+fi
 
-if grep -Eq \
-  '(^|[[:space:];|&])terraform([[:space:]]+-[^[:space:]]+)*[[:space:]]+apply([[:space:]]|$)' \
-  "$production_workflow"; then
+if ! awk '
+  function trim(line) {
+    sub(/^[[:space:]]+/, "", line)
+    sub(/[[:space:]]+$/, "", line)
+    return line
+  }
+  /(^|[^[:alnum:]_])terraform([^[:alnum:]_]|$)/ {
+    line = trim($0)
+    if (line == "uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e") {
+      next
+    }
+    if (line == "terraform -chdir=infra/terraform/production init \\") {
+      init_count++
+      next
+    }
+    if (line == "terraform -chdir=infra/terraform/production plan \\") {
+      plan_count++
+      next
+    }
+    unexpected = 1
+  }
+  END {
+    exit(unexpected || init_count != 1 || plan_count != 1)
+  }
+' "$production_workflow"; then
   printf 'production workflow must remain plan-only\n' >&2
   exit 1
 fi
