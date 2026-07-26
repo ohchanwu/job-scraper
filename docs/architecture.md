@@ -410,6 +410,10 @@ environment. These roles can read and write only their approved state and lock-f
 `DeleteObject` is limited to lock files. They intentionally have no application-deployment
 permissions.
 
+Static Terraform CI runs without AWS credentials. A separate manually dispatched production
+workflow uses the protected `production` environment and short-lived OIDC credentials only to
+initialize state and detect plan changes; it has no apply or plan-publication path.
+
 Stable deployment choices are recorded in the
 [production and naming decision](superpowers/decisions/260711-jobcron-production.md). Exact operator
 steps belong in the [production guide](../deploy/production/README.md), not in this architecture

@@ -1,0 +1,64 @@
+name: Terraform production plan
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  plan:
+    environment: production
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ap-northeast-2
+      TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - name: Configure short-lived AWS credentials
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Initialize production state
+        run: |
+          terraform -chdir=infra/terraform/production init \
+            -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="region=${AWS_REGION}"
+
+      - name: Detect production changes without publishing the plan
+        shell: bash
+        run: |
+          set +e
+          terraform -chdir=infra/terraform/production plan \
+            -input=false \
+            -detailed-exitcode \
+            -out=production.tfplan \
+            >"${RUNNER_TEMP}/production-plan.log" 2>&1
+          plan_rc=$?
+          set -e
+
+          case "$plan_rc" in
+            0)
+              printf 'Terraform production plan: no changes\n'
+              ;;
+            2)
+              printf 'Terraform production plan: changes detected; review locally\n'
+              ;;
+            *)
+              printf 'Terraform production plan: failed; rerun locally\n' >&2
+              exit 1
+              ;;
+          esac
