@@ -21,19 +21,6 @@ Codex/Mayor supplies drift-sensitive commands, explains live output, and helps
 diagnose failures during execution. A CLI session must never be the only place
 where a required approval, stop condition, or recovery procedure exists.
 
-## Source-Authority Gate
-
-The working tree currently contains an uncommitted warning in the Terraform
-architecture specification that calls it deprecated, while the active human
-launch specification still names it as the infrastructure authority. The
-warning also describes SSH and persistent `.env` assumptions that contradict
-the Terraform design below it.
-
-Do not execute Slice 1 infrastructure changes until the human resolves that
-conflict. The recommended resolution is to keep the Terraform architecture
-active and remove only the contradictory warning. Planning and documentation
-may continue without overwriting the uncommitted edit.
-
 ## Teaching Contract For Every Slice
 
 Every slice plan must include:
@@ -80,7 +67,7 @@ state-changing task may run before its dependency passes its exit checkpoint.
 
 **Plan:** [Slice 1 implementation plan][slice-1-plan]
 
-**Status:** Ready for review; execution blocked by the source-authority gate
+**Status:** Ready for review
 
 Delivers:
 

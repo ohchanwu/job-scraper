@@ -23,8 +23,6 @@ Gitleaks.
 
 - This plan implements only Slice 1 from the
   [Terraform launch roadmap][roadmap].
-- Do not execute infrastructure changes until the source-authority conflict in
-  the roadmap is resolved.
 - The AWS root user is never used for CLI, Terraform, or GitHub Actions.
 - Use only the named `jobcron-admin` IAM Identity Center profile on the trusted
   Mac.
@@ -101,105 +99,6 @@ Slice 1 is complete only when:
 9. a clean production root plan contains no infrastructure changes.
 
 ---
-
-### Task 0: Resolve The Architecture Authority Conflict
-
-**Files:**
-
-- Inspect:
-  `docs/superpowers/specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md`
-- Inspect:
-  `docs/superpowers/specs/260726-terraform-first-production-launch-human-blocked-steps.md`
-- Modify after human confirmation:
-  `docs/superpowers/plans/260726-terraform-first-production-launch-roadmap.md`
-- Modify only after human confirmation: the conflicting warning in the
-  Terraform architecture specification
-
-**Interfaces:**
-
-- Consumes: the human's decision that Terraform-first deployment remains active
-- Produces: one unambiguous architecture authority for Tasks 1 through 9
-
-- [ ] **Step 1: Show only the conflicting tracked-document status**
-
-Run:
-
-```bash
-git diff -- \
-  docs/superpowers/specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md \
-  docs/superpowers/specs/260726-terraform-first-production-launch-human-blocked-steps.md
-```
-
-Expected: the active human spec names the Terraform spec as its authority while
-the uncommitted warning calls that same Terraform spec deprecated.
-
-- [ ] **Step 2: Explain the contradiction to the human**
-
-Explain:
-
-- the warning says not to execute the Terraform design;
-- the current request asks to implement its six slices; and
-- the warning's SSH and persistent-`.env` description contradicts the
-  Session Manager and transient-runtime design in the same file.
-
-Recommended decision: keep the Terraform design active and remove only the
-contradictory warning.
-
-- [ ] **Step 3: Stop for the human's authority decision**
-
-Do not edit either specification or begin Task 1 until the human confirms which
-document is authoritative.
-
-- [ ] **Step 4: Verify the resolved authority**
-
-If the human chooses the recommended resolution, remove only the contradictory
-uncommitted warning and replace the roadmap's `Source-Authority Gate` section
-with:
-
-```markdown
-## Source-Authority Gate
-
-**Resolved:** The Terraform AWS foundation specification remains the
-architecture authority. The Terraform-first human steps specification remains
-the human checkpoint authority.
-```
-
-If the human chooses a different authority, stop and rewrite this plan before
-execution.
-
-Run:
-
-```bash
-rg -n 'Status:|WARNING: DEPRECATED|Infrastructure authority|must not be executed' \
-  docs/superpowers/specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md \
-  docs/superpowers/specs/260726-terraform-first-production-launch-human-blocked-steps.md
-```
-
-Expected when the recommended resolution is chosen:
-
-- the Terraform design remains `Approved design, awaiting implementation
-  planning`;
-- the human spec still points to it; and
-- no warning says the Terraform design itself must not be executed.
-
-- [ ] **Step 5: Commit only the confirmed resolution**
-
-```bash
-git add \
-  docs/superpowers/plans/260726-terraform-first-production-launch-roadmap.md
-git add -p -- \
-  docs/superpowers/specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md
-test -z "$(git diff --cached --name-only -- \
-  docs/superpowers/specs/260726-terraform-first-production-launch-human-blocked-steps.md)"
-git diff --cached --check
-gitleaks git --staged --redact --no-banner
-git commit -m "docs: confirm Terraform launch authority"
-```
-
-Removing an uncommitted warning may restore the Terraform specification to
-`HEAD`, leaving no hunk from that file to stage. That is expected. Stop if the
-staged diff contains unrelated OF notes or user edits that the human did not
-authorize for this commit.
 
 ### Task 1: Lock The Toolchain And Root Ownership
 
@@ -1735,7 +1634,6 @@ git commit -m "docs: complete Terraform infrastructure slice 1"
 
 Stop immediately when:
 
-- the architecture authority remains contradictory;
 - `jobcron-admin` resolves to the wrong account, role, or Region;
 - a plan contains replacement, destruction, or an existing application
   resource;
