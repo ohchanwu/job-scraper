@@ -136,10 +136,10 @@ access-controlled operator log, not in this public file.
 
 ### Infrastructure And Edge
 
-- [ ] Private inventory of the existing VPC, subnets, route tables, EIP, EC2,
-      RDS, security groups, DNS records, and rollback values
-- [ ] Human selection of the canonical VPC after the authenticated inventory
-- [ ] Human-approved non-overlapping private subnet CIDRs
+- [ ] Mayor-prepared private inventory of the existing VPC, subnets, route
+      tables, EIP, EC2, RDS, security groups, DNS records, and rollback values
+- [ ] Human approval of Mayor's recommended canonical VPC and EIP candidate
+- [ ] Slice 3 human-approved non-overlapping private subnet CIDRs
 - [ ] Cloudflare Origin CA certificate and private key
 - [ ] Private record of Origin CA expiry and a renewal reminder
 - [ ] Private locations for Terraform recovery evidence, database archives,
@@ -179,14 +179,20 @@ Exit evidence:
 
 Human actions and approvals:
 
-- [ ] Run or supervise the authenticated, read-only infrastructure inventory.
-- [ ] Select the canonical VPC and confirm sufficient non-overlapping address
-      space for two private database subnets.
-- [ ] Compare the inventory with the proposed import blocks and saved adoption
-      plan.
-- [ ] Approve adoption only when the plan imports the chosen VPC, existing
-      public networking, and EIP without replacement or destruction.
-- [ ] Confirm the old EC2 and old RDS remain untouched.
+- [ ] Approve or reject Mayor's recommended canonical VPC and EIP candidate.
+      Mayor performs the authenticated inventory, proves sufficient address
+      capacity, and handles all private identifiers.
+- [ ] Approve the exact two-plan adoption packet after independent review:
+      one narrow production-network read policy plus attachment and one
+      imports-only production plan. Mayor performs both applies and verifies
+      the old EC2, old RDS, routes, subnets, and EIP association remain
+      untouched.
+
+No private subnet CIDR choice is required in Slice 2. Exact CIDR selection and
+approval occur in Slice 3 immediately before subnet creation.
+
+A further human decision is required only if inventory is ambiguous, a plan
+contains live-resource changes, or state recovery becomes uncertain.
 
 Exit evidence:
 

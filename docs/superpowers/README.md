@@ -9,7 +9,7 @@ decision records needed for the current task.
 - [Terraform AWS foundation and Cloudflare ingress automation][terraform-aws-foundation]
 - [Terraform-first production launch human-blocked steps][terraform-launch-human-steps]
 - [Terraform-first production launch roadmap][terraform-launch-roadmap]
-- [Terraform Slice 2: canonical VPC and EIP adoption planning][terraform-slice-2-roadmap]
+- [Terraform Slice 2: canonical VPC and EIP adoption][terraform-slice-2-spec]
 - [PostgreSQL local convergence and per-user AI credentials](specs/260714-postgresql-local-convergence-user-ai-credentials.md)
 
 ## Recently Archived
@@ -97,8 +97,8 @@ decision records needed for the current task.
   specs/260726-terraform-first-production-launch-human-blocked-steps.md
 [terraform-launch-roadmap]:
   plans/260726-terraform-first-production-launch-roadmap.md
-[terraform-slice-2-roadmap]:
-  plans/260726-terraform-first-production-launch-roadmap.md#slice-2-canonical-vpc-and-eip-adoption
+[terraform-slice-2-spec]:
+  specs/260727-terraform-slice-2-canonical-vpc-eip-adoption.md
 [terraform-slice-1-plan]:
   archive/2026-07-26-terraform-slice-1/260726-terraform-slice-1-identity-state-bootstrap-ci.md
 [terraform-slice-1-verification]:

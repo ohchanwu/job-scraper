@@ -1,6 +1,7 @@
 # Terraform-First Production Launch Implementation Roadmap
 
-**Status:** Active; Slice 1 is complete and Slice 2 is ready for plan authoring
+**Status:** Active; Slice 1 is complete and the Slice 2 specification awaits
+human review
 
 **Recorded:** 2026-07-26
 
@@ -84,12 +85,15 @@ Delivers:
 
 ### Slice 2: Canonical VPC And EIP Adoption
 
-**Status:** Ready for plan authoring; authenticated inventory and human resource
-selection remain required before adoption
+**Specification:** [Slice 2 adoption specification][slice-2-spec]
+
+**Status:** Specification ready for human review; implementation planning
+follows approval
 
 Will inventory the existing network privately, select the canonical VPC, and
 adopt only the approved VPC, public networking, and EIP without replacement or
-destruction.
+destruction. Mayor/Gas Town performs the inventory and execution; the human
+normally supplies only candidate approval and exact-plan approval.
 
 ### Slice 3: Private Database Tier And Secret Containers
 
@@ -148,5 +152,7 @@ the rollback window.
   ../archive/2026-07-26-terraform-slice-1/260726-terraform-slice-1-identity-state-bootstrap-ci.md
 [slice-1-verification]:
   ../archive/2026-07-26-terraform-slice-1/260726-terraform-slice-1-verification.md
+[slice-2-spec]:
+  ../specs/260727-terraform-slice-2-canonical-vpc-eip-adoption.md
 [terraform-spec]:
   ../specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md
