@@ -404,6 +404,12 @@ Local development runs the same application and PostgreSQL storage contract. Com
 the local database lifecycle; the application remains a normal host process unless the operator
 explicitly chooses another setup.
 
+The Terraform bootstrap root owns the protected S3 state bucket and GitHub's OIDC provider. It
+exposes separate production and edge roles whose trust policies require the matching GitHub
+environment. These roles can read and write only their approved state and lock-file keys;
+`DeleteObject` is limited to lock files. They intentionally have no application-deployment
+permissions.
+
 Stable deployment choices are recorded in the
 [production and naming decision](superpowers/decisions/260711-jobcron-production.md). Exact operator
 steps belong in the [production guide](../deploy/production/README.md), not in this architecture
