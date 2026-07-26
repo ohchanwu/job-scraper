@@ -11,3 +11,9 @@ for root in bootstrap production edge; do
   terraform -chdir="$root_path" validate
   terraform -chdir="$root_path" test
 done
+
+state_file="$repo_root/infra/terraform/bootstrap/state.tf"
+
+test "$(grep -Fc 'prevent_destroy = true' "$state_file")" -eq 3
+grep -Fq 'variable = "aws:SecureTransport"' "$state_file"
+grep -Fq 'values   = ["false"]' "$state_file"
