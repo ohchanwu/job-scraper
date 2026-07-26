@@ -1174,7 +1174,7 @@ refresh-only apply at their stated checkpoints
 - Produces: remote bootstrap state at `bootstrap/terraform.tfstate` with S3
   native locking
 
-- [ ] **Step 1: Reconfirm authorization immediately before apply**
+- [x] **Step 1: Reconfirm authorization immediately before apply**
 
 Human confirms:
 
@@ -1183,7 +1183,7 @@ Human confirms:
 - no newer plan replaced the reviewed file; and
 - applying the exact plan is authorized.
 
-- [ ] **Step 2: Apply exactly the saved plan**
+- [x] **Step 2: Apply exactly the saved plan**
 
 ```bash
 terraform -chdir=infra/terraform/bootstrap apply \
@@ -1196,7 +1196,7 @@ Expected: only the reviewed bootstrap resources are created or imported.
 Stop on partial failure. Do not rerun apply blindly; inspect state and create a
 new plan.
 
-- [ ] **Step 3: Create the partial backend contract**
+- [x] **Step 3: Create the partial backend contract**
 
 Create `backend.tf`:
 
@@ -1220,21 +1220,21 @@ region = "ap-northeast-2"
 Create the real ignored `jobcron.backend.hcl`, set mode `600`, and verify
 `git check-ignore` reports it.
 
-- [ ] **Step 4: Migrate local state**
+- [x] **Step 4: Migrate local state**
 
 Immediately before migration, the human reconfirms the private destination
 bucket and authorizes copying local bootstrap state into it. Then run:
 
 ```bash
 terraform -chdir=infra/terraform/bootstrap init \
-  -input=false \
   -migrate-state \
   -backend-config=jobcron.backend.hcl
 ```
 
-The human answers `yes` only after confirming the destination bucket privately.
+Terraform requires interactive input for this migration confirmation. The human
+answers `yes` only after confirming the destination bucket privately.
 
-- [ ] **Step 5: Prove the migrated state is authoritative**
+- [x] **Step 5: Prove the migrated state is authoritative**
 
 ```bash
 terraform -chdir=infra/terraform/bootstrap plan \
@@ -1246,15 +1246,17 @@ terraform -chdir=infra/terraform/bootstrap plan \
 Expected exit code: `0`, meaning no changes. Exit code `2` means drift; stop and
 review privately. Exit code `1` is an error.
 
-- [ ] **Step 6: Prove native locking**
+- [x] **Step 6: Prove native locking**
 
-In terminal A:
+Start a real plan in terminal A, then wait until the native lock object appears:
 
 ```bash
-terraform -chdir=infra/terraform/bootstrap console
+terraform -chdir=infra/terraform/bootstrap plan \
+  -input=false \
+  -out=slice1-lock-holder.tfplan
 ```
 
-Keep the console prompt open. In terminal B:
+While terminal A still owns the lock, run in terminal B:
 
 ```bash
 terraform -chdir=infra/terraform/bootstrap plan \
@@ -1264,11 +1266,13 @@ terraform -chdir=infra/terraform/bootstrap plan \
 ```
 
 Expected: terminal B reports that the state lock is already held and makes no
-state change. Exit the console in terminal A with `Ctrl-D`, then confirm a normal
-no-change plan succeeds. Do not use `-lock=false` and do not force-unlock an
-active owner.
+state change. Let terminal A complete normally, verify the lock object
+disappears, then confirm a normal no-change plan succeeds. A Terraform console
+session is not a valid lock holder because current Terraform releases the lock
+after its initial state read. Do not use `-lock=false` and do not force-unlock
+an active owner.
 
-- [ ] **Step 7: Rehearse state-version recovery without changing production**
+- [x] **Step 7: Rehearse state-version recovery without changing production**
 
 Create and privately review a refresh-only saved plan:
 
@@ -1328,17 +1332,17 @@ jobcron_verify_state_recovery() {
       --key bootstrap/terraform.tfstate \
       --version-id "$previous_version" \
       "$recovery_copy" >/dev/null; then
-    rm -f "$recovery_copy"
+    [[ ! -e "$recovery_copy" ]] || unlink "$recovery_copy"
     return 1
   fi
 
   if ! jq -e \
       '.version != null and .serial != null and .lineage != null' \
       "$recovery_copy" >/dev/null; then
-    rm -f "$recovery_copy"
+    unlink "$recovery_copy"
     return 1
   fi
-  rm -f "$recovery_copy"
+  unlink "$recovery_copy"
   printf 'Prior Terraform state version retrieved and parsed\n'
 }
 
@@ -1355,12 +1359,15 @@ unset JOBCRON_RECOVERY_RC
 Expected: the earlier version can be retrieved and parsed as Terraform state
 while live state remains unchanged.
 
-- [ ] **Step 8: Commit the backend contract**
+- [x] **Step 8: Commit the backend contract**
 
 ```bash
 git add \
+  docs/superpowers/plans/260726-terraform-slice-1-identity-state-bootstrap-ci.md \
   infra/terraform/bootstrap/backend.tf \
-  infra/terraform/bootstrap/backend.example.hcl
+  infra/terraform/bootstrap/backend.example.hcl \
+  infra/terraform/bootstrap/state.tf \
+  infra/terraform/bootstrap/tests/state.tftest.hcl
 git diff --cached --check
 gitleaks git --staged --redact --no-banner
 git commit -m "infra: migrate Terraform bootstrap state"

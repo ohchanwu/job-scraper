@@ -36,6 +36,16 @@ run "state_contract" {
   }
 
   assert {
+    condition     = one(aws_s3_bucket_server_side_encryption_configuration.state.rule).bucket_key_enabled == false
+    error_message = "AES256 state encryption must explicitly disable bucket keys to prevent perpetual drift."
+  }
+
+  assert {
+    condition     = toset(one(aws_s3_bucket_server_side_encryption_configuration.state.rule).blocked_encryption_types) == toset(["SSE-C"])
+    error_message = "State encryption must block SSE-C uploads and match the live AWS normalization."
+  }
+
+  assert {
     condition = (
       one(data.aws_iam_policy_document.state_bucket.statement).sid == "DenyInsecureTransport" &&
       one(data.aws_iam_policy_document.state_bucket.statement).effect == "Deny" &&
