@@ -72,12 +72,19 @@ expect_rejected() {
 }
 
 checkout_sha="d23441a48e516b6c34aea4fa41551a30e30af803"
+aws_action_sha="e6de054238d6b7531b4efff3b6587d9aade6a06c"
 static_workflow="$fixture_root/repo/.github/workflows/terraform-check.yml"
 production_workflow="$fixture_root/repo/.github/workflows/terraform-production-plan.yml"
 state_file="$fixture_root/repo/infra/terraform/bootstrap/state.tf"
 failures=0
 
 reset_fixtures
+if ! grep -Fq \
+  "uses: aws-actions/configure-aws-credentials@$aws_action_sha" \
+  "$production_workflow"; then
+  printf 'FAIL: production workflow does not use the reviewed Node.js 24 AWS credentials action pin\n' >&2
+  exit 1
+fi
 if ! run_checker; then
   printf 'FAIL: rejected the unmodified workflows\n' >&2
   cat "$fixture_root/checker.out" >&2
@@ -93,6 +100,10 @@ expect_rejected "symbolic action ref" \
 expect_rejected "different full action SHA" \
   "Terraform workflows changed reviewed action pin" \
   replace_once "$static_workflow" "$checkout_sha" \
+  "0000000000000000000000000000000000000000" || failures=$((failures + 1))
+expect_rejected "different AWS credentials action SHA" \
+  "Terraform workflows changed reviewed action pin" \
+  replace_once "$production_workflow" "$aws_action_sha" \
   "0000000000000000000000000000000000000000" || failures=$((failures + 1))
 expect_rejected "missing OIDC permission" \
   "production workflow must request an OIDC id-token" \

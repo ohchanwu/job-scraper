@@ -199,7 +199,7 @@ require_action_pin \
 require_action_pin \
   2 "hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e"
 require_action_pin \
-  1 "aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708"
+  1 "aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c"
 
 if [[ "${CHECK_TERRAFORM_FIXTURE_MODE:-0}" != 1 ]]; then
   "$repo_root/scripts/check-terraform-workflows_test.sh"
