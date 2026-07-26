@@ -40,7 +40,10 @@ run "state_contract" {
       one(data.aws_iam_policy_document.state_bucket.statement).sid == "DenyInsecureTransport" &&
       one(data.aws_iam_policy_document.state_bucket.statement).effect == "Deny" &&
       toset(one(data.aws_iam_policy_document.state_bucket.statement).actions) == toset(["s3:*"]) &&
-      length(one(data.aws_iam_policy_document.state_bucket.statement).resources) == 2 &&
+      toset(one(data.aws_iam_policy_document.state_bucket.statement).resources) == toset([
+        "arn:aws:s3:::jobcron-state-test-only",
+        "arn:aws:s3:::jobcron-state-test-only/*",
+      ]) &&
       one(one(data.aws_iam_policy_document.state_bucket.statement).principals).type == "*" &&
       toset(one(one(data.aws_iam_policy_document.state_bucket.statement).principals).identifiers) == toset(["*"]) &&
       one(one(data.aws_iam_policy_document.state_bucket.statement).condition).test == "Bool" &&
