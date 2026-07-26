@@ -13,6 +13,10 @@ resource "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
 
   client_id_list = ["sts.amazonaws.com"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 data "aws_iam_policy_document" "production_assume" {
@@ -73,11 +77,9 @@ resource "aws_iam_role" "edge" {
 
 locals {
   production_state_keys = [
-    "bootstrap/terraform.tfstate",
     "production/terraform.tfstate",
   ]
   production_lock_keys = [
-    "bootstrap/terraform.tfstate.tflock",
     "production/terraform.tfstate.tflock",
   ]
 
@@ -91,10 +93,12 @@ locals {
 
 data "aws_iam_policy_document" "production_state" {
   statement {
-    actions = [
-      "s3:GetBucketLocation",
-      "s3:ListBucket",
-    ]
+    actions   = ["s3:GetBucketLocation"]
+    resources = [aws_s3_bucket.state.arn]
+  }
+
+  statement {
+    actions   = ["s3:ListBucket"]
     resources = [aws_s3_bucket.state.arn]
 
     condition {
@@ -142,10 +146,12 @@ resource "aws_iam_role_policy_attachment" "production_state" {
 
 data "aws_iam_policy_document" "edge_state" {
   statement {
-    actions = [
-      "s3:GetBucketLocation",
-      "s3:ListBucket",
-    ]
+    actions   = ["s3:GetBucketLocation"]
+    resources = [aws_s3_bucket.state.arn]
+  }
+
+  statement {
+    actions   = ["s3:ListBucket"]
     resources = [aws_s3_bucket.state.arn]
 
     condition {

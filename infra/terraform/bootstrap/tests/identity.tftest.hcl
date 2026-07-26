@@ -20,7 +20,15 @@ override_data {
   target          = data.aws_iam_policy_document.production_assume
   override_during = plan
   values = {
-    json = "production-assume"
+    json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Sid       = "Production"
+        Effect    = "Allow"
+        Action    = "sts:AssumeRoleWithWebIdentity"
+        Principal = { Federated = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com" }
+      }]
+    })
   }
 }
 
@@ -28,7 +36,15 @@ override_data {
   target          = data.aws_iam_policy_document.edge_assume
   override_during = plan
   values = {
-    json = "edge-assume"
+    json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Sid       = "Edge"
+        Effect    = "Allow"
+        Action    = "sts:AssumeRoleWithWebIdentity"
+        Principal = { Federated = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com" }
+      }]
+    })
   }
 }
 
@@ -36,7 +52,15 @@ override_data {
   target          = data.aws_iam_policy_document.production_state
   override_during = plan
   values = {
-    json = "production-state"
+    json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Sid      = "Production"
+        Effect   = "Allow"
+        Action   = "s3:GetObject"
+        Resource = "*"
+      }]
+    })
   }
 }
 
@@ -44,7 +68,15 @@ override_data {
   target          = data.aws_iam_policy_document.edge_state
   override_during = plan
   values = {
-    json = "edge-state"
+    json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Sid      = "Edge"
+        Effect   = "Allow"
+        Action   = "s3:GetObject"
+        Resource = "*"
+      }]
+    })
   }
 }
 
@@ -73,37 +105,27 @@ run "identity_contract" {
 
   assert {
     condition = (
-      aws_iam_role.production.assume_role_policy ==
-      data.aws_iam_policy_document.production_assume.json
-    )
-    error_message = "Production must use only its production trust document."
-  }
-
-  assert {
-    condition = (
-      aws_iam_role.edge.assume_role_policy ==
-      data.aws_iam_policy_document.edge_assume.json
-    )
-    error_message = "Edge must use only its edge trust document."
-  }
-
-  assert {
-    condition = (
       length(data.aws_iam_policy_document.production_assume.statement) == 1 &&
       one(data.aws_iam_policy_document.production_assume.statement).actions ==
       toset(["sts:AssumeRoleWithWebIdentity"]) &&
       length(one(data.aws_iam_policy_document.production_assume.statement).principals) == 1 &&
       one(one(data.aws_iam_policy_document.production_assume.statement).principals).type ==
       "Federated" &&
+      one(one(data.aws_iam_policy_document.production_assume.statement).principals).identifiers ==
+      toset([aws_iam_openid_connect_provider.github.arn]) &&
       length(one(data.aws_iam_policy_document.production_assume.statement).condition) == 2 &&
       alltrue([
         for condition in one(data.aws_iam_policy_document.production_assume.statement).condition :
         condition.test == "StringEquals" && (
           condition.variable == "token.actions.githubusercontent.com:aud"
-          ? condition.values == ["sts.amazonaws.com"]
+          ? (
+            length(condition.values) == 1 &&
+            one(condition.values) == "sts.amazonaws.com"
+          )
           : (
             condition.variable == "token.actions.githubusercontent.com:sub" &&
-            condition.values == ["repo:ohchanwu/jobcron:environment:production"]
+            length(condition.values) == 1 &&
+            one(condition.values) == "repo:ohchanwu/jobcron:environment:production"
           )
         )
       ])
@@ -119,15 +141,21 @@ run "identity_contract" {
       length(one(data.aws_iam_policy_document.edge_assume.statement).principals) == 1 &&
       one(one(data.aws_iam_policy_document.edge_assume.statement).principals).type ==
       "Federated" &&
+      one(one(data.aws_iam_policy_document.edge_assume.statement).principals).identifiers ==
+      toset([aws_iam_openid_connect_provider.github.arn]) &&
       length(one(data.aws_iam_policy_document.edge_assume.statement).condition) == 2 &&
       alltrue([
         for condition in one(data.aws_iam_policy_document.edge_assume.statement).condition :
         condition.test == "StringEquals" && (
           condition.variable == "token.actions.githubusercontent.com:aud"
-          ? condition.values == ["sts.amazonaws.com"]
+          ? (
+            length(condition.values) == 1 &&
+            one(condition.values) == "sts.amazonaws.com"
+          )
           : (
             condition.variable == "token.actions.githubusercontent.com:sub" &&
-            condition.values == ["repo:ohchanwu/jobcron:environment:edge"]
+            length(condition.values) == 1 &&
+            one(condition.values) == "repo:ohchanwu/jobcron:environment:edge"
           )
         )
       ])
@@ -167,20 +195,48 @@ run "identity_contract" {
 
   assert {
     condition = (
+      length(data.aws_iam_policy_document.production_state.statement[0].condition) == 0 &&
+      length(data.aws_iam_policy_document.production_state.statement[1].condition) == 1 &&
+      one(data.aws_iam_policy_document.production_state.statement[1].condition).test ==
+      "StringLike" &&
+      one(data.aws_iam_policy_document.production_state.statement[1].condition).variable ==
+      "s3:prefix" &&
+      toset(one(data.aws_iam_policy_document.production_state.statement[1].condition).values) ==
+      toset([
+        "production/terraform.tfstate",
+        "production/terraform.tfstate.tflock",
+      ])
+    )
+    error_message = "Production must scope ListBucket by prefix without conditioning GetBucketLocation."
+  }
+
+  assert {
+    condition = (
+      length(data.aws_iam_policy_document.edge_state.statement[0].condition) == 0 &&
+      length(data.aws_iam_policy_document.edge_state.statement[1].condition) == 1 &&
+      one(data.aws_iam_policy_document.edge_state.statement[1].condition).test ==
+      "StringLike" &&
+      one(data.aws_iam_policy_document.edge_state.statement[1].condition).variable ==
+      "s3:prefix" &&
+      toset(one(data.aws_iam_policy_document.edge_state.statement[1].condition).values) ==
+      toset(concat(local.edge_state_keys, local.edge_lock_keys))
+    )
+    error_message = "Edge must scope ListBucket by prefix without conditioning GetBucketLocation."
+  }
+
+  assert {
+    condition = (
       data.aws_iam_policy_document.production_state.statement[0].resources ==
       toset([aws_s3_bucket.state.arn]) &&
       data.aws_iam_policy_document.production_state.statement[1].resources ==
       toset([aws_s3_bucket.state.arn]) &&
       data.aws_iam_policy_document.production_state.statement[2].resources ==
       toset([
-        "${aws_s3_bucket.state.arn}/bootstrap/terraform.tfstate",
-        "${aws_s3_bucket.state.arn}/bootstrap/terraform.tfstate.tflock",
         "${aws_s3_bucket.state.arn}/production/terraform.tfstate",
         "${aws_s3_bucket.state.arn}/production/terraform.tfstate.tflock",
       ]) &&
       data.aws_iam_policy_document.production_state.statement[3].resources ==
       toset([
-        "${aws_s3_bucket.state.arn}/bootstrap/terraform.tfstate.tflock",
         "${aws_s3_bucket.state.arn}/production/terraform.tfstate.tflock",
       ])
     )
