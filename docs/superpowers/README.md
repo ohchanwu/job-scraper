@@ -8,6 +8,8 @@ decision records needed for the current task.
 
 - [Terraform AWS foundation and Cloudflare ingress automation][terraform-aws-foundation]
 - [Terraform-first production launch human-blocked steps][terraform-launch-human-steps]
+- [Terraform-first production launch roadmap][terraform-launch-roadmap]
+- [Terraform Slice 1: identity, state bootstrap, and CI][terraform-slice-1-plan]
 - [PostgreSQL local convergence and per-user AI credentials](specs/260714-postgresql-local-convergence-user-ai-credentials.md)
 
 ## Recently Archived
@@ -91,6 +93,10 @@ decision records needed for the current task.
   specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md
 [terraform-launch-human-steps]:
   specs/260726-terraform-first-production-launch-human-blocked-steps.md
+[terraform-launch-roadmap]:
+  plans/260726-terraform-first-production-launch-roadmap.md
+[terraform-slice-1-plan]:
+  plans/260726-terraform-slice-1-identity-state-bootstrap-ci.md
 [archived-first-production-human-steps]:
   archive/2026-07-26-first-production-launch-human-blocked-steps/260716-first-production-launch-human-blocked-steps.md
 [multi-user-account-spec]:
