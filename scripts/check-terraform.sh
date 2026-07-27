@@ -14,6 +14,7 @@ done
 
 state_file="$repo_root/infra/terraform/bootstrap/state.tf"
 network_file="$repo_root/infra/terraform/production/network.tf"
+variables_file="$repo_root/infra/terraform/production/variables.tf"
 
 require_resource_prevent_destroy() {
   local resource_type="$1"
@@ -62,6 +63,13 @@ require_resource_prevent_destroy aws_route public_ipv4_default "$network_file"
 require_resource_prevent_destroy \
   aws_route_table_association public "$network_file"
 require_resource_prevent_destroy aws_eip origin "$network_file"
+
+if ! grep -Fqx \
+  '    error_message = "Canonical public subnet keys must be public_a through public_d."' \
+  "$variables_file"; then
+  printf 'Canonical public subnet validation message changed.\n' >&2
+  exit 1
+fi
 
 if grep -Eq '^[[:space:]]*route[[:space:]]*\{' "$network_file"; then
   printf 'Production public route table must not use inline route blocks.\n' >&2

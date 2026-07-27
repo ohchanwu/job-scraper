@@ -18,6 +18,8 @@ cp "$repo_root/infra/terraform/bootstrap/identity.tf" \
   "$fixture_root/repo/infra/terraform/bootstrap/"
 cp "$repo_root/infra/terraform/production/network.tf" \
   "$fixture_root/repo/infra/terraform/production/"
+cp "$repo_root/infra/terraform/production/variables.tf" \
+  "$fixture_root/repo/infra/terraform/production/"
 
 cat >"$fixture_root/bin/terraform" <<'EOF'
 #!/usr/bin/env bash
@@ -33,6 +35,8 @@ reset_fixtures() {
   cp "$repo_root/infra/terraform/bootstrap/identity.tf" \
     "$fixture_root/repo/infra/terraform/bootstrap/"
   cp "$repo_root/infra/terraform/production/network.tf" \
+    "$fixture_root/repo/infra/terraform/production/"
+  cp "$repo_root/infra/terraform/production/variables.tf" \
     "$fixture_root/repo/infra/terraform/production/"
 }
 
@@ -105,6 +109,7 @@ production_workflow="$fixture_root/repo/.github/workflows/terraform-production-p
 state_file="$fixture_root/repo/infra/terraform/bootstrap/state.tf"
 identity_file="$fixture_root/repo/infra/terraform/bootstrap/identity.tf"
 network_file="$fixture_root/repo/infra/terraform/production/network.tf"
+variables_file="$fixture_root/repo/infra/terraform/production/variables.tf"
 failures=0
 
 reset_fixtures
@@ -133,6 +138,12 @@ expect_rejected "origin EIP association resource" \
   "Production origin EIP must remain unassociated until cutover." \
   sh -c 'printf "\nresource \"aws_eip_association\" \"origin\" {}\n" >>"$1"' \
   sh "$network_file" || failures=$((failures + 1))
+expect_rejected "canonical public subnet validation message" \
+  "Canonical public subnet validation message changed." \
+  replace_once "$variables_file" \
+  "Canonical public subnet keys must be public_a through public_d." \
+  "Canonical public subnet keys must include four entries." ||
+  failures=$((failures + 1))
 expect_rejected "wildcard network read action" \
   "Slice 2 network read policy actions differ from the approved ceiling." \
   replace_once "$identity_file" \
