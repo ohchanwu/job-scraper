@@ -8,6 +8,8 @@ automation][terraform-spec]
 <br>
 **Authorization decision:** [Two-window first-production-launch
 authorization][two-window-decision]
+<br>
+**Remote checklist:** [Pre-Batch-1 human input checklist][pre-batch-1-checklist]
 
 ## Purpose
 
@@ -457,5 +459,6 @@ This human-blocked specification is complete only when:
 
 [archived-spec]: ../archive/2026-07-26-first-production-launch-human-blocked-steps/260716-first-production-launch-human-blocked-steps.md
 [terraform-spec]: 260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md
+[pre-batch-1-checklist]: 260728-pre-batch-1-human-input-checklist.md
 [two-window-decision]:
   ../decisions/260727-two-window-first-production-launch-authorization.md

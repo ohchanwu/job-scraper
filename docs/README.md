@@ -33,6 +33,7 @@ Use this index instead of recursively loading the entire documentation tree.
 
 - [Active Superpowers work and context policy](superpowers/README.md)
 - [Two-window first-production-launch authorization][two-window-authorization]
+- [Pre-Batch-1 human input checklist][pre-batch-1-checklist]
 - [Contextual dealbreaker match-provenance contract][dealbreaker-provenance-spec]
 - [Contextual dealbreaker match-provenance implementation][dealbreaker-provenance-plan]
 - [Stage 1 contextual dealbreaker validation and exclusion evidence][contextual-dealbreaker-spec]
@@ -74,6 +75,8 @@ Compose, Caddy, CI, and EC2 commands consume those paths directly.
 [local-only-submit-formula]: learnings/260719-local-only-polecat-submit-formula.md
 [two-window-authorization]:
   superpowers/decisions/260727-two-window-first-production-launch-authorization.md
+[pre-batch-1-checklist]:
+  superpowers/specs/260728-pre-batch-1-human-input-checklist.md
 [ponytail-campaign-plan]:
   superpowers/archive/2026-07-18-ponytail-codebase-reduction/260717-campaign-plan.md
 [ponytail-campaign-ledger]:
