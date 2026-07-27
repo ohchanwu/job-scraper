@@ -55,6 +55,46 @@ replace_once() {
   mv "$file.tmp" "$file"
 }
 
+remove_exact_line() {
+  local file="$1"
+  local target="$2"
+
+  awk -v target="$target" '
+    $0 == target && !removed {
+      removed = 1
+      next
+    }
+    { print }
+    END {
+      if (!removed) {
+        exit 1
+      }
+    }
+  ' "$file" >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
+insert_into_first_run_block() {
+  local file="$1"
+  local line="$2"
+
+  awk -v line="$line" '
+    !inserted && $0 == "        run: |" {
+      print
+      print line
+      inserted = 1
+      next
+    }
+    { print }
+    END {
+      if (!inserted) {
+        exit 1
+      }
+    }
+  ' "$file" >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
 insert_inline_route() {
   local file="$1"
 
@@ -125,6 +165,16 @@ if ! run_checker; then
   exit 1
 fi
 
+expect_rejected "missing private network config mapping" \
+  "production workflow must map but never print private network config" \
+  remove_exact_line "$production_workflow" \
+  '      TF_VAR_canonical_network_config: ${{ secrets.TF_VAR_CANONICAL_NETWORK_CONFIG }}' ||
+  failures=$((failures + 1))
+expect_rejected "printed private network config" \
+  "production workflow must map but never print private network config" \
+  insert_into_first_run_block "$production_workflow" \
+  '          printf '\''%s\n'\'' "$TF_VAR_canonical_network_config"' ||
+  failures=$((failures + 1))
 expect_rejected "renamed origin EIP resource" \
   "Terraform resource is missing bound destroy protection: aws_eip.origin" \
   replace_once "$network_file" \
