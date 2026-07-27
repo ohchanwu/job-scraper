@@ -120,7 +120,7 @@ commit SHAs, test summary, and concerns.
 - Does not change: `data.aws_iam_policy_document.production_state`,
   `aws_iam_policy.production_state`, any trust policy, or any edge resource
 
-- [ ] **Step 1: Write the failing Terraform policy test**
+- [x] **Step 1: Write the failing Terraform policy test**
 
 Add an `identity_contract` assertion that requires one policy-document
 statement with `resources == ["*"]` and exactly this set:
@@ -143,7 +143,7 @@ Add `override_data` for
 `data.aws_iam_policy_document.production_network_read` using a harmless
 test-only document, following the existing state-policy overrides.
 
-- [ ] **Step 2: Write failing source-contract mutations**
+- [x] **Step 2: Write failing source-contract mutations**
 
 Update the expected IAM-action multiset in `scripts/check-terraform.sh` to
 include each approved EC2 action exactly once. Remove only the blanket
@@ -157,7 +157,7 @@ Add mutations in `scripts/check-terraform-workflows_test.sh` that change
 Slice 2 network read policy actions differ from the approved ceiling.
 ```
 
-- [ ] **Step 3: Run RED verification**
+- [x] **Step 3: Run RED verification**
 
 Run:
 
@@ -170,7 +170,7 @@ PATH=/opt/homebrew/bin:$PATH terraform \
 
 Expected: failure because the policy data source and resources do not exist.
 
-- [ ] **Step 4: Implement the minimal separate policy**
+- [x] **Step 4: Implement the minimal separate policy**
 
 Append to `identity.tf`:
 
@@ -205,7 +205,7 @@ resource "aws_iam_role_policy_attachment" "production_network_read" {
 
 Do not add a second statement or a wildcard action.
 
-- [ ] **Step 5: Run GREEN verification**
+- [x] **Step 5: Run GREEN verification**
 
 Run:
 
@@ -216,7 +216,7 @@ AWS_PROFILE=jobcron-admin PATH=/opt/homebrew/bin:$PATH \
 
 Expected: all Terraform and mutation tests pass.
 
-- [ ] **Step 6: Review and commit**
+- [x] **Step 6: Review and commit**
 
 Confirm the diff contains two new IAM resources, no existing policy changes,
 no trust changes, and no edge changes.
@@ -248,7 +248,7 @@ git commit -m "infra: add production network read boundary"
 - Produces the 13 stable addresses defined in the specification
 - Produces no output containing private values
 
-- [ ] **Step 1: Write the failing production-root test**
+- [x] **Step 1: Write the failing production-root test**
 
 Create `tests/network.tftest.hcl` with `mock_provider "aws" {}` and one
 `command = plan` run. Supply this non-production fixture:
@@ -317,7 +317,7 @@ Assert:
 - the EIP domain is `vpc`; and
 - every association points to `aws_route_table.public.id`.
 
-- [ ] **Step 2: Add failing static lifecycle checks**
+- [x] **Step 2: Add failing static lifecycle checks**
 
 Change `require_resource_prevent_destroy` to accept
 `resource_type`, `resource_name`, and `source_file`; pass `state.tf` to the
@@ -342,7 +342,7 @@ Extend the mutation fixture to copy `network.tf`. Add mutations that rename the
 `aws_eip_association` resource. Require the checker to reject each for its
 specific contract message.
 
-- [ ] **Step 3: Run RED verification**
+- [x] **Step 3: Run RED verification**
 
 Run:
 
@@ -353,7 +353,7 @@ PATH=/opt/homebrew/bin:$PATH terraform \
 
 Expected: failure because the variable and network resources do not exist.
 
-- [ ] **Step 4: Add the durable private input schema**
+- [x] **Step 4: Add the durable private input schema**
 
 Create `variables.tf`:
 
@@ -392,7 +392,7 @@ variable "canonical_network_config" {
 }
 ```
 
-- [ ] **Step 5: Add the minimal network resources**
+- [x] **Step 5: Add the minimal network resources**
 
 Create `network.tf` with the exact stable resource names from the
 specification. Use `for_each` for subnets and associations, reference resource
@@ -421,7 +421,7 @@ resource "aws_route" "public_ipv4_default" {
 Declare `aws_eip.origin` with only `domain = "vpc"` and the lifecycle guard.
 Do not declare an association.
 
-- [ ] **Step 6: Run GREEN and negative-input verification**
+- [x] **Step 6: Run GREEN and negative-input verification**
 
 Run:
 
@@ -435,7 +435,7 @@ AWS_PROFILE=jobcron-admin PATH=/opt/homebrew/bin:$PATH \
 Add a second test run with only three subnet keys and assert Terraform rejects
 it with the exact validation message.
 
-- [ ] **Step 7: Review and commit**
+- [x] **Step 7: Review and commit**
 
 ```bash
 git diff --check
