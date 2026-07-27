@@ -20,9 +20,9 @@ Each of the six implementation slices in the Terraform specification requires
 its own implementation plan, saved Terraform plan, independent review, and
 verification evidence. Window 1 authorizes policy-compliant applies for Slices
 2 through 5 without repeated human approval of each plan instance. Window 2
-reserves the final EIP, DNS, and public-traffic cutover for one explicit human
-response. Those slice plans own exact commands. This document owns the
-human-only inputs and checkpoints that those plans must not bypass.
+reserves the final EIP attachment, DNS, and public-traffic cutover for one
+explicit human response. Those slice plans own exact commands. This document
+owns the human-only inputs and checkpoints that those plans must not bypass.
 
 ## Supersession History
 
@@ -101,14 +101,14 @@ These gates apply to every implementation slice:
    incomplete, malformed, or unavailable.
 5. The existing EC2, VPC, RDS, and recovery materials remain intact until the
    explicit rollback-close checkpoint.
-6. The EIP and DNS cutover cannot start until the replacement stack passes
-   private-path data, application, archive, and recovery checks.
+6. The EIP attachment and DNS cutover cannot start until the replacement stack
+   passes private-path data, application, archive, and recovery checks.
 7. Each user-facing claim must be verified through the same browser path a real
    user will use. HTTP status checks alone are insufficient.
 8. Window 1 plans contain no destroy or replace action, use only the slice's
    explicit address-and-action allow-list, preserve the old EC2, old RDS,
-   existing EIP association, and rollback materials, and stay within the
-   approved spending ceiling.
+   inherited network relationships, unattached reserved EIP, and rollback
+   materials, and stay within the approved spending ceiling.
 9. Live discovery is unambiguous and satisfies the documented deterministic
    selection contract; credentials are available and current.
 10. Any ambiguity, drift, missing credential, unexpected action or address,
@@ -152,9 +152,9 @@ access-controlled operator log, not in this public file.
 ### Infrastructure And Edge
 
 - [ ] Mayor-prepared private inventory of the existing VPC, subnets, route
-      tables, EIP, EC2, RDS, security groups, DNS records, and rollback values
-- [ ] Deterministically selected canonical VPC and EIP candidate, or a human
-      decision if authenticated inventory is ambiguous
+      tables, EIPs, EC2, RDS, security groups, DNS records, and rollback values
+- [ ] Deterministically selected canonical VPC and public-network candidate,
+      plus confirmation that no existing EIP fills the reserved cutover role
 - [ ] Slice 3 non-overlapping private subnet CIDRs that pass its controller
       policy gate
 - [ ] Cloudflare Origin CA certificate and private key
@@ -203,19 +203,20 @@ Exit evidence:
 - the narrow edge role cannot mutate production compute, database, IAM, or
   secrets.
 
-### Slice 2: Canonical VPC And EIP Adoption
+### Slice 2: Canonical VPC Adoption And EIP Reservation
 
 Window 1 controller policy gates:
 
-- [ ] Authenticated inventory selects one canonical VPC and EIP candidate
-      unambiguously under the deterministic relationship contract.
+- [ ] Authenticated inventory selects one canonical VPC and public-network
+      candidate unambiguously and confirms that no existing EIP fills the
+      reserved cutover role.
 - [ ] An independent reviewer approves the exact two-plan adoption packet: one
       narrow production-network read policy plus attachment and one
-      imports-only production plan.
+      production plan with eight imports and one unattached EIP creation.
 - [ ] Machine checks prove both plans use only the explicit allow-list, contain
       no destroy or replace action, remain within the approved spending ceiling,
-      and preserve the old EC2, old RDS, routes, subnets, EIP association, and
-      rollback materials.
+      and preserve the old EC2, old RDS, routes, subnets, inherited main-route
+      relationship, and rollback materials.
 
 No private subnet CIDR choice is required in Slice 2. Exact CIDR selection and
 policy validation occur in Slice 3 immediately before subnet creation.
@@ -225,7 +226,8 @@ condition fires.
 
 Exit evidence:
 
-- Terraform owns the approved existing network and EIP objects;
+- Terraform owns the eight approved existing network objects and one new,
+  unattached EIP;
 - the post-import plan is clean; and
 - no production or rollback resource was replaced or deleted.
 

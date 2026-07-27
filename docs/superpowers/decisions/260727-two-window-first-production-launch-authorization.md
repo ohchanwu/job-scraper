@@ -22,8 +22,8 @@ unattended only when its saved plan:
   allow-list;
 - exposes no private or sensitive value in tracked output;
 - stays within the human-approved spending ceiling;
-- preserves the old EC2 instance, old RDS instance, existing EIP association,
-  and required rollback materials;
+- preserves the old EC2 instance, old RDS instance, inherited network
+  relationships, unattached reserved EIP, and required rollback materials;
 - follows an unambiguous live discovery result that satisfies the documented
   deterministic selection contract;
 - has current credentials available; and
@@ -35,11 +35,11 @@ review; it does not by itself require another human response.
 
 ### Window 2: Public Cutover
 
-The final EIP, DNS, and public-traffic cutover always remains a separate human
-gate. Mayor presents one consolidated packet containing the exact cutover
-scope, private-path verification result, rollback readiness, value-blind
-change summary, and stop conditions. Cutover starts only after the human
-explicitly approves that packet.
+The final EIP attachment, DNS, and public-traffic cutover always remains a
+separate human gate. Mayor presents one consolidated packet containing the
+exact cutover scope, private-path verification result, rollback readiness,
+value-blind change summary, and stop conditions. Cutover starts only after the
+human explicitly approves that packet.
 
 ## Stop And Return To The Human
 

@@ -1,4 +1,4 @@
-# Terraform Slice 2: Canonical VPC And EIP Adoption
+# Terraform Slice 2: Canonical VPC Adoption And EIP Reservation
 
 **Status:** Implementation in progress under Window 1 controller policy gates
 
@@ -17,11 +17,21 @@ steps][human-spec]
 **Authorization decision:** [Two-window first-production-launch
 authorization][two-window-decision]
 
+**Revision approval:** On 2026-07-28, the human approved replacing four
+nonexistent explicit subnet-association imports with read-only verification of
+the inherited main-route relationship and replacing the nonexistent EIP import
+with creation of one unattached EIP.
+
+That approval is Slice 2's spending ceiling: at most one standard VPC-domain
+EIP and no other billable production create. It does not establish the broader
+Window 1 maximum infrastructure spend required before Batch 1.
+
 ## Decision Summary
 
-Slice 2 adopts the existing RDS VPC, its shared public networking, and the
-existing Elastic IPv4 allocation into the production Terraform state. It does
-not move, replace, recreate, or reconfigure any live workload.
+Slice 2 adopts the existing RDS VPC and its shared public networking into the
+production Terraform state. It also creates one new, unattached Elastic IPv4
+allocation reserved for the later rollback/cutover path. It does not move,
+replace, recreate, or reconfigure any live workload.
 
 Mayor/Gas Town owns discovery, private identifier handling, Terraform
 implementation, plan review, apply execution, verification, and evidence.
@@ -33,7 +43,8 @@ The packet contains:
 - a bootstrap plan that grants the protected production workflow only the EC2
   read calls needed to refresh the adopted objects through one separate policy
   and attachment; and
-- a production plan that imports only the approved network and EIP objects.
+- a production plan that imports the approved existing network objects and
+  creates only one unattached EIP.
 
 No normal Slice 2 step requires the human to navigate AWS, run a command, copy
 an identifier, choose subnet CIDRs, inspect raw JSON, or edit a file.
@@ -70,7 +81,7 @@ before creating the saved adoption plan.
 
 ## Scope
 
-### Adopt
+### Adopt Existing Objects
 
 The selected candidate must resolve to exactly:
 
@@ -78,13 +89,23 @@ The selected candidate must resolve to exactly:
 - one internet gateway attached to that VPC;
 - four existing public subnets in that VPC;
 - one public route table shared by those four subnets;
-- the route-table associations for those four subnets;
-- the existing IPv4 default route through that internet gateway; and
-- one existing Elastic IPv4 allocation used by the rollback/cutover path.
+- no explicit route-table associations for those four subnets, which therefore
+  inherit that VPC's main route table; and
+- the existing IPv4 default route through that internet gateway.
+
+These are eight imports: one VPC, one internet gateway, four subnets, one route
+table, and one default route.
+
+### Create
+
+Create exactly one VPC-domain EIP with no association argument or separate EIP
+association resource. The allocation remains unattached in Slice 2 and is the
+only approved production create action.
 
 ### Do Not Touch
 
-Slice 2 must not import, create, update, replace, destroy, detach, or reassociate:
+Other than the exact adopt/create lists above, Slice 2 must not import, create,
+update, replace, destroy, detach, or reassociate:
 
 - the old EC2 instance or its VPC;
 - the current RDS instance, subnet group, or security groups;
@@ -93,11 +114,13 @@ Slice 2 must not import, create, update, replace, destroy, detach, or reassociat
 - any NAT gateway;
 - any DNS or Cloudflare object;
 - any EIP association;
-- any route, route target, subnet CIDR, or subnet attribute;
+- any additional route or route target;
+- any subnet CIDR or subnet attribute;
 - any application, container, database row, secret, certificate, or backup; or
 - the narrow edge role or edge Terraform state.
 
-Tag changes are deferred. The adoption plan is imports-only.
+Tag changes are deferred. The production plan is limited to eight imports and
+one unattached EIP creation.
 
 ## Private Inventory Contract
 
@@ -120,28 +143,32 @@ candidate:
 
 1. the chosen VPC contains the current RDS instance;
 2. all four chosen public subnets belong to that VPC;
-3. all four subnets use the same public route table;
+3. none of the four subnets has an explicit route-table association, so all
+   four inherit the same VPC main route table;
 4. that route table's IPv4 default route targets the chosen attached internet
    gateway;
-5. the chosen EIP is the existing rollback/cutover allocation;
-6. the EIP's association target will remain unchanged in Slice 2;
-7. at least two Availability Zones have enough unused, non-overlapping address
+5. no existing EIP is the rollback/cutover allocation, and the production plan
+   proposes one new unattached VPC-domain EIP;
+6. at least two Availability Zones have enough unused, non-overlapping address
    space for Slice 3's private database subnets; and
-8. the chosen objects are not already managed by another Terraform state.
+7. the chosen existing objects are not already managed by another Terraform
+   state.
 
 If exactly one candidate satisfies every relationship, Mayor selects it
 automatically under Window 1 after independent review. If more than one
 candidate remains plausible, the controller stops and presents the human a
-concise comparison without identifiers. If no candidate satisfies every
-relationship, Slice 2 stops instead of weakening the contract.
+concise comparison without identifiers. If an EIP appears before the saved
+plan is created, or no candidate satisfies every relationship, Slice 2 stops
+instead of weakening the contract or allocating a duplicate.
 
 ## Controller Policy Gates
 
 ### Gate 1: Deterministic Resource Selection
 
 The controller may accept the logical candidate only when authenticated
-inventory selects exactly one VPC, its enumerated public-network dependency
-set, and the EIP under the deterministic relationship contract. An independent
+inventory selects exactly one VPC and its enumerated public-network dependency
+set, verifies the inherited main-route relationship, and confirms that no
+existing EIP satisfies the reserved rollback/cutover role. An independent
 reviewer must reproduce the result. Passing this gate authorizes Mayor to store
 the candidate's durable, non-credential network configuration in the protected
 `production` GitHub environment secret; this does not mutate AWS
@@ -162,9 +189,11 @@ the summary and machine checks prove:
 
 - bootstrap: one narrow production-network read policy and one attachment, with
   no existing-policy or trust change and no update, replace, or delete action;
-- production: exactly 13 imports, zero additions, zero changes, and zero
+- production: exactly eight imports, one addition, zero changes, and zero
   destroys;
-- no route, subnet, EIP association, EC2, or RDS action;
+- the only production create action is `aws_eip.origin`;
+- no route-table association, route, subnet, EC2, or RDS create, update, or
+  delete action;
 - old EC2 and old RDS relationship fingerprints unchanged; and
 - the plans are saved locally, unpublished, and bound to the current remote
   state serials.
@@ -200,18 +229,14 @@ aws_subnet.public["public_c"]
 aws_subnet.public["public_d"]
 aws_route_table.public
 aws_route.public_ipv4_default
-aws_route_table_association.public["public_a"]
-aws_route_table_association.public["public_b"]
-aws_route_table_association.public["public_c"]
-aws_route_table_association.public["public_d"]
 aws_eip.origin
 ```
 
 Logical keys remain stable and contain no AWS identifiers.
 
-The allow-list contains 13 resource addresses: one VPC, one internet gateway,
-four subnets, one route table, one default route, four associations, and one
-EIP.
+The allow-list contains nine resource addresses. Eight are import-only: one
+VPC, one internet gateway, four subnets, one route table, and one default route.
+The ninth is create-only: one unattached EIP.
 
 Tracked variable schemas separate two private inputs:
 
@@ -232,13 +257,21 @@ The workflow maps the protected secret to Terraform's
 value. No resource identifier, CIDR, address, or Availability Zone is hard-coded
 in tracked HCL.
 
-Every adopted resource has a bound `prevent_destroy` lifecycle rule. The
-production root must not declare an EIP association resource or an EIP
+Every adopted resource and the created EIP has a bound `prevent_destroy`
+lifecycle rule. The production root must not declare a subnet route-table
+association, main-route-table association, EIP association resource, or EIP
 association argument in this slice.
 
 Route management must use one dedicated `aws_route` resource for the existing
 IPv4 default route. It must not mix inline route blocks with standalone route
 resources.
+
+The inherited relationship remains outside Terraform ownership. Immediately
+before each local saved plan and exact-plan apply, the controller must resolve
+each subnet's effective route table from read-only AWS inventory: explicit
+association first, otherwise the VPC main route table. The gate fails unless
+all four subnets still have no explicit association and inherit the adopted
+route table. Provider refresh and the same check run again after apply.
 
 ## Production Workflow Read Boundary
 
@@ -300,17 +333,19 @@ must show:
 
 ### Plan B: Production Adoption
 
-The saved production plan must report exactly 13 imports and:
+The saved production plan must report exactly eight imports and:
 
 ```text
-0 to add, 0 to change, 0 to destroy
+1 to add, 0 to change, 0 to destroy
 ```
 
 Machine review with `terraform show -json` must prove:
 
 - every planned address is in the exact allow-list above;
-- every allowed address carries import metadata;
-- no action list contains `create`, `update`, or `delete`;
+- each of the eight existing network addresses carries import metadata;
+- `aws_eip.origin` has no import metadata and its only action is `create`;
+- no other action list contains `create`, `update`, or `delete`;
+- no subnet or EIP association resource appears;
 - no unknown extra resource appears; and
 - no sensitive value is written to a tracked or published sink.
 
@@ -333,14 +368,16 @@ privately.
 If Plan A fails, stop and inspect the bootstrap state and IAM policy. Do not run
 Plan B.
 
-If an import fails:
+If an import or EIP creation fails:
 
 1. do not rerun or reconstruct state blindly;
 2. compare the production state with the exact import allow-list;
-3. verify live AWS relationships remain unchanged;
-4. continue only if the remaining imports can be represented by a newly saved
+3. inspect EIPs read-only and do not allocate a second address if the first
+   create reached AWS but not state;
+4. verify live AWS relationships remain unchanged;
+5. continue only if the remaining actions can be represented by a newly saved
    plan that passes independent review and every Window 1 policy gate; and
-5. otherwise request human approval for an exact state-only recovery.
+6. otherwise request human approval for an exact state-only recovery.
 
 Removing an imported address from Terraform state does not delete the AWS
 object, but `terraform state rm` is still a destructive state operation. It is
@@ -357,7 +394,7 @@ proven.
 - `terraform fmt -check -recursive`
 - `terraform init -backend=false`, `validate`, and `test` for all roots
 - exact resource-address and `prevent_destroy` contract tests
-- route-ownership and no-EIP-association tests
+- inherited-route assertion and no-association-resource tests
 - exact production-role read-policy ceiling tests
 - workflow mutation tests rejecting apply/import/state/destroy commands,
   symbolic action refs, unmasked account IDs, and broadened IAM actions
@@ -367,9 +404,10 @@ proven.
 ### Private Live Verification
 
 - pre-apply and post-apply resource relationship fingerprints match;
-- the EIP association target is unchanged;
+- all four public subnets still inherit the same main route table;
+- exactly one Terraform-owned EIP exists and remains unattached;
 - the old EC2 instance and current RDS instance are unchanged;
-- subnet CIDRs, attributes, route-table associations, and route targets match;
+- subnet CIDRs, attributes, and route targets match;
 - the post-apply bootstrap plan is clean;
 - the post-import local production plan is clean;
 - the protected GitHub production plan reports `no changes`; and
@@ -384,9 +422,11 @@ Slice 2 is complete only when:
 2. an independent reviewer approved both exact saved plans;
 3. the exact two-plan packet passed every Window 1 controller policy gate;
 4. the production role has only the required read additions;
-5. all 13 expected network and EIP addresses are present in production state;
+5. all eight adopted network addresses and the one created EIP address are
+   present in production state;
 6. the post-import local and protected GitHub plans are clean;
-7. the EIP association, routes, subnets, old EC2, and current RDS are unchanged;
+7. the EIP remains unattached, the public subnets still inherit the same main
+   route table, and routes, subnets, old EC2, and current RDS are unchanged;
 8. no private identifier or plan body entered Git or workflow logs;
 9. recovery evidence exists privately; and
 10. implementation documentation is updated and this specification is archived
@@ -415,7 +455,7 @@ unless inventory is ambiguous or another stop condition fires.
 - Creating or modifying RDS, EC2, IAM instance roles, runtime secrets, or
   security groups
 - Adding VPC or origin discovery tags
-- Reassociating the EIP
+- Attaching or reassociating the EIP
 - Cloudflare, DNS, Caddy, application, or database changes
 - Importing rollback resources that are intentionally outside final Terraform
   ownership

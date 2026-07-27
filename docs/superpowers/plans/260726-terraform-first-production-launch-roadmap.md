@@ -69,9 +69,9 @@ apply before its dependency passes its exit checkpoint.
 
 Slices 2 through 5 may apply under Window 1 only when the saved plan passes the
 machine-checkable policy and independent-review constraints in the
-[authorization decision][two-window-decision]. Slice 6's final EIP, DNS, and
-public-traffic cutover remains Window 2 and requires one explicit human
-response to the consolidated cutover packet.
+[authorization decision][two-window-decision]. Slice 6's final EIP attachment,
+DNS, and public-traffic cutover remains Window 2 and requires one explicit
+human response to the consolidated cutover packet.
 
 ## Slice Plans
 
@@ -94,7 +94,7 @@ Delivers:
 - static Terraform CI; and
 - a manually dispatched production plan-only workflow.
 
-### Slice 2: Canonical VPC And EIP Adoption
+### Slice 2: Canonical VPC Adoption And EIP Reservation
 
 **Specification:** [Slice 2 adoption specification][slice-2-spec]
 
@@ -102,10 +102,11 @@ Delivers:
 
 **Status:** Implementation in progress under Window 1 controller policy gates
 
-Will inventory the existing network privately, select the canonical VPC, and
-adopt only the policy-compliant VPC, public networking, and EIP without
-replacement or destruction. An unambiguous candidate and compliant two-plan
-packet proceed after independent review; ambiguity returns to the human.
+Will inventory the existing network privately, select the canonical VPC, import
+its eight policy-compliant public-network objects, and create one unattached EIP
+without replacing or reconfiguring live resources. An unambiguous candidate
+and compliant two-plan packet proceed after independent review; ambiguity
+returns to the human.
 
 ### Slice 3: Private Database Tier And Secret Containers
 
