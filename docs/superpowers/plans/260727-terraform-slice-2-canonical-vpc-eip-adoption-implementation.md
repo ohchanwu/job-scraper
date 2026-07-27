@@ -593,7 +593,7 @@ git commit -m "ci: enforce Terraform adoption plan contracts"
 - Consumes: authenticated read-only AWS inventory
 - Produces: one logical candidate bundle and selection policy packet
 
-- [ ] **Step 1: Reauthenticate value-blind**
+- [x] **Step 1: Reauthenticate value-blind**
 
 ```bash
 aws sso login --profile jobcron-admin --no-browser
@@ -606,7 +606,7 @@ test "$(aws configure get region --profile jobcron-admin)" = "ap-northeast-2"
 
 The human approves only the SSO page. Do not print the account or role.
 
-- [ ] **Step 2: Capture the private inventory**
+- [x] **Step 2: Capture the private inventory**
 
 Write full JSON responses under the ignored inventory directory for:
 
@@ -625,7 +625,7 @@ aws ec2 describe-security-groups
 Use `--profile jobcron-admin --region ap-northeast-2 --output json` on every
 call. Do not send the files through mail or paste them into a report.
 
-- [ ] **Step 3: Derive the candidate privately**
+- [x] **Step 3: Derive the candidate privately**
 
 Select the VPC containing the current RDS instance. Resolve each subnet's
 effective route table: explicit association first, otherwise the main route
@@ -645,7 +645,7 @@ The candidate must have:
 If any condition is false or multiple EIPs remain plausible, mark the packet
 `AMBIGUOUS` and stop at the selection policy gate.
 
-- [ ] **Step 4: Write the two packet forms**
+- [x] **Step 4: Write the two packet forms**
 
 `candidate-private.json` contains exact IDs, CIDRs, attributes, EIP
 association fingerprint, current EC2/RDS fingerprints, and capacity evidence.
@@ -697,18 +697,23 @@ Recommendation: approve | ambiguous
 
 Do not include identifiers or topology values.
 
-- [ ] **Step 5: Independently review the packet**
+- [x] **Step 5: Independently review the packet**
 
 The reviewer reads the private JSON locally, reruns the relationship queries,
 and records one of `APPROVED` or `AMBIGUOUS` in `task-4-report.md`.
 
-- [ ] **Step 6: Enforce the selection policy gate**
+- [x] **Step 6: Enforce the selection policy gate**
 
 If the reviewer reproduces exactly one candidate, select Candidate A
 automatically and continue. If the verdict is `AMBIGUOUS`, stop and present
 only `candidate-summary.md` and the review verdict to the human.
 
 No GitHub secret or AWS resource changes occur before this gate passes.
+
+**Run result (2026-07-28):** `AMBIGUOUS`. The existing public subnets inherit
+the VPC main route table rather than having importable explicit associations,
+and the target region has no existing EIP to adopt. Execution stopped at this
+gate without an AWS or GitHub mutation.
 
 ---
 
