@@ -8,6 +8,7 @@ trap 'rm -rf "$fixture_root"' EXIT
 mkdir -p \
   "$fixture_root/repo/.github/workflows" \
   "$fixture_root/repo/infra/terraform/bootstrap" \
+  "$fixture_root/repo/infra/terraform/production" \
   "$fixture_root/repo/scripts" \
   "$fixture_root/bin"
 cp "$repo_root/scripts/check-terraform.sh" "$fixture_root/repo/scripts/"
@@ -15,6 +16,8 @@ cp "$repo_root/infra/terraform/bootstrap/state.tf" \
   "$fixture_root/repo/infra/terraform/bootstrap/"
 cp "$repo_root/infra/terraform/bootstrap/identity.tf" \
   "$fixture_root/repo/infra/terraform/bootstrap/"
+cp "$repo_root/infra/terraform/production/network.tf" \
+  "$fixture_root/repo/infra/terraform/production/"
 
 cat >"$fixture_root/bin/terraform" <<'EOF'
 #!/usr/bin/env bash
@@ -29,6 +32,8 @@ reset_fixtures() {
     "$fixture_root/repo/infra/terraform/bootstrap/"
   cp "$repo_root/infra/terraform/bootstrap/identity.tf" \
     "$fixture_root/repo/infra/terraform/bootstrap/"
+  cp "$repo_root/infra/terraform/production/network.tf" \
+    "$fixture_root/repo/infra/terraform/production/"
 }
 
 replace_once() {
@@ -42,6 +47,28 @@ replace_once() {
       replaced = 1
     }
     { print }
+  ' "$file" >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
+insert_inline_route() {
+  local file="$1"
+
+  awk '
+    !inserted && $0 == "resource \"aws_route_table\" \"public\" {" {
+      print
+      print "  route {"
+      print "    cidr_block = \"0.0.0.0/0\""
+      print "  }"
+      inserted = 1
+      next
+    }
+    { print }
+    END {
+      if (!inserted) {
+        exit 1
+      }
+    }
   ' "$file" >"$file.tmp"
   mv "$file.tmp" "$file"
 }
@@ -77,6 +104,7 @@ static_workflow="$fixture_root/repo/.github/workflows/terraform-check.yml"
 production_workflow="$fixture_root/repo/.github/workflows/terraform-production-plan.yml"
 state_file="$fixture_root/repo/infra/terraform/bootstrap/state.tf"
 identity_file="$fixture_root/repo/infra/terraform/bootstrap/identity.tf"
+network_file="$fixture_root/repo/infra/terraform/production/network.tf"
 failures=0
 
 reset_fixtures
@@ -92,6 +120,19 @@ if ! run_checker; then
   exit 1
 fi
 
+expect_rejected "renamed origin EIP resource" \
+  "Terraform resource is missing bound destroy protection: aws_eip.origin" \
+  replace_once "$network_file" \
+  'resource "aws_eip" "origin" {' \
+  'resource "aws_eip" "renamed_origin" {' || failures=$((failures + 1))
+expect_rejected "inline public route" \
+  "Production public route table must not use inline route blocks." \
+  insert_inline_route "$network_file" ||
+  failures=$((failures + 1))
+expect_rejected "origin EIP association resource" \
+  "Production origin EIP must remain unassociated until cutover." \
+  sh -c 'printf "\nresource \"aws_eip_association\" \"origin\" {}\n" >>"$1"' \
+  sh "$network_file" || failures=$((failures + 1))
 expect_rejected "wildcard network read action" \
   "Slice 2 network read policy actions differ from the approved ceiling." \
   replace_once "$identity_file" \
@@ -147,7 +188,7 @@ expect_rejected "full destroy command" \
   sh -c 'printf "\n          terraform -chdir=infra/terraform/production destroy -auto-approve\n" >>"$1"' \
   sh "$production_workflow" || failures=$((failures + 1))
 expect_rejected "misbound destroy protection" \
-  "State resource is missing bound destroy protection" \
+  "Terraform resource is missing bound destroy protection" \
   replace_once "$state_file" \
   'resource "aws_s3_bucket_versioning" "state" {' \
   'resource "aws_s3_bucket_versioning" "unprotected" {' || failures=$((failures + 1))
