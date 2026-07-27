@@ -66,12 +66,14 @@ enable public traffic, delete rollback resources, or close the rollback window.
 
 ## Timing
 
-The human is not needed after Slice 2's two security fixes. Independent agents
-review those fixes and execution continues under the controller policy gates.
-The next normal human interaction is the consolidated Window 1 input packet
-only if human-controlled inputs remain missing. After those inputs are
-available, the intended next interaction is Window 2 cutover approval. A stop
-condition is an exceptional human-facing interruption.
+Task 3's two security fixes are internal: independent agents review them and
+execution continues without human approval of the fixes themselves. If AWS
+reauthentication is required, the next expected human action is value-blind AWS
+SSO device approval. Otherwise, the next expected human action is the
+consolidated Window 1 input packet if human-controlled inputs remain missing.
+After SSO approval and any required Window 1 inputs, Window 2 cutover is the
+next planned approval. A stop condition is an exceptional human-facing
+interruption.
 
 ## Rationale
 
