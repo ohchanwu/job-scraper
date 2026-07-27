@@ -52,6 +52,7 @@ decision records needed for the current task.
 
 ## Stable Decisions
 
+- [Two-window first-production-launch authorization][two-window-authorization]
 - [No browser-driven scraping for v1.x](decisions/260606-no-browser-driven-scraping.md)
 - [RDS production settings](decisions/260710-rds-production-settings.md)
 - [Jobcron production and rename decisions](decisions/260711-jobcron-production.md)
@@ -102,6 +103,8 @@ decision records needed for the current task.
   specs/260727-terraform-slice-2-canonical-vpc-eip-adoption.md
 [terraform-slice-2-plan]:
   plans/260727-terraform-slice-2-canonical-vpc-eip-adoption-implementation.md
+[two-window-authorization]:
+  decisions/260727-two-window-first-production-launch-authorization.md
 [terraform-slice-1-plan]:
   archive/2026-07-26-terraform-slice-1/260726-terraform-slice-1-identity-state-bootstrap-ci.md
 [terraform-slice-1-verification]:

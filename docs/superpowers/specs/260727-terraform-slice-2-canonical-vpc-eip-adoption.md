@@ -1,6 +1,6 @@
 # Terraform Slice 2: Canonical VPC And EIP Adoption
 
-**Status:** Approved for implementation; Human Gate 1 pending
+**Status:** Implementation in progress under Window 1 controller policy gates
 
 **Recorded:** 2026-07-27
 
@@ -14,6 +14,9 @@ steps][human-spec]
 
 **Implementation plan:** [Terraform Slice 2 implementation plan][implementation-plan]
 
+**Authorization decision:** [Two-window first-production-launch
+authorization][two-window-decision]
+
 ## Decision Summary
 
 Slice 2 adopts the existing RDS VPC, its shared public networking, and the
@@ -22,10 +25,8 @@ not move, replace, recreate, or reconfigure any live workload.
 
 Mayor/Gas Town owns discovery, private identifier handling, Terraform
 implementation, plan review, apply execution, verification, and evidence.
-The human overseer has two normal interactions:
-
-1. approve Mayor's recommended canonical VPC and EIP candidate; and
-2. approve one exact two-plan adoption packet after independent review.
+Under Window 1, an unambiguous candidate and a compliant two-plan packet may
+proceed without another human response.
 
 The packet contains:
 
@@ -71,7 +72,7 @@ before creating the saved adoption plan.
 
 ### Adopt
 
-The approved candidate must resolve to exactly:
+The selected candidate must resolve to exactly:
 
 - one VPC containing the current RDS instance;
 - one internet gateway attached to that VPC;
@@ -128,33 +129,36 @@ candidate:
    space for Slice 3's private database subnets; and
 8. the chosen objects are not already managed by another Terraform state.
 
-Mayor presents one recommendation with a short explanation. If more than one
-candidate remains plausible, the human receives a concise comparison without
-identifiers and selects one. If no candidate satisfies every relationship,
-Slice 2 stops instead of weakening the contract.
+If exactly one candidate satisfies every relationship, Mayor selects it
+automatically under Window 1 after independent review. If more than one
+candidate remains plausible, the controller stops and presents the human a
+concise comparison without identifiers. If no candidate satisfies every
+relationship, Slice 2 stops instead of weakening the contract.
 
-## Human-Only Authority
+## Controller Policy Gates
 
-### Normal Gate 1: Resource Selection
+### Gate 1: Deterministic Resource Selection
 
-The human approves or rejects the recommended logical candidate. Approval
-covers the VPC, its enumerated public-network dependency set, and the EIP as one
-bundle. It also authorizes Mayor to store that candidate's durable,
-non-credential network configuration in the protected `production` GitHub
-environment secret; this does not mutate AWS infrastructure.
+The controller may accept the logical candidate only when authenticated
+inventory selects exactly one VPC, its enumerated public-network dependency
+set, and the EIP under the deterministic relationship contract. An independent
+reviewer must reproduce the result. Passing this gate authorizes Mayor to store
+the candidate's durable, non-credential network configuration in the protected
+`production` GitHub environment secret; this does not mutate AWS
+infrastructure.
 
 The human does not choose the two private subnet CIDRs in this slice. Mayor only
 proves that sufficient non-overlapping capacity exists. Exact CIDR selection
-and approval belong to Slice 3, immediately before subnet creation.
+and policy validation belong to Slice 3, immediately before subnet creation.
 
-### Normal Gate 2: Exact Adoption Packet
+### Gate 2: Exact Adoption Packet
 
 Mayor supplies a value-blind summary and cryptographic digest for each saved
 plan. An independent reviewer must first confirm the raw private plans satisfy
 this specification.
 
-The human approves both exact saved plans in one response only when the summary
-states:
+The controller may apply both exact saved plans in dependency order only when
+the summary and machine checks prove:
 
 - bootstrap: one narrow production-network read policy and one attachment, with
   no existing-policy or trust change and no update, replace, or delete action;
@@ -165,18 +169,23 @@ states:
 - the plans are saved locally, unpublished, and bound to the current remote
   state serials.
 
-Approval applies only to those exact plan files and digests. Any regenerated
-plan requires a new summary and approval.
+Authorization applies only to those exact plan files and digests. Any
+regenerated plan requires a new summary, machine checks, and independent
+review, but not another human response when every Window 1 policy gate passes.
 
-### Conditional Human Gate
+### Stop And Return To The Human
 
-A further human decision is required only if:
+A human decision is required if:
 
 - inventory is genuinely ambiguous;
-- the plan proposes any live-resource mutation;
+- the plan proposes an unexpected action, address, live-resource mutation,
+  destroy, or replace action;
 - a partial import leaves state recovery uncertain;
 - another Terraform state already owns a candidate object; or
-- implementation would need scope beyond the approved resource bundle.
+- implementation would need scope beyond the approved resource bundle;
+- credentials are missing or stale;
+- the plan exceeds the approved spending ceiling; or
+- any other Window 1 policy or verification gate fails.
 
 ## Terraform Ownership Contract
 
@@ -267,7 +276,8 @@ The workflow continues to:
 Static checks must require the private network input mapping and reject any
 workflow command that prints it.
 
-All imports and applies run locally with `jobcron-admin` after human approval.
+All imports and applies run locally with `jobcron-admin` after the applicable
+controller policy gate passes.
 
 ## Plan And Apply Contract
 
@@ -304,9 +314,10 @@ Machine review with `terraform show -json` must prove:
 - no unknown extra resource appears; and
 - no sensitive value is written to a tracked or published sink.
 
-Mayor applies the two exact saved plans in dependency order. The bootstrap plan
-runs first. If it fails or no longer matches state, the production plan does
-not run.
+After independent review and all Window 1 policy checks pass, Mayor applies the
+two exact saved plans in dependency order without another human response. The
+bootstrap plan runs first. If it fails or no longer matches state, the
+production plan does not run.
 
 After import, temporary import blocks and import-only private inputs are removed
 from the working configuration. The durable private network configuration
@@ -327,8 +338,8 @@ If an import fails:
 1. do not rerun or reconstruct state blindly;
 2. compare the production state with the exact import allow-list;
 3. verify live AWS relationships remain unchanged;
-4. continue only if the remaining imports can be represented by a newly saved,
-   reviewed, and approved plan; and
+4. continue only if the remaining imports can be represented by a newly saved
+   plan that passes independent review and every Window 1 policy gate; and
 5. otherwise request human approval for an exact state-only recovery.
 
 Removing an imported address from Terraform state does not delete the AWS
@@ -368,9 +379,10 @@ proven.
 
 Slice 2 is complete only when:
 
-1. the human approved the recommended candidate bundle;
+1. authenticated inventory and independent review selected one candidate
+   bundle unambiguously;
 2. an independent reviewer approved both exact saved plans;
-3. the human approved the exact two-plan packet;
+3. the exact two-plan packet passed every Window 1 controller policy gate;
 4. the production role has only the required read additions;
 5. all 13 expected network and EIP addresses are present in production state;
 6. the post-import local and protected GitHub plans are clean;
@@ -388,14 +400,14 @@ The implementation plan should split work into independently reviewed units:
 2. Terraform contract tests and network resource configuration;
 3. narrow production-role read-policy change;
 4. temporary import inputs and saved-plan JSON gates;
-5. independent whole-slice review and the human adoption packet;
+5. independent whole-slice review and the controller policy packet;
 6. exact-plan applies, post-import cleanup, and live verification; and
 7. architecture, operator-guide, roadmap, and archive updates.
 
 Expected engineering effort is approximately one half-day for inventory and
 candidate proof, one day for TDD implementation and review, and one half-day for
-the approval/apply/verification checkpoint. Normal human effort is two concise
-approval responses.
+the policy-gated apply and verification checkpoint. Normal human effort is zero
+unless inventory is ambiguous or another stop condition fires.
 
 ## Out Of Scope
 
@@ -417,3 +429,5 @@ approval responses.
   ../plans/260726-terraform-first-production-launch-roadmap.md
 [terraform-spec]:
   260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md
+[two-window-decision]:
+  ../decisions/260727-two-window-first-production-launch-authorization.md

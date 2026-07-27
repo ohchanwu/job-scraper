@@ -1,11 +1,13 @@
 # Jobcron Terraform-First Production Launch: Human-Blocked Steps
 
-**Status:** Active; awaiting Terraform implementation plans and human-authorized
-external changes<br>
+**Status:** Active under the approved two-window launch authorization<br>
 **Recorded:** 2026-07-26<br>
 **Owner:** Human operator, assisted by agents where appropriate<br>
 **Infrastructure authority:** [Terraform AWS foundation and Cloudflare ingress
 automation][terraform-spec]
+<br>
+**Authorization decision:** [Two-window first-production-launch
+authorization][two-window-decision]
 
 ## Purpose
 
@@ -14,10 +16,13 @@ that only the human operator can supply for Jobcron's first production launch.
 This document is not an executable command runbook and does not authorize an AWS,
 Cloudflare, registry, DNS, database, or production change by itself.
 
-Each of the six implementation slices in the Terraform specification requires its
-own implementation plan, saved Terraform plan, verification evidence, and explicit
-human approval before state changes. Those slice plans own exact commands. This
-document owns the human checkpoints that those plans must not bypass.
+Each of the six implementation slices in the Terraform specification requires
+its own implementation plan, saved Terraform plan, independent review, and
+verification evidence. Window 1 authorizes policy-compliant applies for Slices
+2 through 5 without repeated human approval of each plan instance. Window 2
+reserves the final EIP, DNS, and public-traffic cutover for one explicit human
+response. Those slice plans own exact commands. This document owns the
+human-only inputs and checkpoints that those plans must not bypass.
 
 ## Supersession History
 
@@ -71,11 +76,12 @@ certificates, or private recovery locations.
 ## Authority Boundary
 
 An agent may prepare plans, inspect value-blind metadata, run approved checks,
-and execute an authorized change while the human is present. An agent must not:
+and execute a Window 1 change without the human present when every controller
+policy gate passes. An agent must not:
 
 - invent or select the human's identity, account, billing, or recovery values;
 - reveal, copy into Git, or echo undisclosed secret values;
-- approve spending or a Terraform apply on the human's behalf;
+- set or broaden the human-approved spending ceiling;
 - choose the canonical production resources without an authenticated inventory;
 - enable public traffic before the human authorizes cutover;
 - delete rollback resources or close the rollback window; or
@@ -85,8 +91,9 @@ and execute an authorized change while the human is present. An agent must not:
 
 These gates apply to every implementation slice:
 
-1. No state-changing phase starts until the exact saved plan has been reviewed
-   and explicitly approved by the human.
+1. No state-changing phase starts until the exact saved plan passes independent
+   review and the applicable Window 1 controller policy gate or Window 2 human
+   approval.
 2. No real secret may enter Git, Terraform variables, plans, state, EC2 user
    data, issue text, chat, screenshots, or shared logs.
 3. No cloud identifier or personal address may enter tracked documentation.
@@ -98,27 +105,35 @@ These gates apply to every implementation slice:
    private-path data, application, archive, and recovery checks.
 7. Each user-facing claim must be verified through the same browser path a real
    user will use. HTTP status checks alone are insufficient.
-8. Any failed gate stops the sequence. The operator records the failure
-   privately and resumes only from a newly reviewed plan or documented recovery
-   point.
+8. Window 1 plans contain no destroy or replace action, use only the slice's
+   explicit address-and-action allow-list, preserve the old EC2, old RDS,
+   existing EIP association, and rollback materials, and stay within the
+   approved spending ceiling.
+9. Live discovery is unambiguous and satisfies the documented deterministic
+   selection contract; credentials are available and current.
+10. Any ambiguity, drift, missing credential, unexpected action or address,
+    policy broadening, spending violation, failed verification, uncertain
+    recovery, destroy or replace action, or rollback-close need stops the
+    sequence and returns control to the human.
 
 ## Human-Controlled Inputs
 
 Prepare these values privately. Checkbox completion belongs in the
 access-controlled operator log, not in this public file.
 
-### Identity And Approval
+### Window 1 Inputs And Authority
 
 - [x] Authenticated `jobcron-admin` AWS CLI profile backed by IAM Identity
       Center and MFA
 - [x] Expected AWS account, role, and region, checked without publishing their
       exact values
-- [ ] Cloudflare account and zone access
-- [ ] OCI registry repository and credentials for image publication and host
-      pulls
-- [ ] Approval limits for infrastructure spending
+- [ ] Cloud account access not held by the agent, including Cloudflare account
+      and zone access
+- [ ] OCI registry access and credentials for image publication and host pulls
+- [ ] Maximum approved infrastructure spend
 - [x] Access-controlled operator-log location
-- [ ] Private rollback decision owner and rollback-window end condition
+- [ ] Private rollback decision owner and the condition that ends the rollback
+      window
 
 ### Application And Data
 
@@ -138,22 +153,33 @@ access-controlled operator log, not in this public file.
 
 - [ ] Mayor-prepared private inventory of the existing VPC, subnets, route
       tables, EIP, EC2, RDS, security groups, DNS records, and rollback values
-- [ ] Human approval of Mayor's recommended canonical VPC and EIP candidate
-- [ ] Slice 3 human-approved non-overlapping private subnet CIDRs
+- [ ] Deterministically selected canonical VPC and EIP candidate, or a human
+      decision if authenticated inventory is ambiguous
+- [ ] Slice 3 non-overlapping private subnet CIDRs that pass its controller
+      policy gate
 - [ ] Cloudflare Origin CA certificate and private key
 - [ ] Private record of Origin CA expiry and a renewal reminder
 - [ ] Private locations for Terraform recovery evidence, database archives,
       log archives, and verified MacBook copies
 
-## Human Execution Gates By Terraform Slice
+### Human Interaction Timing
 
-The slice order is load-bearing. A later slice may be planned while an earlier
-one is under review, but it may not apply changes that depend on an incomplete
-earlier slice.
+The human is not needed after Slice 2's two security fixes. Independent agents
+review those fixes and execution continues under the controller policy gates.
+The next normal interaction is the consolidated Window 1 input packet only if
+human-controlled inputs remain missing. After those inputs are available, the
+intended next interaction is the Window 2 cutover approval. Any stop condition
+is an exceptional human-facing interruption.
+
+## Authorization Gates By Terraform Slice
+
+The slice order is load-bearing. Planning, implementation, and independent
+review may be front-loaded, but no apply may run before its dependency passes
+its exit checkpoint.
 
 ### Slice 1: Identity, State Bootstrap, And Terraform CI
 
-Human actions and approvals:
+Completed human actions and approvals:
 
 - [x] Configure and authenticate `jobcron-admin` through IAM Identity Center.
 - [x] Confirm the caller identity, expected role, and expected region without
@@ -177,22 +203,23 @@ Exit evidence:
 
 ### Slice 2: Canonical VPC And EIP Adoption
 
-Human actions and approvals:
+Window 1 controller policy gates:
 
-- [ ] Approve or reject Mayor's recommended canonical VPC and EIP candidate.
-      Mayor performs the authenticated inventory, proves sufficient address
-      capacity, and handles all private identifiers.
-- [ ] Approve the exact two-plan adoption packet after independent review:
-      one narrow production-network read policy plus attachment and one
-      imports-only production plan. Mayor performs both applies and verifies
-      the old EC2, old RDS, routes, subnets, and EIP association remain
-      untouched.
+- [ ] Authenticated inventory selects one canonical VPC and EIP candidate
+      unambiguously under the deterministic relationship contract.
+- [ ] An independent reviewer approves the exact two-plan adoption packet: one
+      narrow production-network read policy plus attachment and one
+      imports-only production plan.
+- [ ] Machine checks prove both plans use only the explicit allow-list, contain
+      no destroy or replace action, remain within the approved spending ceiling,
+      and preserve the old EC2, old RDS, routes, subnets, EIP association, and
+      rollback materials.
 
 No private subnet CIDR choice is required in Slice 2. Exact CIDR selection and
-approval occur in Slice 3 immediately before subnet creation.
+policy validation occur in Slice 3 immediately before subnet creation.
 
-A further human decision is required only if inventory is ambiguous, a plan
-contains live-resource changes, or state recovery becomes uncertain.
+A human decision is required only if inventory is ambiguous or another stop
+condition fires.
 
 Exit evidence:
 
@@ -202,16 +229,16 @@ Exit evidence:
 
 ### Slice 3: Private Database Tier And Secret Containers
 
-Human actions and approvals:
+Window 1 controller policy gates:
 
-- [ ] Review and approve the plan for two private database subnets, database
+- [ ] Independently review the plan for two private database subnets, database
       subnet group, security groups, new encrypted RDS instance, recovery
       bucket, and empty runtime-secret container.
 - [ ] Confirm the plan uses RDS-managed master credentials and does not expose a
       secret version to Terraform.
-- [ ] Approve the apply only after checking deletion protection,
+- [ ] Apply only after machine checks prove deletion protection,
       `prevent_destroy`, backup retention, TLS requirements, and public-access
-      settings.
+      settings, plus every global Window 1 policy requirement.
 - [ ] Record the new RDS restore identifiers and recovery evidence privately.
 
 Exit evidence:
@@ -223,9 +250,9 @@ Exit evidence:
 
 ### Slice 4: Replacement EC2, Transient Runtime, And Recovery
 
-Human actions and approvals:
+Window 1 controller policy gates and human-supplied inputs:
 
-- [ ] Review and approve the replacement-host, IAM, Session Manager, bootstrap,
+- [ ] Independently review the replacement-host, IAM, Session Manager, bootstrap,
       Caddy, and archive plan.
 - [ ] Confirm the host has encrypted storage, no SSH key pair, no port 22
       ingress, and only the narrow permissions approved by the Terraform spec.
@@ -257,11 +284,11 @@ Exit evidence:
 
 ### Slice 5: Cloudflare Prefix-List Automation
 
-Human actions and approvals:
+Window 1 controller policy gates:
 
-- [ ] Review the fetched official Cloudflare IPv4 set, validation result,
+- [ ] Independently review the fetched official Cloudflare IPv4 set, validation result,
       prefix-list quota, saved edge plan, and narrow edge-role permissions.
-- [ ] Approve an edge apply only when the plan can change the tagged prefix
+- [ ] Apply only when machine checks prove the plan can change the tagged prefix
       list and its single origin port 443 ingress rule.
 - [ ] Confirm malformed, empty, implausible, duplicate, or oversized upstream
       data fails without changing AWS.
@@ -304,7 +331,11 @@ Exit evidence:
 
 #### EIP, DNS, And Cloudflare Cutover
 
-- [ ] Review and explicitly approve the saved EIP reassociation plan.
+- [ ] Present one consolidated Window 2 packet containing the exact cutover
+      scope, private-path verification result, rollback readiness, value-blind
+      change summary, and stop conditions.
+- [ ] Obtain the human's explicit approval of that exact packet before any EIP,
+      DNS, or public-traffic change.
 - [ ] Issue or confirm the Origin CA certificate covers the apex and `www`.
 - [ ] Populate the runtime secret before Caddy starts.
 - [ ] Record current DNS and EIP rollback values privately.
@@ -397,8 +428,8 @@ Using a real browser through the proxied public hostname:
 
 This human-blocked specification is complete only when:
 
-1. all six Terraform slices have approved plans, verified applies, and recorded
-   human checkpoints;
+1. all six Terraform slices have independently reviewed plans, verified applies,
+   and recorded Window 1 policy or Window 2 human checkpoints;
 2. the replacement stack satisfies the Terraform infrastructure acceptance
    criteria;
 3. the exact release, import, paid-provider, browser, durability, archive, and
@@ -409,7 +440,8 @@ This human-blocked specification is complete only when:
    references, and the Superpowers index describe the deployed architecture;
 6. no secret or private production identifier appears in tracked artifacts,
    Terraform state, plans, or shared logs; and
-7. the human records the final go-live and rollback-close decisions privately.
+7. the human records the Window 2 go-live and rollback-close decisions
+   privately.
 
 ## Out Of Scope
 
@@ -421,3 +453,5 @@ This human-blocked specification is complete only when:
 
 [archived-spec]: ../archive/2026-07-26-first-production-launch-human-blocked-steps/260716-first-production-launch-human-blocked-steps.md
 [terraform-spec]: 260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md
+[two-window-decision]:
+  ../decisions/260727-two-window-first-production-launch-authorization.md

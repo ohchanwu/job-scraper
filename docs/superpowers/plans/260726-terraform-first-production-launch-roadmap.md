@@ -1,7 +1,7 @@
 # Terraform-First Production Launch Implementation Roadmap
 
-**Status:** Active; Slice 1 is complete and the Slice 2 specification awaits
-human review
+**Status:** Active; Slice 1 is complete and Slice 2 is in progress under the
+approved two-window authorization
 
 **Recorded:** 2026-07-26
 
@@ -10,6 +10,9 @@ automation][terraform-spec]
 
 **Human authority:** [Terraform-first production launch human-blocked
 steps][human-spec]
+
+**Authorization decision:** [Two-window first-production-launch
+authorization][two-window-decision]
 
 ## Goal
 
@@ -32,7 +35,8 @@ Every slice plan must include:
 4. agent actions versus human-only actions;
 5. value-blind commands that do not print identifiers or secrets;
 6. expected safe output;
-7. an explicit human approval immediately before each state change;
+7. the Window 1 controller policy gate or Window 2 human approval that
+   authorizes each state change;
 8. stop conditions and common failure symptoms;
 9. rollback or recovery steps; and
 10. evidence required before the next slice starts.
@@ -59,8 +63,15 @@ tracked documentation.
    and documentation
 ```
 
-Later slices may be researched while an earlier slice is being reviewed, but no
-state-changing task may run before its dependency passes its exit checkpoint.
+Planning, implementation, and independent review may be front-loaded across
+later slices. State-changing applies remain strictly ordered: no slice may
+apply before its dependency passes its exit checkpoint.
+
+Slices 2 through 5 may apply under Window 1 only when the saved plan passes the
+machine-checkable policy and independent-review constraints in the
+[authorization decision][two-window-decision]. Slice 6's final EIP, DNS, and
+public-traffic cutover remains Window 2 and requires one explicit human
+response to the consolidated cutover packet.
 
 ## Slice Plans
 
@@ -89,13 +100,12 @@ Delivers:
 
 **Implementation plan:** [Slice 2 implementation plan][slice-2-plan]
 
-**Status:** Implementation in progress; authenticated inventory and Human
-Gate 1 are pending
+**Status:** Implementation in progress under Window 1 controller policy gates
 
 Will inventory the existing network privately, select the canonical VPC, and
-adopt only the approved VPC, public networking, and EIP without replacement or
-destruction. Mayor/Gas Town performs the inventory and execution; the human
-normally supplies only candidate approval and exact-plan approval.
+adopt only the policy-compliant VPC, public networking, and EIP without
+replacement or destruction. An unambiguous candidate and compliant two-plan
+packet proceed after independent review; ambiguity returns to the human.
 
 ### Slice 3: Private Database Tier And Secret Containers
 
@@ -130,9 +140,10 @@ browser journeys, and close the rollback window only after durability checks.
 
 ## Plan-Authoring Cadence
 
-Write the next slice plan only when the current slice is close enough to its
-exit checkpoint that live resource names, interfaces, and failure evidence are
-known. This avoids a six-slice command book that goes stale before use.
+Plans and independent reviews may be prepared ahead of the apply sequence.
+Revalidate drift-sensitive inventory and regenerate saved plans immediately
+before each policy-gated apply so front-loading does not turn into stale
+authority.
 
 When a slice finishes:
 
@@ -150,6 +161,8 @@ the rollback window.
 
 [human-spec]:
   ../specs/260726-terraform-first-production-launch-human-blocked-steps.md
+[two-window-decision]:
+  ../decisions/260727-two-window-first-production-launch-authorization.md
 [slice-1-plan]:
   ../archive/2026-07-26-terraform-slice-1/260726-terraform-slice-1-identity-state-bootstrap-ci.md
 [slice-1-verification]:

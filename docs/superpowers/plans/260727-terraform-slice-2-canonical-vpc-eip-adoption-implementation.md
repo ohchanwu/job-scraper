@@ -5,8 +5,7 @@
 > `superpowers:executing-plans` to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** Approved for execution; human Gate 1 remains before private input
-publication and human Gate 2 remains before either Terraform apply
+**Status:** Approved for execution under Window 1 controller policy gates
 
 **Goal:** Adopt the existing RDS VPC, its four-subnet public network, and the
 existing Elastic IPv4 allocation into the production Terraform state without
@@ -24,6 +23,9 @@ Identity Center, Bash, `jq`, GitHub Actions OIDC, and GitHub CLI.
 **Specification:** [Terraform Slice 2 canonical VPC and EIP adoption
 specification][slice-2-spec]
 
+**Authorization decision:** [Two-window first-production-launch
+authorization][two-window-decision]
+
 ## Global Constraints
 
 - Start every implementation task from the exact current Mayor baseline. When
@@ -40,10 +42,14 @@ specification][slice-2-spec]
 - Exact private inventory, inputs, plans, digests, and recovery evidence belong
   only under this plan's ignored `.superpowers/sdd/` workspace or ignored
   `*.tfvars.json`, `*.tfplan`, and `*.backend.hcl` files.
-- No AWS mutation is allowed before the exact saved-plan Gate 2 approval.
-- Gate 1 approval authorizes only the chosen candidate and value-blind creation
-  of `TF_VAR_CANONICAL_NETWORK_CONFIG` in GitHub's protected `production`
-  environment. It does not authorize Terraform apply.
+- No AWS mutation is allowed before independent review and the exact saved-plan
+  controller policy gate.
+- Candidate selection must be deterministic and unambiguous. Passing the
+  selection policy gate authorizes only value-blind creation of
+  `TF_VAR_CANONICAL_NETWORK_CONFIG` in GitHub's protected `production`
+  environment.
+- A state-changing apply may proceed without another human response only when
+  the saved plan passes every Window 1 policy in the authorization decision.
 - Plan A may create only
   `aws_iam_policy.production_network_read` and
   `aws_iam_role_policy_attachment.production_network_read`.
@@ -63,13 +69,13 @@ specification][slice-2-spec]
 ```text
 Task 1 bootstrap read boundary ─┐
 Task 2 production declarations ├─> Task 3 CI and plan gates
-                               └─> Task 4 private inventory -> Human Gate 1
+                               └─> Task 4 inventory -> selection policy gate
                                                         |
                                                         v
                                   Task 5 bind inputs and save plans
                                                         |
                                                         v
-                                     independent review -> Human Gate 2
+                              independent review -> apply policy gate
                                                         |
                                                         v
                                   Task 6 apply, clean, verify
@@ -585,7 +591,7 @@ git commit -m "ci: enforce Terraform adoption plan contracts"
 **Interfaces:**
 
 - Consumes: authenticated read-only AWS inventory
-- Produces: one logical candidate bundle and Human Gate 1 packet
+- Produces: one logical candidate bundle and selection policy packet
 
 - [ ] **Step 1: Reauthenticate value-blind**
 
@@ -637,7 +643,7 @@ The candidate must have:
 - unused, non-overlapping capacity in at least two Availability Zones.
 
 If any condition is false or multiple EIPs remain plausible, mark the packet
-`AMBIGUOUS` and stop at Gate 1.
+`AMBIGUOUS` and stop at the selection policy gate.
 
 - [ ] **Step 4: Write the two packet forms**
 
@@ -696,16 +702,17 @@ Do not include identifiers or topology values.
 The reviewer reads the private JSON locally, reruns the relationship queries,
 and records one of `APPROVED` or `AMBIGUOUS` in `task-4-report.md`.
 
-- [ ] **Step 6: Stop for Human Gate 1**
+- [ ] **Step 6: Enforce the selection policy gate**
 
-Present only `candidate-summary.md` and the review verdict. Ask the human to
-approve or reject Candidate A.
+If the reviewer reproduces exactly one candidate, select Candidate A
+automatically and continue. If the verdict is `AMBIGUOUS`, stop and present
+only `candidate-summary.md` and the review verdict to the human.
 
-No GitHub secret or AWS resource changes occur before approval.
+No GitHub secret or AWS resource changes occur before this gate passes.
 
 ---
 
-### Task 5: Bind The Approved Candidate And Create Exact Saved Plans
+### Task 5: Bind The Policy-Compliant Candidate And Create Exact Saved Plans
 
 **Files:**
 
@@ -722,12 +729,12 @@ No GitHub secret or AWS resource changes occur before approval.
 - Create privately in the SDD workspace:
   `slice2-adoption.tfplan`
 - Create privately in the SDD workspace:
-  `gate-2-summary.md`
+  `controller-policy-summary.md`
 
 **Interfaces:**
 
-- Consumes: Human-approved `candidate-private.json`
-- Produces: two exact, digested saved plans and Human Gate 2 packet
+- Consumes: policy-compliant `candidate-private.json`
+- Produces: two exact, digested saved plans and controller policy packet
 
 - [ ] **Step 1: Add the transient import schema and blocks**
 
@@ -751,7 +758,7 @@ The four subnet and four association maps must use only `public_a` through
 
 - [ ] **Step 2: Build private Terraform inputs**
 
-Generate the durable network configuration from the approved inventory,
+Generate the durable network configuration from the policy-compliant inventory,
 including the attributes declared in Task 2. Generate the transient import ID
 object separately. Confirm Git ignores both:
 
@@ -773,7 +780,8 @@ git check-ignore \
 
 - [ ] **Step 3: Set the protected GitHub environment secret**
 
-After Gate 1 approval, pipe the compact durable JSON without echoing it:
+After the selection policy gate passes, pipe the compact durable JSON without
+echoing it:
 
 ```bash
 jq -c '.canonical_network_config' \
@@ -849,8 +857,8 @@ PATH=/opt/homebrew/bin:$PATH terraform \
 ```
 
 Expected: exactly 13 imports and `0 add, 0 change, 0 destroy`. Any attribute
-drift blocks Gate 2; adjust tracked configuration to the observed approved
-state, rerun tests, and generate a new plan.
+drift blocks the apply policy gate; adjust tracked configuration to the
+observed selected state, rerun tests, and generate a new plan.
 
 - [ ] **Step 8: Bind plans to evidence**
 
@@ -863,17 +871,17 @@ Privately record:
 - old EC2 and current RDS fingerprints; and
 - current S3 state object version identifiers.
 
-Hash private values before placing them in the human summary.
+Hash private values before placing them in the controller summary.
 
 - [ ] **Step 9: Independent whole-packet review**
 
 The reviewer checks both raw plans, both JSON contracts, the private inventory,
 all fingerprints, the exact tracked diff, and the no-publication boundary.
-Verdict must be `APPROVED` before Gate 2.
+Verdict must be `APPROVED` before the apply policy gate.
 
-- [ ] **Step 10: Stop for Human Gate 2**
+- [ ] **Step 10: Enforce the apply policy gate**
 
-Present the value-blind summary:
+Record the value-blind summary:
 
 ```text
 Plan A: 2 creates, 0 updates, 0 replacements, 0 destroys
@@ -885,7 +893,11 @@ State serial bindings: recorded
 Independent review: APPROVED
 ```
 
-Ask the human to authorize applying only those exact saved plans.
+Apply only those exact saved plans without another human response when machine
+checks and independent review prove every Window 1 policy. Stop and return to
+the human on ambiguity, drift, missing credentials, an unexpected action or
+address, policy broadening, a spending-limit violation, failed verification,
+uncertain recovery, or any destroy or replace action.
 
 ---
 
@@ -901,14 +913,14 @@ Ask the human to authorize applying only those exact saved plans.
 
 **Interfaces:**
 
-- Consumes: exact Gate 2-approved plan files and digests
+- Consumes: exact policy-compliant plan files and digests
 - Produces: adopted remote state and clean local/remote production plans
 
 - [ ] **Step 1: Reverify exact plan identity**
 
-Recompute both plan digests and compare them byte-for-byte with Gate 2. Confirm
-state lineage/serial fingerprints still match. If either differs, stop and
-regenerate the packet.
+Recompute both plan digests and compare them byte-for-byte with the reviewed
+controller packet. Confirm state lineage/serial fingerprints still match. If
+either differs, stop and regenerate the packet.
 
 - [ ] **Step 2: Apply Plan A only**
 
@@ -1012,10 +1024,10 @@ subnets, shared public route table/default route/associations, and EIP
 allocation. State explicitly that the EIP association, old EC2, and current RDS
 remain unchanged and outside this slice's mutation scope.
 
-- [ ] **Step 2: Mark the two human gates complete**
+- [ ] **Step 2: Mark the two controller policy gates complete**
 
-Check only the approved candidate and exact-plan items. Do not mark Slice 3
-CIDR selection complete.
+Check only the deterministic candidate and exact-plan policy items. Do not mark
+Slice 3 CIDR selection complete.
 
 - [ ] **Step 3: Write sanitized verification**
 
@@ -1082,3 +1094,5 @@ protected production state.
 
 [slice-2-spec]:
   ../specs/260727-terraform-slice-2-canonical-vpc-eip-adoption.md
+[two-window-decision]:
+  ../decisions/260727-two-window-first-production-launch-authorization.md
