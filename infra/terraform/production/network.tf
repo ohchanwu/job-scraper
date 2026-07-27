@@ -54,17 +54,6 @@ resource "aws_route" "public_ipv4_default" {
   }
 }
 
-resource "aws_route_table_association" "public" {
-  for_each = toset(["public_a", "public_b", "public_c", "public_d"])
-
-  subnet_id      = aws_subnet.public[each.key].id
-  route_table_id = aws_route_table.public.id
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
 resource "aws_eip" "origin" {
   domain = "vpc"
 

@@ -196,6 +196,14 @@ expect_rejected "origin EIP association resource" \
   "Production origin EIP must remain unassociated until cutover." \
   sh -c 'printf "\nresource \"aws_eip_association\" \"origin\" {}\n" >>"$1"' \
   sh "$network_file" || failures=$((failures + 1))
+expect_rejected "explicit subnet route-table association resource" \
+  "Production public subnets must inherit the VPC main route table." \
+  sh -c 'printf "\nresource \"aws_route_table_association\" \"unexpected\" {}\n" >>"$1"' \
+  sh "$network_file" || failures=$((failures + 1))
+expect_rejected "main route-table association resource" \
+  "Production public subnets must inherit the VPC main route table." \
+  sh -c 'printf "\nresource \"aws_main_route_table_association\" \"unexpected\" {}\n" >>"$1"' \
+  sh "$network_file" || failures=$((failures + 1))
 expect_rejected "canonical public subnet validation message" \
   "Canonical public subnet validation message changed." \
   replace_once "$variables_file" \

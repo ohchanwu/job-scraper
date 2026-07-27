@@ -60,8 +60,6 @@ require_resource_prevent_destroy aws_internet_gateway canonical "$network_file"
 require_resource_prevent_destroy aws_subnet public "$network_file"
 require_resource_prevent_destroy aws_route_table public "$network_file"
 require_resource_prevent_destroy aws_route public_ipv4_default "$network_file"
-require_resource_prevent_destroy \
-  aws_route_table_association public "$network_file"
 require_resource_prevent_destroy aws_eip origin "$network_file"
 
 if ! grep -Fqx \
@@ -73,6 +71,13 @@ fi
 
 if grep -Eq '^[[:space:]]*route[[:space:]]*\{' "$network_file"; then
   printf 'Production public route table must not use inline route blocks.\n' >&2
+  exit 1
+fi
+
+if grep -Eq \
+  '^resource[[:space:]]+"aws_(route_table_association|main_route_table_association)"' \
+  "$network_file"; then
+  printf 'Production public subnets must inherit the VPC main route table.\n' >&2
   exit 1
 fi
 

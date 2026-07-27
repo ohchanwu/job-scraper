@@ -468,7 +468,7 @@ The original Task 2 commit declared four explicit subnet association resources
 before live inventory proved that those resources do not exist. The following
 steps replace that assumption while preserving the completed history above.
 
-- [ ] **Step 8: Add failing no-association mutation tests**
+- [x] **Step 8: Add failing no-association mutation tests**
 
 Extend `scripts/check-terraform-workflows_test.sh` with mutations that append
 one `aws_route_table_association` resource and one
@@ -478,14 +478,14 @@ reject either with one generic inherited-main-route contract message.
 Run the mutation suite before changing the checker and record RED because the
 new forbidden resource is accepted.
 
-- [ ] **Step 9: Remove association ownership and implement the guard**
+- [x] **Step 9: Remove association ownership and implement the guard**
 
 Delete `aws_route_table_association.public` from `network.tf`, remove its test
 assertion and `prevent_destroy` requirement, and add static rejection of both
 association resource types. Keep the four subnets, route table, standalone
 default route, and EIP declaration unchanged.
 
-- [ ] **Step 10: Run GREEN verification and commit**
+- [x] **Step 10: Run GREEN verification and commit**
 
 ```bash
 PATH=/opt/homebrew/bin:$PATH terraform \

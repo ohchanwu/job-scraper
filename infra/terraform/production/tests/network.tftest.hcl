@@ -88,13 +88,6 @@ run "network_contract" {
     error_message = "The adopted origin EIP must remain VPC-scoped."
   }
 
-  assert {
-    condition = alltrue([
-      for association in aws_route_table_association.public :
-      association.route_table_id == aws_route_table.public.id
-    ])
-    error_message = "Every public subnet must use the canonical public route table."
-  }
 }
 
 run "reject_missing_public_subnet" {
