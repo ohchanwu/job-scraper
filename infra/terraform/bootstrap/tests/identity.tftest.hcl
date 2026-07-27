@@ -105,6 +105,14 @@ override_resource {
 }
 
 override_resource {
+  target          = aws_iam_policy.production_network_read
+  override_during = plan
+  values = {
+    arn = "arn:aws:iam::123456789012:policy/JobcronTerraformProductionNetworkRead"
+  }
+}
+
+override_resource {
   target          = aws_iam_policy.edge_state
   override_during = plan
   values = {
@@ -197,6 +205,15 @@ run "identity_contract" {
   assert {
     condition = (
       length(data.aws_iam_policy_document.production_network_read.statement) == 1 &&
+      one(
+        jsondecode(data.aws_iam_policy_document.production_network_read.json).Statement,
+      ).Effect ==
+      "Allow" &&
+      coalesce(
+        one(data.aws_iam_policy_document.production_network_read.statement).effect,
+        "Allow",
+      ) ==
+      "Allow" &&
       one(data.aws_iam_policy_document.production_network_read.statement).resources ==
       toset(["*"]) &&
       one(data.aws_iam_policy_document.production_network_read.statement).actions ==
@@ -213,6 +230,18 @@ run "identity_contract" {
       ])
     )
     error_message = "Production network reads must remain within the approved EC2 Describe ceiling."
+  }
+
+  assert {
+    condition = (
+      aws_iam_policy.production_network_read.policy ==
+      data.aws_iam_policy_document.production_network_read.json &&
+      aws_iam_role_policy_attachment.production_network_read.role ==
+      aws_iam_role.production.name &&
+      aws_iam_role_policy_attachment.production_network_read.policy_arn ==
+      aws_iam_policy.production_network_read.arn
+    )
+    error_message = "Production must attach only the approved network-read policy document."
   }
 
   assert {
