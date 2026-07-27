@@ -1,30 +1,6 @@
 mock_provider "aws" {}
 
 override_resource {
-  target = aws_vpc.canonical
-}
-
-override_resource {
-  target = aws_internet_gateway.canonical
-}
-
-override_resource {
-  target = aws_subnet.public["public_a"]
-}
-
-override_resource {
-  target = aws_subnet.public["public_b"]
-}
-
-override_resource {
-  target = aws_subnet.public["public_c"]
-}
-
-override_resource {
-  target = aws_subnet.public["public_d"]
-}
-
-override_resource {
   target          = aws_route_table.public
   override_during = plan
   values = {
@@ -32,24 +8,7 @@ override_resource {
   }
 }
 
-override_resource {
-  target = aws_route.public_ipv4_default
-}
-
 variables {
-  canonical_import_ids = {
-    vpc              = "vpc-test-only"
-    internet_gateway = "igw-test-only"
-    public_subnets = {
-      public_a = "subnet-test-only-a"
-      public_b = "subnet-test-only-b"
-      public_c = "subnet-test-only-c"
-      public_d = "subnet-test-only-d"
-    }
-    public_route_table  = "rtb-test-only"
-    public_ipv4_default = "rtb-test-only_0.0.0.0/0"
-  }
-
   canonical_network_config = {
     vpc = {
       cidr_block                           = "10.255.0.0/24"
@@ -179,24 +138,4 @@ run "reject_missing_public_subnet" {
   }
 
   expect_failures = [var.canonical_network_config]
-}
-
-run "reject_missing_import_subnet" {
-  command = plan
-
-  variables {
-    canonical_import_ids = {
-      vpc              = "vpc-test-only"
-      internet_gateway = "igw-test-only"
-      public_subnets = {
-        public_a = "subnet-test-only-a"
-        public_b = "subnet-test-only-b"
-        public_c = "subnet-test-only-c"
-      }
-      public_route_table  = "rtb-test-only"
-      public_ipv4_default = "rtb-test-only_0.0.0.0/0"
-    }
-  }
-
-  expect_failures = [var.canonical_import_ids]
 }

@@ -940,7 +940,7 @@ git commit -m "infra: bind canonical network imports"
 Confirm `git status --short` does not list any private input, plan, JSON, or
 backend file.
 
-- [ ] **Step 6: Save Plan A**
+- [x] **Step 6: Save Plan A**
 
 ```bash
 AWS_PROFILE=jobcron-admin PATH=/opt/homebrew/bin:$PATH \
@@ -956,7 +956,7 @@ PATH=/opt/homebrew/bin:$PATH terraform \
 
 Expected: exactly two creates and no other action.
 
-- [ ] **Step 7: Reassert inherited routes and save Plan B**
+- [x] **Step 7: Reassert inherited routes and save Plan B**
 
 Immediately before planning, refresh the read-only route-table inventory.
 Resolve each subnet's effective table using explicit association first,
@@ -982,7 +982,7 @@ metadata. Any attribute drift blocks the apply policy gate; adjust tracked
 configuration to the observed selected state, rerun tests, and generate a new
 plan.
 
-- [ ] **Step 8: Bind plans to evidence**
+- [x] **Step 8: Bind plans to evidence**
 
 Privately record:
 
@@ -996,13 +996,13 @@ Privately record:
 
 Hash private values before placing them in the controller summary.
 
-- [ ] **Step 9: Independent whole-packet review**
+- [x] **Step 9: Independent whole-packet review**
 
 The reviewer checks both raw plans, both JSON contracts, the private inventory,
 all fingerprints, the exact tracked diff, and the no-publication boundary.
 Verdict must be `APPROVED` before the apply policy gate.
 
-- [ ] **Step 10: Enforce the apply policy gate**
+- [x] **Step 10: Enforce the apply policy gate**
 
 Record the value-blind summary:
 
@@ -1041,7 +1041,7 @@ uncertain recovery, or any destroy or replace action.
 - Produces: adopted remote state, one unattached EIP, and clean local/remote
   production plans
 
-- [ ] **Step 1: Reverify exact plan identity**
+- [x] **Step 1: Reverify exact plan identity**
 
 Recompute both plan digests and compare them byte-for-byte with the reviewed
 controller packet. Confirm state lineage/serial fingerprints still match.
@@ -1050,7 +1050,7 @@ still inherit the adopted main route table with no explicit association, and
 no EIP may have appeared. If any condition or digest differs, stop and
 regenerate the packet.
 
-- [ ] **Step 2: Apply Plan A only**
+- [x] **Step 2: Apply Plan A only**
 
 ```bash
 AWS_PROFILE=jobcron-admin PATH=/opt/homebrew/bin:$PATH \
@@ -1060,7 +1060,7 @@ AWS_PROFILE=jobcron-admin PATH=/opt/homebrew/bin:$PATH \
 
 Immediately run a new bootstrap plan. It must be clean before Plan B runs.
 
-- [ ] **Step 3: Apply Plan B only**
+- [x] **Step 3: Apply Plan B only**
 
 ```bash
 AWS_PROFILE=jobcron-admin PATH=/opt/homebrew/bin:$PATH \
@@ -1070,7 +1070,7 @@ AWS_PROFILE=jobcron-admin PATH=/opt/homebrew/bin:$PATH \
 
 Expected: `8 imported, 1 added, 0 changed, 0 destroyed`.
 
-- [ ] **Step 4: Verify live relationships before cleanup**
+- [x] **Step 4: Verify live relationships before cleanup**
 
 Rerun the Task 4 inventory. Require matching pre/post fingerprints for:
 
@@ -1084,7 +1084,7 @@ Rerun the Task 4 inventory. Require matching pre/post fingerprints for:
 
 If any AWS relationship changed, stop and report. Do not run `state rm`.
 
-- [ ] **Step 5: Remove import-only configuration**
+- [x] **Step 5: Remove import-only configuration**
 
 Delete `imports.tf` and remove only `canonical_import_ids` from `variables.tf`.
 Keep `canonical_network_config` and the protected GitHub secret.
@@ -1111,7 +1111,7 @@ Terraform production plan: no changes
 
 The Node.js 20 deprecation annotation must also be absent.
 
-- [ ] **Step 7: Run full verification and commit cleanup**
+- [x] **Step 7: Run full verification and commit cleanup**
 
 ```bash
 AWS_PROFILE=jobcron-admin PATH=/opt/homebrew/bin:$PATH \
