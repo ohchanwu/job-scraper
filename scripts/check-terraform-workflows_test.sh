@@ -175,6 +175,14 @@ expect_rejected "printed private network config" \
   insert_into_first_run_block "$production_workflow" \
   '          printf '\''%s\n'\'' "$TF_VAR_canonical_network_config"' ||
   failures=$((failures + 1))
+expect_rejected "bare env environment dump" \
+  "production workflow must map but never print private network config" \
+  insert_into_first_run_block "$production_workflow" \
+  '          env' || failures=$((failures + 1))
+expect_rejected "bare printenv environment dump" \
+  "production workflow must map but never print private network config" \
+  insert_into_first_run_block "$production_workflow" \
+  '          printenv' || failures=$((failures + 1))
 expect_rejected "renamed origin EIP resource" \
   "Terraform resource is missing bound destroy protection: aws_eip.origin" \
   replace_once "$network_file" \

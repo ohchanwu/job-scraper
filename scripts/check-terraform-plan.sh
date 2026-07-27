@@ -58,7 +58,7 @@ case "$mode" in
         (.change.actions == ["no-op"]) and
         (.change.importing | type == "object") and
         (.change.importing.id | type == "string") and
-        (.change.importing.id | length > 0)
+        (.change.importing.id | test("\\S"))
       ) and
       ([.resource_changes[].address] | sort == ($expected | sort))
     ' "$plan_json" >/dev/null 2>&1 || fail

@@ -162,6 +162,9 @@ jq '.resource_changes[0].change.importing = {}' \
 jq '.resource_changes[0].change.importing.id = ""' \
   "$fixture_root/adoption-valid.json" \
   >"$fixture_root/adoption-empty-import-id.json"
+jq '.resource_changes[0].change.importing.id = "   "' \
+  "$fixture_root/adoption-valid.json" \
+  >"$fixture_root/adoption-whitespace-import-id.json"
 jq '.resource_changes[0].change.importing.id = 123' \
   "$fixture_root/adoption-valid.json" \
   >"$fixture_root/adoption-malformed-import-id.json"
@@ -222,6 +225,10 @@ expect_rejected \
   "adoption empty import id" \
   adoption \
   "$fixture_root/adoption-empty-import-id.json"
+expect_rejected \
+  "adoption whitespace-only import id" \
+  adoption \
+  "$fixture_root/adoption-whitespace-import-id.json"
 expect_rejected \
   "adoption malformed import id" \
   adoption \
