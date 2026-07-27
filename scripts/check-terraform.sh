@@ -163,6 +163,29 @@ fi
 production_workflow="$repo_root/.github/workflows/terraform-production-plan.yml"
 workflow_files=("$repo_root/.github/workflows/"terraform-*.yml)
 
+mapping_count="$(
+  grep -Fxc \
+    '      TF_VAR_canonical_network_config: ${{ secrets.TF_VAR_CANONICAL_NETWORK_CONFIG }}' \
+    "$production_workflow" || true
+)"
+variable_count="$(
+  grep -Fo 'TF_VAR_canonical_network_config' "$production_workflow" |
+    wc -l |
+    tr -d ' ' || true
+)"
+secret_count="$(
+  grep -Fo 'TF_VAR_CANONICAL_NETWORK_CONFIG' "$production_workflow" |
+    wc -l |
+    tr -d ' ' || true
+)"
+if [[ "$mapping_count" -ne 1 ||
+  "$variable_count" -ne 1 ||
+  "$secret_count" -ne 1 ]]; then
+  printf 'production workflow must map but never print private network config\n' \
+    >&2
+  exit 1
+fi
+
 if ! grep -Fq 'id-token: write' "$production_workflow"; then
   printf 'production workflow must request an OIDC id-token\n' >&2
   exit 1
@@ -242,5 +265,6 @@ require_action_pin \
   1 "aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c"
 
 if [[ "${CHECK_TERRAFORM_FIXTURE_MODE:-0}" != 1 ]]; then
+  "$repo_root/scripts/check-terraform-plan_test.sh"
   "$repo_root/scripts/check-terraform-workflows_test.sh"
 fi
