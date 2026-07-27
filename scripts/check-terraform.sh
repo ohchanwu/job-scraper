@@ -13,10 +13,12 @@ for root in bootstrap production edge; do
 done
 
 state_file="$repo_root/infra/terraform/bootstrap/state.tf"
+network_file="$repo_root/infra/terraform/production/network.tf"
 
 require_resource_prevent_destroy() {
   local resource_type="$1"
   local resource_name="$2"
+  local source_file="$3"
 
   if ! awk -v header="resource \"$resource_type\" \"$resource_name\" {" '
     $0 == header {
@@ -41,17 +43,38 @@ require_resource_prevent_destroy() {
         exit 1
       }
     }
-  ' "$state_file"; then
-    printf 'State resource is missing bound destroy protection: %s.%s\n' \
+  ' "$source_file"; then
+    printf 'Terraform resource is missing bound destroy protection: %s.%s\n' \
       "$resource_type" "$resource_name" >&2
     exit 1
   fi
 }
 
-require_resource_prevent_destroy aws_s3_bucket state
-require_resource_prevent_destroy aws_s3_bucket_versioning state
+require_resource_prevent_destroy aws_s3_bucket state "$state_file"
+require_resource_prevent_destroy aws_s3_bucket_versioning state "$state_file"
 require_resource_prevent_destroy \
-  aws_s3_bucket_server_side_encryption_configuration state
+  aws_s3_bucket_server_side_encryption_configuration state "$state_file"
+require_resource_prevent_destroy aws_vpc canonical "$network_file"
+require_resource_prevent_destroy aws_internet_gateway canonical "$network_file"
+require_resource_prevent_destroy aws_subnet public "$network_file"
+require_resource_prevent_destroy aws_route_table public "$network_file"
+require_resource_prevent_destroy aws_route public_ipv4_default "$network_file"
+require_resource_prevent_destroy \
+  aws_route_table_association public "$network_file"
+require_resource_prevent_destroy aws_eip origin "$network_file"
+
+if grep -Eq '^[[:space:]]*route[[:space:]]*\{' "$network_file"; then
+  printf 'Production public route table must not use inline route blocks.\n' >&2
+  exit 1
+fi
+
+if grep -Eq \
+  '^[[:space:]]*(instance|network_interface|associate_with_private_ip)[[:space:]]*=' \
+  "$network_file" ||
+  grep -Eq '^resource[[:space:]]+"aws_eip_association"' "$network_file"; then
+  printf 'Production origin EIP must remain unassociated until cutover.\n' >&2
+  exit 1
+fi
 
 for policy_token in \
   'sid    = "DenyInsecureTransport"' \
