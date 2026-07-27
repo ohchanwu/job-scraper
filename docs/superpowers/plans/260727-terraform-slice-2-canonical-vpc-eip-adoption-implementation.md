@@ -1,4 +1,4 @@
-# Terraform Slice 2 Canonical VPC And EIP Adoption Implementation Plan
+# Terraform Slice 2 Canonical VPC Adoption And EIP Reservation Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > `superpowers:subagent-driven-development` (recommended) or
@@ -7,15 +7,17 @@
 
 **Status:** Approved for execution under Window 1 controller policy gates
 
-**Goal:** Adopt the existing RDS VPC, its four-subnet public network, and the
-existing Elastic IPv4 allocation into the production Terraform state without
-changing live AWS infrastructure.
+**Goal:** Adopt the existing RDS VPC and its four-subnet public network into
+the production Terraform state, then reserve exactly one new unattached
+Elastic IPv4 allocation without changing any existing AWS relationship.
 
 **Architecture:** The bootstrap root adds a separate read-only EC2 policy to
-the protected production GitHub role. The production root declares 13 adopted
-resource addresses backed by one durable private network input. Temporary
-import blocks bind exact private IDs only during the imports-only plan and are
-removed after adoption.
+the protected production GitHub role. The production root declares eight
+import-only network addresses and one create-only EIP address backed by one
+durable private network input. The four subnets continue to inherit the VPC
+main route table; Terraform does not declare association resources. Temporary
+import blocks bind only the eight existing private IDs and are removed after
+adoption.
 
 **Tech Stack:** Terraform 1.15.8, AWS provider 6.33.0, AWS CLI v2 with IAM
 Identity Center, Bash, `jq`, GitHub Actions OIDC, and GitHub CLI.
@@ -28,11 +30,11 @@ authorization][two-window-decision]
 
 ## Global Constraints
 
-- Start every implementation task from the exact current Mayor baseline. When
-  the baseline is not on GitHub, fetch it from
-  `${HOME}/gt/jobscraper/mayor/rig`; do not push it.
-- Repository instructions prohibit `git push`, PR creation, `gt done`, and
-  merge-queue submission. Commit locally at each reviewed checkpoint.
+- Start every implementation task from the exact current Mayor baseline.
+- The human explicitly authorized and completed one checkpoint push through
+  commit `21f4788`. Do not push later Slice 2 commits without another explicit
+  instruction. PR creation, `gt done`, and merge-queue submission remain out of
+  scope.
 - Use `PATH=/opt/homebrew/bin:$PATH` for native ARM64 Terraform on this Mac.
 - Use only short-lived `AWS_PROFILE=jobcron-admin` credentials for local AWS
   work. A login renewal may require the human to approve an SSO page.
@@ -53,8 +55,16 @@ authorization][two-window-decision]
 - Plan A may create only
   `aws_iam_policy.production_network_read` and
   `aws_iam_role_policy_attachment.production_network_read`.
-- Plan B must show exactly 13 imports, `0 to add`, `0 to change`, and
-  `0 to destroy`.
+- Plan B must show exactly eight imports, `1 to add`, `0 to change`, and
+  `0 to destroy`. The sole addition must be `aws_eip.origin`, with no import
+  metadata and no association.
+- Immediately before every saved production plan and exact-plan apply, and
+  again after apply, resolve each subnet's effective route table from
+  read-only AWS inventory: explicit association first, otherwise the VPC main
+  route table. All four must still have no explicit association and inherit
+  the adopted main route table.
+- The Slice 2 spending ceiling is one standard VPC-domain EIP and no other
+  billable production create.
 - Do not import or modify the old EC2 instance, old EC2 VPC, current RDS,
   security groups, DNS, Cloudflare, EIP association, subnet attributes, routes,
   or tags.
@@ -238,7 +248,7 @@ git commit -m "infra: add production network read boundary"
 
 ---
 
-### Task 2: Declare The Adopted Production Network
+### Task 2: Declare The Adopted Network And Reserved EIP
 
 **Files:**
 
@@ -251,7 +261,7 @@ git commit -m "infra: add production network read boundary"
 **Interfaces:**
 
 - Consumes: `var.canonical_network_config`
-- Produces the 13 stable addresses defined in the specification
+- Produces the nine stable addresses defined in the specification
 - Produces no output containing private values
 
 - [x] **Step 1: Write the failing production-root test**
@@ -321,7 +331,7 @@ Assert:
 - the keys are exactly `public_a` through `public_d`;
 - the route destination is `0.0.0.0/0`;
 - the EIP domain is `vpc`; and
-- every association points to `aws_route_table.public.id`.
+- no subnet-route-table or EIP association resource is declared.
 
 - [x] **Step 2: Add failing static lifecycle checks**
 
@@ -335,7 +345,6 @@ aws_internet_gateway.canonical
 aws_subnet.public
 aws_route_table.public
 aws_route.public_ipv4_default
-aws_route_table_association.public
 aws_eip.origin
 ```
 
@@ -401,8 +410,8 @@ variable "canonical_network_config" {
 - [x] **Step 5: Add the minimal network resources**
 
 Create `network.tf` with the exact stable resource names from the
-specification. Use `for_each` for subnets and associations, reference resource
-IDs internally, omit `tags`, and bind this lifecycle block to every resource:
+specification. Use `for_each` for subnets, reference resource IDs internally,
+omit `tags`, and bind this lifecycle block to every resource:
 
 ```hcl
 lifecycle {
@@ -425,7 +434,8 @@ resource "aws_route" "public_ipv4_default" {
 ```
 
 Declare `aws_eip.origin` with only `domain = "vpc"` and the lifecycle guard.
-Do not declare an association.
+Do not declare a subnet-route-table association, main-route-table association,
+or EIP association.
 
 - [x] **Step 6: Run GREEN and negative-input verification**
 
@@ -452,6 +462,45 @@ git add infra/terraform/production/variables.tf \
 git commit -m "infra: declare canonical production network"
 ```
 
+#### Task 2 revision after live inventory
+
+The original Task 2 commit declared four explicit subnet association resources
+before live inventory proved that those resources do not exist. The following
+steps replace that assumption while preserving the completed history above.
+
+- [ ] **Step 8: Add failing no-association mutation tests**
+
+Extend `scripts/check-terraform-workflows_test.sh` with mutations that append
+one `aws_route_table_association` resource and one
+`aws_main_route_table_association` resource. Require the static checker to
+reject either with one generic inherited-main-route contract message.
+
+Run the mutation suite before changing the checker and record RED because the
+new forbidden resource is accepted.
+
+- [ ] **Step 9: Remove association ownership and implement the guard**
+
+Delete `aws_route_table_association.public` from `network.tf`, remove its test
+assertion and `prevent_destroy` requirement, and add static rejection of both
+association resource types. Keep the four subnets, route table, standalone
+default route, and EIP declaration unchanged.
+
+- [ ] **Step 10: Run GREEN verification and commit**
+
+```bash
+PATH=/opt/homebrew/bin:$PATH terraform \
+  -chdir=infra/terraform/production test
+./scripts/check-terraform-workflows_test.sh
+AWS_PROFILE=jobcron-admin PATH=/opt/homebrew/bin:$PATH \
+  ./scripts/check-terraform.sh
+git diff --check
+git add infra/terraform/production/network.tf \
+  infra/terraform/production/tests/network.tftest.hcl \
+  scripts/check-terraform.sh \
+  scripts/check-terraform-workflows_test.sh
+git commit -m "infra: preserve inherited production routes"
+```
+
 ---
 
 ### Task 3: Enforce Private Workflow Inputs And Saved-Plan Contracts
@@ -470,10 +519,13 @@ git commit -m "infra: declare canonical production network"
   variable `TF_VAR_canonical_network_config`
 - `scripts/check-terraform-plan.sh bootstrap PLAN_JSON` accepts only the two
   approved creates
-- `scripts/check-terraform-plan.sh adoption PLAN_JSON` accepts only the 13
-  approved imports
+- `scripts/check-terraform-plan.sh adoption PLAN_JSON` accepts only eight
+  approved imports plus one create-only unattached EIP
 
-- [ ] **Step 1: Write failing workflow mutations**
+Steps 1 through 7 were completed under the superseded 13-import contract. The
+revision steps below change the adoption checker before a live plan is saved.
+
+- [x] **Step 1: Write failing workflow mutations**
 
 Require this exact workflow mapping once:
 
@@ -492,7 +544,7 @@ Both must fail with:
 production workflow must map but never print private network config
 ```
 
-- [ ] **Step 2: Write failing plan-checker tests**
+- [x] **Step 2: Write failing plan-checker tests**
 
 Create `check-terraform-plan_test.sh`. Generate minimal temporary JSON
 fixtures and require:
@@ -507,7 +559,7 @@ fixtures and require:
 Each rejection must assert the checker emits only a generic contract error,
 never a resource ID or plan value.
 
-- [ ] **Step 3: Run RED verification**
+- [x] **Step 3: Run RED verification**
 
 Run:
 
@@ -518,7 +570,7 @@ Run:
 
 Expected: failure because the workflow mapping and checker do not exist.
 
-- [ ] **Step 4: Implement the plan checker**
+- [x] **Step 4: Implement the plan checker**
 
 Use Bash plus `jq`. Filter plan JSON to resource changes whose actions are not
 `["no-op"]` for bootstrap, and to changes with import metadata for adoption.
@@ -539,7 +591,7 @@ Terraform saved plan violates the Slice 2 contract
 
 Exit non-zero without printing the rejected JSON.
 
-- [ ] **Step 5: Implement the workflow guard**
+- [x] **Step 5: Implement the workflow guard**
 
 Add the exact secret mapping under the existing job `env:` block. In
 `check-terraform.sh`, require exactly one occurrence of
@@ -549,7 +601,7 @@ Add the exact secret mapping under the existing job `env:` block. In
 Run `check-terraform-plan_test.sh` beside the existing workflow mutation test
 when `CHECK_TERRAFORM_FIXTURE_MODE` is not enabled.
 
-- [ ] **Step 6: Run GREEN verification**
+- [x] **Step 6: Run GREEN verification**
 
 ```bash
 ./scripts/check-terraform-plan_test.sh
@@ -558,7 +610,7 @@ AWS_PROFILE=jobcron-admin PATH=/opt/homebrew/bin:$PATH \
   ./scripts/check-terraform.sh
 ```
 
-- [ ] **Step 7: Review and commit**
+- [x] **Step 7: Review and commit**
 
 Confirm the production workflow still contains only `init` and `plan`
 Terraform commands.
@@ -570,6 +622,43 @@ git add .github/workflows/terraform-production-plan.yml \
   scripts/check-terraform.sh \
   scripts/check-terraform-workflows_test.sh
 git commit -m "ci: enforce Terraform adoption plan contracts"
+```
+
+#### Task 3 revision after live inventory
+
+- [ ] **Step 8: Rewrite the adoption fixtures first**
+
+Change the valid adoption fixture to contain exactly:
+
+- eight allow-listed resource changes with `actions = ["no-op"]` and
+  non-empty import metadata; and
+- `aws_eip.origin` with `actions = ["create"]` and no import metadata.
+
+Add negative fixtures for a missing import, missing import metadata, an EIP
+import, an EIP no-op/update/delete action, an association address, any other
+extra address, and any create/update/delete action on an adopted address.
+Require generic errors that disclose no plan value. Run the suite and record
+RED against the old checker.
+
+- [ ] **Step 9: Implement the nine-address action contract**
+
+Update `scripts/check-terraform-plan.sh` so adoption mode requires the exact
+nine-address allow-list. Require import metadata only on the eight existing
+addresses. Require `aws_eip.origin` to be create-only with no import metadata.
+Reject all association addresses and unknown no-op addresses as well as every
+unexpected mutating action.
+
+- [ ] **Step 10: Run GREEN verification and commit**
+
+```bash
+./scripts/check-terraform-plan_test.sh
+./scripts/check-terraform-workflows_test.sh
+AWS_PROFILE=jobcron-admin PATH=/opt/homebrew/bin:$PATH \
+  ./scripts/check-terraform.sh
+git diff --check
+git add scripts/check-terraform-plan.sh \
+  scripts/check-terraform-plan_test.sh
+git commit -m "ci: enforce eight imports and one EIP create"
 ```
 
 ---
@@ -638,12 +727,15 @@ The candidate must have:
 - exactly four public subnets;
 - one shared public route table;
 - one `0.0.0.0/0` route to that gateway;
-- one intended existing EIP whose current association is retained;
+- no explicit route-table association on any of the four subnets;
+- all four subnets inheriting that shared table as the VPC main route table;
+- no existing EIP that already satisfies the reserved cutover role;
 - no ownership in another Terraform state; and
 - unused, non-overlapping capacity in at least two Availability Zones.
 
-If any condition is false or multiple EIPs remain plausible, mark the packet
-`AMBIGUOUS` and stop at the selection policy gate.
+If any condition is false, an EIP appears before the saved plan, or any
+relationship changes, mark the packet `AMBIGUOUS` and stop at the selection
+policy gate.
 
 - [x] **Step 4: Write the two packet forms**
 
@@ -662,12 +754,11 @@ Use this exact top-level shape:
     "internet_gateway": "",
     "public_subnets": {},
     "public_route_table": "",
-    "public_ipv4_default": "",
-    "public_associations": {},
-    "eip": ""
+    "public_ipv4_default": ""
   },
   "fingerprints": {
-    "eip_association": "",
+    "effective_route_relationships": "",
+    "eip_inventory": "",
     "old_ec2": "",
     "current_rds": "",
     "network_relationships": ""
@@ -688,8 +779,10 @@ RDS VPC relationship: verified
 Public subnet count: 4
 Public route-table count: 1
 Internet gateway count: 1
-EIP candidate count: 1
-EIP association retained: yes
+Explicit subnet-association count: 0
+Inherited main-route relationship: verified
+Existing EIP candidate count: 0
+New unattached EIP authorized: yes
 Two-AZ private-subnet capacity: verified
 Other Terraform ownership: not detected
 Recommendation: approve | ambiguous
@@ -714,6 +807,24 @@ No GitHub secret or AWS resource changes occur before this gate passes.
 the VPC main route table rather than having importable explicit associations,
 and the target region has no existing EIP to adopt. Execution stopped at this
 gate without an AWS or GitHub mutation.
+
+- [ ] **Step 7: Re-derive and independently approve the revised packet**
+
+Reauthenticate if necessary, refresh all private inventory files, and derive
+the packet using the revised shape above. The independent reviewer must
+reproduce:
+
+- the exact eight importable existing objects;
+- zero explicit subnet associations;
+- the same inherited main-route relationship for all four subnets;
+- zero existing EIPs;
+- no other Terraform ownership; and
+- sufficient two-AZ capacity.
+
+Write `task-4-revised-report.md` without overwriting the historical ambiguous
+report. Continue only on `APPROVED`. This gate authorizes private input binding
+and at most one new unattached EIP; it does not authorize association or public
+traffic.
 
 ---
 
@@ -747,19 +858,17 @@ Add sensitive variable `canonical_import_ids` with this shape:
 
 ```hcl
 object({
-  vpc                    = string
-  internet_gateway       = string
-  public_subnets         = map(string)
-  public_route_table     = string
-  public_ipv4_default    = string
-  public_associations    = map(string)
-  eip                    = string
+  vpc                 = string
+  internet_gateway    = string
+  public_subnets      = map(string)
+  public_route_table  = string
+  public_ipv4_default = string
 })
 ```
 
-Create 13 import blocks that map these values to the exact stable addresses.
-The four subnet and four association maps must use only `public_a` through
-`public_d`.
+Create eight import blocks that map these values to the eight import-only
+stable addresses. The subnet map must use only `public_a` through `public_d`.
+Do not import `aws_eip.origin`; its declaration is the sole create in Plan B.
 
 - [ ] **Step 2: Build private Terraform inputs**
 
@@ -847,7 +956,13 @@ PATH=/opt/homebrew/bin:$PATH terraform \
 
 Expected: exactly two creates and no other action.
 
-- [ ] **Step 7: Save Plan B**
+- [ ] **Step 7: Reassert inherited routes and save Plan B**
+
+Immediately before planning, refresh the read-only route-table inventory.
+Resolve each subnet's effective table using explicit association first,
+otherwise the VPC main table. Stop unless all four still have no explicit
+association and inherit the selected adopted table. Also refresh the EIP
+inventory and stop if any EIP now satisfies the reserved cutover role.
 
 ```bash
 AWS_PROFILE=jobcron-admin PATH=/opt/homebrew/bin:$PATH \
@@ -861,9 +976,11 @@ PATH=/opt/homebrew/bin:$PATH terraform \
   adoption "$SDD_WORKSPACE/slice2-adoption.json"
 ```
 
-Expected: exactly 13 imports and `0 add, 0 change, 0 destroy`. Any attribute
-drift blocks the apply policy gate; adjust tracked configuration to the
-observed selected state, rerun tests, and generate a new plan.
+Expected: exactly eight imports and `1 add, 0 change, 0 destroy`. The sole
+addition must be the unattached `aws_eip.origin`; it must have no import
+metadata. Any attribute drift blocks the apply policy gate; adjust tracked
+configuration to the observed selected state, rerun tests, and generate a new
+plan.
 
 - [ ] **Step 8: Bind plans to evidence**
 
@@ -872,7 +989,8 @@ Privately record:
 - SHA-256 digest of each plan file;
 - SHA-256 digest of each plan JSON;
 - current state lineage/serial fingerprints for both roots;
-- pre-plan EIP association fingerprint;
+- pre-plan EIP inventory fingerprint;
+- effective-route relationship fingerprint;
 - old EC2 and current RDS fingerprints; and
 - current S3 state object version identifiers.
 
@@ -890,9 +1008,10 @@ Record the value-blind summary:
 
 ```text
 Plan A: 2 creates, 0 updates, 0 replacements, 0 destroys
-Plan B: 13 imports, 0 additions, 0 changes, 0 destroys
+Plan B: 8 imports, 1 addition, 0 changes, 0 destroys
 Existing policies/trust/edge changes: none
-Route/subnet/EIP association/EC2/RDS changes: none
+Route/subnet/association/EC2/RDS changes: none
+Sole billable production create: 1 unattached VPC-domain EIP
 Plan digests: recorded
 State serial bindings: recorded
 Independent review: APPROVED
@@ -906,7 +1025,7 @@ uncertain recovery, or any destroy or replace action.
 
 ---
 
-### Task 6: Apply, Remove Import Scaffolding, And Prove No Change
+### Task 6: Apply, Remove Import Scaffolding, And Prove Exact Change
 
 **Files:**
 
@@ -919,13 +1038,17 @@ uncertain recovery, or any destroy or replace action.
 **Interfaces:**
 
 - Consumes: exact policy-compliant plan files and digests
-- Produces: adopted remote state and clean local/remote production plans
+- Produces: adopted remote state, one unattached EIP, and clean local/remote
+  production plans
 
 - [ ] **Step 1: Reverify exact plan identity**
 
 Recompute both plan digests and compare them byte-for-byte with the reviewed
-controller packet. Confirm state lineage/serial fingerprints still match. If
-either differs, stop and regenerate the packet.
+controller packet. Confirm state lineage/serial fingerprints still match.
+Refresh the effective-route and EIP inventory checks: all four subnets must
+still inherit the adopted main route table with no explicit association, and
+no EIP may have appeared. If any condition or digest differs, stop and
+regenerate the packet.
 
 - [ ] **Step 2: Apply Plan A only**
 
@@ -945,15 +1068,17 @@ AWS_PROFILE=jobcron-admin PATH=/opt/homebrew/bin:$PATH \
   -input=false "$SDD_WORKSPACE/slice2-adoption.tfplan"
 ```
 
-Expected: `13 imported, 0 added, 0 changed, 0 destroyed`.
+Expected: `8 imported, 1 added, 0 changed, 0 destroyed`.
 
 - [ ] **Step 4: Verify live relationships before cleanup**
 
 Rerun the Task 4 inventory. Require matching pre/post fingerprints for:
 
-- EIP association;
+- exactly one Terraform-owned EIP exists and is unattached;
+- no second EIP was allocated by a retry;
 - old EC2 and current RDS;
-- VPC, subnet, route table, associations, default route, and internet gateway;
+- VPC, subnet, route table, inherited main-route relationship, default route,
+  and internet gateway;
   and
 - all CIDRs and adopted attributes.
 
@@ -1025,9 +1150,11 @@ Do not commit ignored private evidence.
 - [ ] **Step 1: Update maintained deployment truth**
 
 State that Terraform now owns the canonical VPC, internet gateway, four public
-subnets, shared public route table/default route/associations, and EIP
-allocation. State explicitly that the EIP association, old EC2, and current RDS
-remain unchanged and outside this slice's mutation scope.
+subnets, shared public route table/default route, and EIP allocation. State
+explicitly that the inherited subnet-to-main-route relationship remains
+asserted by the controller rather than owned as Terraform association
+resources. The EIP remains unattached; the old EC2 and current RDS remain
+unchanged and outside this slice's mutation scope.
 
 - [ ] **Step 2: Mark the two controller policy gates complete**
 
@@ -1094,8 +1221,8 @@ git status --short --branch
 
 An independent final reviewer must verify the full slice range against the
 specification. Slice 2 is not complete until both local and protected GitHub
-production plans are clean and the 13 imported addresses are present in the
-protected production state.
+production plans are clean and the eight imported addresses plus the one
+created EIP address are present in the protected production state.
 
 [slice-2-spec]:
   ../specs/260727-terraform-slice-2-canonical-vpc-eip-adoption.md
