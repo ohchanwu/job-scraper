@@ -65,6 +65,22 @@ override_data {
 }
 
 override_data {
+  target          = data.aws_iam_policy_document.production_network_read
+  override_during = plan
+  values = {
+    json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Sid      = "ProductionNetworkRead"
+        Effect   = "Allow"
+        Action   = "ec2:DescribeVpcs"
+        Resource = "*"
+      }]
+    })
+  }
+}
+
+override_data {
   target          = data.aws_iam_policy_document.edge_state
   override_during = plan
   values = {
@@ -176,6 +192,27 @@ run "identity_contract" {
       toset(["s3:DeleteObject"])
     )
     error_message = "Production state policy must contain only the four approved action groups."
+  }
+
+  assert {
+    condition = (
+      length(data.aws_iam_policy_document.production_network_read.statement) == 1 &&
+      one(data.aws_iam_policy_document.production_network_read.statement).resources ==
+      toset(["*"]) &&
+      one(data.aws_iam_policy_document.production_network_read.statement).actions ==
+      toset([
+        "ec2:DescribeAddresses",
+        "ec2:DescribeAvailabilityZones",
+        "ec2:DescribeInternetGateways",
+        "ec2:DescribeRouteTables",
+        "ec2:DescribeSubnetAttribute",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeTags",
+        "ec2:DescribeVpcAttribute",
+        "ec2:DescribeVpcs",
+      ])
+    )
+    error_message = "Production network reads must remain within the approved EC2 Describe ceiling."
   }
 
   assert {

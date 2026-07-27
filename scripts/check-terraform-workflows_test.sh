@@ -76,6 +76,7 @@ aws_action_sha="e6de054238d6b7531b4efff3b6587d9aade6a06c"
 static_workflow="$fixture_root/repo/.github/workflows/terraform-check.yml"
 production_workflow="$fixture_root/repo/.github/workflows/terraform-production-plan.yml"
 state_file="$fixture_root/repo/infra/terraform/bootstrap/state.tf"
+identity_file="$fixture_root/repo/infra/terraform/bootstrap/identity.tf"
 failures=0
 
 reset_fixtures
@@ -91,6 +92,16 @@ if ! run_checker; then
   exit 1
 fi
 
+expect_rejected "wildcard network read action" \
+  "Slice 2 network read policy actions differ from the approved ceiling." \
+  replace_once "$identity_file" \
+  '"ec2:DescribeVpcs"' \
+  '"ec2:Describe*"' || failures=$((failures + 1))
+expect_rejected "network write action" \
+  "Slice 2 network read policy actions differ from the approved ceiling." \
+  replace_once "$identity_file" \
+  '"ec2:DescribeVpcs"' \
+  '"ec2:CreateVpc"' || failures=$((failures + 1))
 expect_rejected "semantic action tag" \
   "Terraform workflows must pin actions by full commit SHA" \
   replace_once "$static_workflow" "$checkout_sha" "v6.0.0" || failures=$((failures + 1))

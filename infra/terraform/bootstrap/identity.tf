@@ -196,3 +196,30 @@ resource "aws_iam_role_policy_attachment" "edge_state" {
   role       = aws_iam_role.edge.name
   policy_arn = aws_iam_policy.edge_state.arn
 }
+
+data "aws_iam_policy_document" "production_network_read" {
+  statement {
+    actions = [
+      "ec2:DescribeAddresses",
+      "ec2:DescribeAvailabilityZones",
+      "ec2:DescribeInternetGateways",
+      "ec2:DescribeRouteTables",
+      "ec2:DescribeSubnetAttribute",
+      "ec2:DescribeSubnets",
+      "ec2:DescribeTags",
+      "ec2:DescribeVpcAttribute",
+      "ec2:DescribeVpcs",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_policy" "production_network_read" {
+  name   = "JobcronTerraformProductionNetworkRead"
+  policy = data.aws_iam_policy_document.production_network_read.json
+}
+
+resource "aws_iam_role_policy_attachment" "production_network_read" {
+  role       = aws_iam_role.production.name
+  policy_arn = aws_iam_policy.production_network_read.arn
+}

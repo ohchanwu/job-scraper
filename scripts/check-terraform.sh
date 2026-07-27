@@ -95,7 +95,7 @@ if grep -Fq '"bootstrap/terraform.tfstate' "$identity_file"; then
   exit 1
 fi
 
-for forbidden in '"ec2:' '"rds:' '"iam:' '"secretsmanager:'; do
+for forbidden in '"rds:' '"iam:' '"secretsmanager:'; do
   if grep -Fiq "$forbidden" "$identity_file"; then
     printf 'Slice 1 identity policy contains forbidden action: %s\n' \
       "$forbidden" >&2
@@ -104,6 +104,15 @@ for forbidden in '"ec2:' '"rds:' '"iam:' '"secretsmanager:'; do
 done
 
 expected_policy_tokens="$(printf '%s\n' \
+  '"ec2:DescribeAddresses"' \
+  '"ec2:DescribeAvailabilityZones"' \
+  '"ec2:DescribeInternetGateways"' \
+  '"ec2:DescribeRouteTables"' \
+  '"ec2:DescribeSubnetAttribute"' \
+  '"ec2:DescribeSubnets"' \
+  '"ec2:DescribeTags"' \
+  '"ec2:DescribeVpcAttribute"' \
+  '"ec2:DescribeVpcs"' \
   '"s3:DeleteObject"' '"s3:DeleteObject"' \
   '"s3:GetBucketLocation"' '"s3:GetBucketLocation"' \
   '"s3:GetObject"' '"s3:GetObject"' \
@@ -116,7 +125,7 @@ actual_policy_tokens="$(
   grep -Eo '"[a-z0-9]+:[A-Za-z*]+"' "$identity_file" | sort
 )"
 if [[ "$actual_policy_tokens" != "$expected_policy_tokens" ]]; then
-  printf 'Slice 1 identity policy actions differ from the approved ceiling.\n' >&2
+  printf 'Slice 2 network read policy actions differ from the approved ceiling.\n' >&2
   exit 1
 fi
 

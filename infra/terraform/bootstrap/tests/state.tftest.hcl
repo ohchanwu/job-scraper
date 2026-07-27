@@ -1,4 +1,10 @@
-mock_provider "aws" {}
+mock_provider "aws" {
+  mock_data "aws_iam_policy_document" {
+    defaults = {
+      json = "{}"
+    }
+  }
+}
 
 variables {
   state_bucket_name = "jobcron-state-test-only"
