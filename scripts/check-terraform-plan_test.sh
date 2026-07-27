@@ -102,7 +102,7 @@ jq '.resource_changes += [{
 }]' "$fixture_root/bootstrap-valid.json" \
   >"$fixture_root/bootstrap-extra.json"
 
-adoption_addresses=(
+adoption_import_addresses=(
   'aws_vpc.canonical'
   'aws_internet_gateway.canonical'
   'aws_subnet.public["public_a"]'
@@ -111,14 +111,9 @@ adoption_addresses=(
   'aws_subnet.public["public_d"]'
   'aws_route_table.public'
   'aws_route.public_ipv4_default'
-  'aws_route_table_association.public["public_a"]'
-  'aws_route_table_association.public["public_b"]'
-  'aws_route_table_association.public["public_c"]'
-  'aws_route_table_association.public["public_d"]'
-  'aws_eip.origin'
 )
 
-printf '%s\n' "${adoption_addresses[@]}" |
+printf '%s\n' "${adoption_import_addresses[@]}" |
   jq -R '{
     address: .,
     change: {
@@ -129,11 +124,26 @@ printf '%s\n' "${adoption_addresses[@]}" |
     }
   }' |
   jq -s '{resource_changes: .}' \
+  >"$fixture_root/adoption-imports.json"
+jq '.resource_changes += [{
+  "address": "aws_eip.origin",
+  "change": {
+    "actions": ["create"],
+    "before": null,
+    "after": {
+      "domain": "vpc",
+      "value": "test-only-private-plan-value"
+    }
+  }
+}]' "$fixture_root/adoption-imports.json" \
   >"$fixture_root/adoption-valid.json"
 
 jq 'del(.resource_changes[0])' \
   "$fixture_root/adoption-valid.json" \
   >"$fixture_root/adoption-missing.json"
+jq 'del(.resource_changes[] | select(.address == "aws_eip.origin"))' \
+  "$fixture_root/adoption-valid.json" \
+  >"$fixture_root/adoption-missing-eip.json"
 jq '.resource_changes += [{
   "address": "aws_instance.test_only_extra",
   "change": {
@@ -153,6 +163,16 @@ jq '.resource_changes += [{
   }
 }]' "$fixture_root/adoption-valid.json" \
   >"$fixture_root/adoption-extra-unimported-no-op.json"
+jq '.resource_changes += [{
+  "address": "aws_route_table_association.public[\"public_a\"]",
+  "change": {
+    "actions": ["no-op"],
+    "importing": {"id": "test-only-private-association-id"},
+    "before": null,
+    "after": {"value": "test-only-private-plan-value"}
+  }
+}]' "$fixture_root/adoption-valid.json" \
+  >"$fixture_root/adoption-association.json"
 jq '.resource_changes[0].change.importing = null' \
   "$fixture_root/adoption-valid.json" \
   >"$fixture_root/adoption-missing-import-metadata.json"
@@ -168,12 +188,23 @@ jq '.resource_changes[0].change.importing.id = "   "' \
 jq '.resource_changes[0].change.importing.id = 123' \
   "$fixture_root/adoption-valid.json" \
   >"$fixture_root/adoption-malformed-import-id.json"
+jq '(.resource_changes[] | select(.address == "aws_eip.origin") |
+  .change.importing) = {"id": "test-only-private-eip-id"}' \
+  "$fixture_root/adoption-valid.json" \
+  >"$fixture_root/adoption-eip-import.json"
 
 for action in create update delete; do
   jq --arg action "$action" \
     '.resource_changes[0].change.actions = [$action]' \
     "$fixture_root/adoption-valid.json" \
     >"$fixture_root/adoption-$action.json"
+done
+for action in no-op update delete; do
+  jq --arg action "$action" \
+    '(.resource_changes[] | select(.address == "aws_eip.origin") |
+      .change.actions) = [$action]' \
+    "$fixture_root/adoption-valid.json" \
+    >"$fixture_root/adoption-eip-$action.json"
 done
 
 printf '{malformed-json\n' >"$fixture_root/malformed.json"
@@ -206,6 +237,10 @@ expect_rejected \
   adoption \
   "$fixture_root/adoption-missing.json"
 expect_rejected \
+  "adoption missing EIP create" \
+  adoption \
+  "$fixture_root/adoption-missing-eip.json"
+expect_rejected \
   "adoption extra address" \
   adoption \
   "$fixture_root/adoption-extra.json"
@@ -213,6 +248,10 @@ expect_rejected \
   "adoption extra unimported no-op" \
   adoption \
   "$fixture_root/adoption-extra-unimported-no-op.json"
+expect_rejected \
+  "adoption association address" \
+  adoption \
+  "$fixture_root/adoption-association.json"
 expect_rejected \
   "adoption missing import metadata" \
   adoption \
@@ -233,11 +272,21 @@ expect_rejected \
   "adoption malformed import id" \
   adoption \
   "$fixture_root/adoption-malformed-import-id.json"
+expect_rejected \
+  "adoption EIP import metadata" \
+  adoption \
+  "$fixture_root/adoption-eip-import.json"
 for action in create update delete; do
   expect_rejected \
-    "adoption $action action" \
+    "adoption imported-resource $action action" \
     adoption \
     "$fixture_root/adoption-$action.json"
+done
+for action in no-op update delete; do
+  expect_rejected \
+    "adoption EIP $action action" \
+    adoption \
+    "$fixture_root/adoption-eip-$action.json"
 done
 
 expect_rejected \

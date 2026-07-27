@@ -626,7 +626,7 @@ git commit -m "ci: enforce Terraform adoption plan contracts"
 
 #### Task 3 revision after live inventory
 
-- [ ] **Step 8: Rewrite the adoption fixtures first**
+- [x] **Step 8: Rewrite the adoption fixtures first**
 
 Change the valid adoption fixture to contain exactly:
 
@@ -640,7 +640,7 @@ extra address, and any create/update/delete action on an adopted address.
 Require generic errors that disclose no plan value. Run the suite and record
 RED against the old checker.
 
-- [ ] **Step 9: Implement the nine-address action contract**
+- [x] **Step 9: Implement the nine-address action contract**
 
 Update `scripts/check-terraform-plan.sh` so adoption mode requires the exact
 nine-address allow-list. Require import metadata only on the eight existing
@@ -648,7 +648,7 @@ addresses. Require `aws_eip.origin` to be create-only with no import metadata.
 Reject all association addresses and unknown no-op addresses as well as every
 unexpected mutating action.
 
-- [ ] **Step 10: Run GREEN verification and commit**
+- [x] **Step 10: Run GREEN verification and commit**
 
 ```bash
 ./scripts/check-terraform-plan_test.sh

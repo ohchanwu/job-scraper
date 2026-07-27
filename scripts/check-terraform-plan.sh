@@ -44,23 +44,40 @@ case "$mode" in
         "aws_subnet.public[\"public_c\"]",
         "aws_subnet.public[\"public_d\"]",
         "aws_route_table.public",
-        "aws_route.public_ipv4_default",
-        "aws_route_table_association.public[\"public_a\"]",
-        "aws_route_table_association.public[\"public_b\"]",
-        "aws_route_table_association.public[\"public_c\"]",
-        "aws_route_table_association.public[\"public_d\"]",
-        "aws_eip.origin"
-      ] as $expected |
+        "aws_route.public_ipv4_default"
+      ] as $expected_imports |
+      "aws_eip.origin" as $expected_create |
       (.resource_changes | type == "array") and
-      (.resource_changes | length == 13) and
+      (
+        [.resource_changes[] | select(.address != $expected_create)] as $imports |
+        [.resource_changes[] | select(.address == $expected_create)] as $creates |
+        (.resource_changes | length == 9) and
+        ($imports | length == 8) and
+        ($creates | length == 1) and
+        all(
+          $imports[];
+          (.change.actions == ["no-op"]) and
+          (.change.importing | type == "object") and
+          (.change.importing.id | type == "string") and
+          (.change.importing.id | test("\\S"))
+        ) and
+        ([$imports[].address] | sort == ($expected_imports | sort)) and
+        all(
+          $creates[];
+          (.change.actions == ["create"]) and
+          (.change.importing == null)
+        )
+      ) and
       all(
         .resource_changes[];
         (.change.actions == ["no-op"]) and
-        (.change.importing | type == "object") and
-        (.change.importing.id | type == "string") and
-        (.change.importing.id | test("\\S"))
-      ) and
-      ([.resource_changes[].address] | sort == ($expected | sort))
+        (.address != $expected_create)
+        or
+        (
+          (.address == $expected_create) and
+          (.change.actions == ["create"])
+        )
+      )
     ' "$plan_json" >/dev/null 2>&1 || fail
     printf 'adoption plan contract verified\n'
     ;;
