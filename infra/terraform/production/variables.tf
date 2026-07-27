@@ -30,3 +30,34 @@ variable "canonical_network_config" {
     error_message = "Canonical public subnet keys must be public_a through public_d."
   }
 }
+
+variable "canonical_import_ids" {
+  description = "Private identifiers used only during canonical network adoption."
+  sensitive   = true
+
+  type = object({
+    vpc                 = string
+    internet_gateway    = string
+    public_subnets      = map(string)
+    public_route_table  = string
+    public_ipv4_default = string
+  })
+
+  validation {
+    condition = (
+      toset(keys(var.canonical_import_ids.public_subnets)) ==
+      toset(["public_a", "public_b", "public_c", "public_d"]) &&
+      alltrue([
+        trimspace(var.canonical_import_ids.vpc) != "",
+        trimspace(var.canonical_import_ids.internet_gateway) != "",
+        trimspace(var.canonical_import_ids.public_route_table) != "",
+        trimspace(var.canonical_import_ids.public_ipv4_default) != "",
+      ]) &&
+      alltrue([
+        for subnet_id in values(var.canonical_import_ids.public_subnets) :
+        trimspace(subnet_id) != ""
+      ])
+    )
+    error_message = "Canonical import IDs must contain eight populated network bindings."
+  }
+}

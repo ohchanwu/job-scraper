@@ -808,7 +808,7 @@ the VPC main route table rather than having importable explicit associations,
 and the target region has no existing EIP to adopt. Execution stopped at this
 gate without an AWS or GitHub mutation.
 
-- [ ] **Step 7: Re-derive and independently approve the revised packet**
+- [x] **Step 7: Re-derive and independently approve the revised packet**
 
 Reauthenticate if necessary, refresh all private inventory files, and derive
 the packet using the revised shape above. The independent reviewer must
@@ -852,7 +852,7 @@ traffic.
 - Consumes: policy-compliant `candidate-private.json`
 - Produces: two exact, digested saved plans and controller policy packet
 
-- [ ] **Step 1: Add the transient import schema and blocks**
+- [x] **Step 1: Add the transient import schema and blocks**
 
 Add sensitive variable `canonical_import_ids` with this shape:
 
@@ -870,7 +870,7 @@ Create eight import blocks that map these values to the eight import-only
 stable addresses. The subnet map must use only `public_a` through `public_d`.
 Do not import `aws_eip.origin`; its declaration is the sole create in Plan B.
 
-- [ ] **Step 2: Build private Terraform inputs**
+- [x] **Step 2: Build private Terraform inputs**
 
 Generate the durable network configuration from the policy-compliant inventory,
 including the attributes declared in Task 2. Generate the transient import ID
@@ -892,7 +892,7 @@ git check-ignore \
   infra/terraform/production/jobcron.backend.hcl
 ```
 
-- [ ] **Step 3: Set the protected GitHub environment secret**
+- [x] **Step 3: Set the protected GitHub environment secret**
 
 After the selection policy gate passes, pipe the compact durable JSON without
 echoing it:
@@ -912,7 +912,7 @@ gh secret list --env production --repo ohchanwu/jobcron |
   awk '$1 == "TF_VAR_CANONICAL_NETWORK_CONFIG" { found = 1 } END { exit !found }'
 ```
 
-- [ ] **Step 4: Initialize both protected backends**
+- [x] **Step 4: Initialize both protected backends**
 
 Use the existing private bootstrap backend configuration. Create the production
 backend configuration from the same private state-bucket source without
@@ -929,7 +929,7 @@ AWS_PROFILE=jobcron-admin PATH=/opt/homebrew/bin:$PATH \
   -backend-config=jobcron.backend.hcl
 ```
 
-- [ ] **Step 5: Commit the safe temporary configuration**
+- [x] **Step 5: Commit the safe temporary configuration**
 
 ```bash
 git add infra/terraform/production/variables.tf \
