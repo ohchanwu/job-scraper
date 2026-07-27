@@ -87,8 +87,10 @@ Delivers:
 
 **Specification:** [Slice 2 adoption specification][slice-2-spec]
 
-**Status:** Specification ready for human review; implementation planning
-follows approval
+**Implementation plan:** [Slice 2 implementation plan][slice-2-plan]
+
+**Status:** Implementation in progress; authenticated inventory and Human
+Gate 1 are pending
 
 Will inventory the existing network privately, select the canonical VPC, and
 adopt only the approved VPC, public networking, and EIP without replacement or
@@ -154,5 +156,7 @@ the rollback window.
   ../archive/2026-07-26-terraform-slice-1/260726-terraform-slice-1-verification.md
 [slice-2-spec]:
   ../specs/260727-terraform-slice-2-canonical-vpc-eip-adoption.md
+[slice-2-plan]:
+  260727-terraform-slice-2-canonical-vpc-eip-adoption-implementation.md
 [terraform-spec]:
   ../specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md

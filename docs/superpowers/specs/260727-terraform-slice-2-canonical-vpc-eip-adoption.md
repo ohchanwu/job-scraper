@@ -1,6 +1,6 @@
 # Terraform Slice 2: Canonical VPC And EIP Adoption
 
-**Status:** Active specification awaiting human review
+**Status:** Approved for implementation; Human Gate 1 pending
 
 **Recorded:** 2026-07-27
 
@@ -11,6 +11,8 @@ automation][terraform-spec]
 steps][human-spec]
 
 **Roadmap:** [Terraform-first production launch roadmap][roadmap]
+
+**Implementation plan:** [Terraform Slice 2 implementation plan][implementation-plan]
 
 ## Decision Summary
 
@@ -409,6 +411,8 @@ approval responses.
 
 [human-spec]:
   260726-terraform-first-production-launch-human-blocked-steps.md
+[implementation-plan]:
+  ../plans/260727-terraform-slice-2-canonical-vpc-eip-adoption-implementation.md
 [roadmap]:
   ../plans/260726-terraform-first-production-launch-roadmap.md
 [terraform-spec]:

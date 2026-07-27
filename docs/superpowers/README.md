@@ -10,6 +10,7 @@ decision records needed for the current task.
 - [Terraform-first production launch human-blocked steps][terraform-launch-human-steps]
 - [Terraform-first production launch roadmap][terraform-launch-roadmap]
 - [Terraform Slice 2: canonical VPC and EIP adoption][terraform-slice-2-spec]
+- [Terraform Slice 2 implementation][terraform-slice-2-plan]
 - [PostgreSQL local convergence and per-user AI credentials](specs/260714-postgresql-local-convergence-user-ai-credentials.md)
 
 ## Recently Archived
@@ -99,6 +100,8 @@ decision records needed for the current task.
   plans/260726-terraform-first-production-launch-roadmap.md
 [terraform-slice-2-spec]:
   specs/260727-terraform-slice-2-canonical-vpc-eip-adoption.md
+[terraform-slice-2-plan]:
+  plans/260727-terraform-slice-2-canonical-vpc-eip-adoption-implementation.md
 [terraform-slice-1-plan]:
   archive/2026-07-26-terraform-slice-1/260726-terraform-slice-1-identity-state-bootstrap-ci.md
 [terraform-slice-1-verification]:
