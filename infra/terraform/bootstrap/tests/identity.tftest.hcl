@@ -81,6 +81,22 @@ override_data {
 }
 
 override_data {
+  target          = data.aws_iam_policy_document.production_slice3_read
+  override_during = plan
+  values = {
+    json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Sid      = "ProductionSlice3Read"
+        Effect   = "Allow"
+        Action   = "rds:DescribeDBInstances"
+        Resource = "*"
+      }]
+    })
+  }
+}
+
+override_data {
   target          = data.aws_iam_policy_document.edge_state
   override_during = plan
   values = {
@@ -109,6 +125,14 @@ override_resource {
   override_during = plan
   values = {
     arn = "arn:aws:iam::123456789012:policy/JobcronTerraformProductionNetworkRead"
+  }
+}
+
+override_resource {
+  target          = aws_iam_policy.production_slice3_read
+  override_during = plan
+  values = {
+    arn = "arn:aws:iam::123456789012:policy/JobcronTerraformProductionSlice3Read"
   }
 }
 
@@ -245,6 +269,83 @@ run "identity_contract" {
       aws_iam_policy.production_network_read.arn
     )
     error_message = "Production must attach only the approved network-read policy document."
+  }
+
+  assert {
+    condition = (
+      length(data.aws_iam_policy_document.production_slice3_read.statement) == 1 &&
+      one(
+        jsondecode(data.aws_iam_policy_document.production_slice3_read.json).Statement,
+      ).Effect ==
+      "Allow" &&
+      coalesce(
+        one(data.aws_iam_policy_document.production_slice3_read.statement).effect,
+        "Allow",
+      ) ==
+      "Allow" &&
+      one(data.aws_iam_policy_document.production_slice3_read.statement).resources ==
+      toset(["*"]) &&
+      one(data.aws_iam_policy_document.production_slice3_read.statement).actions ==
+      toset([
+        "ec2:DescribeSecurityGroupRules",
+        "rds:DescribeDBEngineVersions",
+        "rds:DescribeDBInstances",
+        "rds:DescribeDBParameterGroups",
+        "rds:DescribeDBParameters",
+        "rds:DescribeDBSubnetGroups",
+        "rds:DescribeOrderableDBInstanceOptions",
+        "rds:ListTagsForResource",
+        "s3:GetAccelerateConfiguration",
+        "s3:GetBucketAcl",
+        "s3:GetBucketCORS",
+        "s3:GetBucketLocation",
+        "s3:GetBucketLogging",
+        "s3:GetBucketObjectLockConfiguration",
+        "s3:GetBucketOwnershipControls",
+        "s3:GetBucketPolicy",
+        "s3:GetBucketPolicyStatus",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:GetBucketRequestPayment",
+        "s3:GetBucketTagging",
+        "s3:GetBucketVersioning",
+        "s3:GetBucketWebsite",
+        "s3:GetEncryptionConfiguration",
+        "s3:GetLifecycleConfiguration",
+        "s3:GetReplicationConfiguration",
+        "s3:ListBucket",
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetResourcePolicy",
+        "secretsmanager:ListSecretVersionIds",
+      ])
+    )
+    error_message = "Production Slice 3 reads must remain within the exact refresh-only ceiling."
+  }
+
+  assert {
+    condition = alltrue([
+      for action in one(
+        data.aws_iam_policy_document.production_slice3_read.statement,
+      ).actions :
+      length(regexall(
+        "(Create|Put|Update|Delete|Modify|Restore|Rotate|Replicate|PassRole|GetSecretValue|BatchGetSecretValue)",
+        action,
+      )) == 0
+    ])
+    error_message = "Production Slice 3 reads must exclude write verbs and secret-value reads."
+  }
+
+  assert {
+    condition = (
+      aws_iam_policy.production_slice3_read.name ==
+      "JobcronTerraformProductionSlice3Read" &&
+      aws_iam_policy.production_slice3_read.policy ==
+      data.aws_iam_policy_document.production_slice3_read.json &&
+      aws_iam_role_policy_attachment.production_slice3_read.role ==
+      aws_iam_role.production.name &&
+      aws_iam_role_policy_attachment.production_slice3_read.policy_arn ==
+      aws_iam_policy.production_slice3_read.arn
+    )
+    error_message = "Production must attach the approved Slice 3 refresh-only policy document."
   }
 
   assert {

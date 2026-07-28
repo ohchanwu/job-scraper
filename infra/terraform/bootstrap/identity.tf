@@ -226,3 +226,54 @@ resource "aws_iam_role_policy_attachment" "production_network_read" {
   role       = aws_iam_role.production.name
   policy_arn = aws_iam_policy.production_network_read.arn
 }
+
+data "aws_iam_policy_document" "production_slice3_read" {
+  statement {
+    actions = [
+      "ec2:DescribeSecurityGroupRules",
+      "rds:DescribeDBEngineVersions",
+      "rds:DescribeDBInstances",
+      "rds:DescribeDBParameterGroups",
+      "rds:DescribeDBParameters",
+      "rds:DescribeDBSubnetGroups",
+      "rds:DescribeOrderableDBInstanceOptions",
+      "rds:ListTagsForResource",
+      "s3:GetAccelerateConfiguration",
+      "s3:GetBucketAcl",
+      "s3:GetBucketCORS",
+      "s3:GetBucketLocation",
+      "s3:GetBucketLogging",
+      "s3:GetBucketObjectLockConfiguration",
+      "s3:GetBucketOwnershipControls",
+      "s3:GetBucketPolicy",
+      "s3:GetBucketPolicyStatus",
+      "s3:GetBucketPublicAccessBlock",
+      "s3:GetBucketRequestPayment",
+      "s3:GetBucketTagging",
+      "s3:GetBucketVersioning",
+      "s3:GetBucketWebsite",
+      "s3:GetEncryptionConfiguration",
+      "s3:GetLifecycleConfiguration",
+      "s3:GetReplicationConfiguration",
+      "s3:ListBucket",
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:GetResourcePolicy",
+      "secretsmanager:ListSecretVersionIds",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_policy" "production_slice3_read" {
+  name   = "JobcronTerraformProductionSlice3Read"
+  policy = data.aws_iam_policy_document.production_slice3_read.json
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "production_slice3_read" {
+  role       = aws_iam_role.production.name
+  policy_arn = aws_iam_policy.production_slice3_read.arn
+}

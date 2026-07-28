@@ -131,13 +131,107 @@ if grep -Fq '"bootstrap/terraform.tfstate' "$identity_file"; then
   exit 1
 fi
 
+require_resource_prevent_destroy \
+  aws_iam_policy production_slice3_read "$identity_file"
+
+identity_without_slice3="$(
+  awk '
+    $0 == "data \"aws_iam_policy_document\" \"production_slice3_read\" {" {
+      skip = 1
+      depth = 1
+      next
+    }
+    skip {
+      line = $0
+      depth += gsub(/\{/, "{", line) - gsub(/\}/, "}", line)
+      if (depth == 0) {
+        skip = 0
+      }
+      next
+    }
+    { print }
+  ' "$identity_file"
+)"
 for forbidden in '"rds:' '"iam:' '"secretsmanager:'; do
-  if grep -Fiq "$forbidden" "$identity_file"; then
+  if grep -Fiq "$forbidden" <<<"$identity_without_slice3"; then
     printf 'Slice 1 identity policy contains forbidden action: %s\n' \
       "$forbidden" >&2
     exit 1
   fi
 done
+
+expected_slice3_actions="$(printf '%s\n' \
+  'ec2:DescribeSecurityGroupRules' \
+  'rds:DescribeDBEngineVersions' \
+  'rds:DescribeDBInstances' \
+  'rds:DescribeDBParameterGroups' \
+  'rds:DescribeDBParameters' \
+  'rds:DescribeDBSubnetGroups' \
+  'rds:DescribeOrderableDBInstanceOptions' \
+  'rds:ListTagsForResource' \
+  's3:GetAccelerateConfiguration' \
+  's3:GetBucketAcl' \
+  's3:GetBucketCORS' \
+  's3:GetBucketLocation' \
+  's3:GetBucketLogging' \
+  's3:GetBucketObjectLockConfiguration' \
+  's3:GetBucketOwnershipControls' \
+  's3:GetBucketPolicy' \
+  's3:GetBucketPolicyStatus' \
+  's3:GetBucketPublicAccessBlock' \
+  's3:GetBucketRequestPayment' \
+  's3:GetBucketTagging' \
+  's3:GetBucketVersioning' \
+  's3:GetBucketWebsite' \
+  's3:GetEncryptionConfiguration' \
+  's3:GetLifecycleConfiguration' \
+  's3:GetReplicationConfiguration' \
+  's3:ListBucket' \
+  'secretsmanager:DescribeSecret' \
+  'secretsmanager:GetResourcePolicy' \
+  'secretsmanager:ListSecretVersionIds' |
+  sort)"
+actual_slice3_actions="$(
+  awk '
+    $0 == "data \"aws_iam_policy_document\" \"production_slice3_read\" {" {
+      found_document = 1
+      document_depth = 1
+      next
+    }
+    found_document && document_depth > 0 {
+      line = $0
+      opens = gsub(/\{/, "{", line)
+      closes = gsub(/\}/, "}", line)
+      if ($0 ~ /^[[:space:]]*actions[[:space:]]*=[[:space:]]*\[[[:space:]]*$/) {
+        in_actions = 1
+      } else if (in_actions &&
+                 $0 ~ /^[[:space:]]*"[A-Za-z0-9:*]+"[,]?[[:space:]]*$/) {
+        action = $0
+        sub(/^[[:space:]]*"/, "", action)
+        sub(/"[,]?[[:space:]]*$/, "", action)
+        print action
+      } else if (in_actions && $0 ~ /^[[:space:]]*\][[:space:]]*$/) {
+        in_actions = 0
+      }
+      document_depth += opens - closes
+      if (document_depth == 0) {
+        exit
+      }
+    }
+  ' "$identity_file" | sort
+)"
+if grep -Eq \
+  '(Create|Put|Update|Delete|Modify|Restore|Rotate|Replicate|PassRole|GetSecretValue|BatchGetSecretValue)' \
+  <<<"$actual_slice3_actions"; then
+  printf 'Slice 3 refresh-only policy contains a write or secret-value action.\n' \
+    >&2
+  exit 1
+fi
+if [[ "$actual_slice3_actions" != "$expected_slice3_actions" ]]; then
+  printf 'Slice 3 refresh-only policy actions differ from the approved ceiling.\n' \
+    >&2
+  exit 1
+fi
 
 expected_policy_tokens="$(printf '%s\n' \
   '"ec2:DescribeAddresses"' \
@@ -161,7 +255,7 @@ expected_policy_tokens="$(printf '%s\n' \
   '"sts:AssumeRoleWithWebIdentity"' '"sts:AssumeRoleWithWebIdentity"' |
   sort)"
 actual_policy_tokens="$(
-  grep -Eo '"[a-z0-9]+:[A-Za-z*]+"' "$identity_file" | sort
+  grep -Eo '"[a-z0-9]+:[A-Za-z*]+"' <<<"$identity_without_slice3" | sort
 )"
 if [[ "$actual_policy_tokens" != "$expected_policy_tokens" ]]; then
   printf 'Slice 2 network read policy actions differ from the approved ceiling.\n' >&2
