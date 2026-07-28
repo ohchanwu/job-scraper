@@ -20,7 +20,7 @@ reset_fixture() {
 replace_all() {
   local old="$1"
   local new="$2"
-  perl -0pi -e "s/\\Q$old\\E/$new/g" "$fixture"
+  OLD="$old" NEW="$new" perl -0pi -e 's/\Q$ENV{OLD}\E/$ENV{NEW}/g' "$fixture"
 }
 
 remove_line() {

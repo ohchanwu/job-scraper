@@ -34,6 +34,8 @@ jobs:
         run: go build ./cmd/jobcron ./cmd/jobcron-import ./cmd/jobcron-user
       - name: release archive contract
         run: go test ./scripts -run TestReleaseConfigPackagesImporter -count=1
+      - name: production image publication contract
+        run: sh scripts/check-production-image-workflow_test.sh
       - name: production Compose contract
         env:
           JOBCRON_IMAGE: example.invalid/jobcron:sha-0123456789ab
