@@ -232,6 +232,7 @@ run "protected_recovery_bucket_contract" {
         "\\bwebsite\\s*\\{",
         "\\btransition\\s*\\{",
         "noncurrent_version_transition\\s*\\{",
+        "newer_noncurrent_versions",
         "expired_object_delete_marker",
         "effect\\s*=\\s*\"Allow\"",
         "output\\s+\"",
