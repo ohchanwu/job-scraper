@@ -183,9 +183,9 @@ this plan prints these files.
 
 ## Slice 3 Dependency Interface
 
-Stop unless the exact integrated Slice 3 commit provides these same-root
-Terraform addresses from plan commit `ea5df1c` plus its approved pending
-recovery-lifecycle correction:
+The durable reviewed Mayor planning baseline is `0ed4540`, at
+`docs/superpowers/plans/260728-terraform-slice-3-private-database-secret-containers-implementation.md`.
+It defines these same-root Terraform addresses:
 
 ```text
 aws_db_instance.production
@@ -196,6 +196,10 @@ aws_secretsmanager_secret.runtime
 aws_s3_bucket.recovery
 aws_s3_bucket_lifecycle_configuration.recovery
 ```
+
+Nothing in this planning dependency is pending. Runtime execution must use the
+later exact Slice 3 completion checkpoint and integrated commit, and must stop
+if that checkpoint differs from the reviewed interface below.
 
 Slice 3 intentionally produces no Terraform output. Slice 4 consumes the
 same-root resource attributes directly:
