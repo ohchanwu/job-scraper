@@ -85,10 +85,12 @@ expect_rejected "missing push flag" \
 expect_rejected "visible build output" \
   replace_all ' >"$build_log" 2>&1' "" || failures=$((failures + 1))
 expect_rejected "printed build output" \
-  insert_after '          chmod 600 "$build_log" "$metadata_file"' \
+  insert_after \
+  '          chmod 600 "$build_log" "$metadata_file" "$package_response" "$manifest_lookup"' \
   '          cat "$build_log"' || failures=$((failures + 1))
 expect_rejected "exported build metadata" \
-  insert_after '          chmod 600 "$build_log" "$metadata_file"' \
+  insert_after \
+  '          chmod 600 "$build_log" "$metadata_file" "$package_response" "$manifest_lookup"' \
   '          echo "metadata=$metadata_file" >>"$GITHUB_OUTPUT"' ||
   failures=$((failures + 1))
 expect_rejected "digest in summary" \
@@ -103,6 +105,142 @@ expect_rejected "immutable tag overwrite" \
 expect_rejected "repository publication secret" \
   replace_all '${{ secrets.GITHUB_TOKEN }}' '${{ secrets.GHCR_TOKEN }}' ||
   failures=$((failures + 1))
+expect_rejected "missing release concurrency" \
+  remove_line '  group: publish-production-image-${{ inputs.release_sha }}' ||
+  failures=$((failures + 1))
+expect_rejected "cancelled in-progress release" \
+  replace_all "  cancel-in-progress: false" "  cancel-in-progress: true" ||
+  failures=$((failures + 1))
+expect_rejected "discarded manifest lookup output" \
+  replace_all ' >"$manifest_lookup" 2>&1' ' >/dev/null 2>&1' ||
+  failures=$((failures + 1))
+expect_rejected "permissive manifest lookup failure" \
+  replace_all \
+  'elif grep -Fqx "ERROR: ${image}: not found" "$manifest_lookup"; then' \
+  'elif test "$?" -ne 0; then' || failures=$((failures + 1))
+expect_rejected "retained manifest lookup output" \
+  remove_line '          rm -f "$manifest_lookup"' ||
+  failures=$((failures + 1))
+expect_rejected "missing registry logout" \
+  replace_all 'docker logout ghcr.io >/dev/null 2>&1 || true; ' "" ||
+  failures=$((failures + 1))
+
+publish_script="$fixture_root/publish.sh"
+awk '
+  $0 == "      - name: Publish immutable private image" { in_step = 1 }
+  in_step && $0 == "        run: |" { emit = 1; next }
+  emit { sub(/^          /, ""); print }
+' "$workflow" >"$publish_script"
+chmod +x "$publish_script"
+
+fake_bin="$fixture_root/bin"
+mkdir "$fake_bin"
+cat >"$fake_bin/git" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+cat >"$fake_bin/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$FAKE_DOCKER_LOG"
+case "${1:-}" in
+  login)
+    cat >/dev/null
+    ;;
+  logout)
+    ;;
+  buildx)
+    if [[ "${2:-}" == "imagetools" && "${3:-}" == "inspect" ]]; then
+      case "$FAKE_INSPECT_MODE" in
+        absent)
+          printf 'ERROR: %s: not found\n' "$4" >&2
+          exit 1
+          ;;
+        network)
+          printf 'ERROR: failed to do request: temporary network failure\n' >&2
+          exit 1
+          ;;
+        existing)
+          printf '{"manifest":"exists"}\n'
+          ;;
+      esac
+    elif [[ "${2:-}" != "build" ]]; then
+      exit 64
+    fi
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+EOF
+cat >"$fake_bin/curl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+while (($#)); do
+  if [[ "$1" == "--output" ]]; then
+    printf '{"visibility":"private"}\n' >"$2"
+    exit 0
+  fi
+  shift
+done
+exit 64
+EOF
+cat >"$fake_bin/jq" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$fake_bin"/*
+
+run_publish() {
+  local mode="$1"
+  local case_root="$fixture_root/run-$mode"
+  mkdir "$case_root"
+  : >"$case_root/docker.log"
+  : >"$case_root/summary"
+  PATH="$fake_bin:$PATH" \
+    FAKE_DOCKER_LOG="$case_root/docker.log" \
+    FAKE_INSPECT_MODE="$mode" \
+    GHCR_TOKEN="synthetic-token" \
+    GHCR_USER="synthetic-user" \
+    GITHUB_REPOSITORY_OWNER="synthetic-owner" \
+    GITHUB_STEP_SUMMARY="$case_root/summary" \
+    RELEASE_SHA="0123456789abcdef0123456789abcdef01234567" \
+    RUNNER_TEMP="$case_root" \
+    bash "$publish_script" >"$case_root/output" 2>&1
+}
+
+if ! run_publish absent; then
+  printf 'FAIL: rejected a narrowly recognized absent manifest\n' >&2
+  failures=$((failures + 1))
+elif ! grep -Fq "buildx build" "$fixture_root/run-absent/docker.log"; then
+  printf 'FAIL: absent manifest did not reach the build\n' >&2
+  failures=$((failures + 1))
+elif ! grep -Fq "logout ghcr.io" "$fixture_root/run-absent/docker.log"; then
+  printf 'FAIL: successful publication did not log out of GHCR\n' >&2
+  failures=$((failures + 1))
+fi
+
+if run_publish network; then
+  printf 'FAIL: transient manifest lookup failure reached publication\n' >&2
+  failures=$((failures + 1))
+elif grep -Fq "buildx build" "$fixture_root/run-network/docker.log"; then
+  printf 'FAIL: transient manifest lookup failure invoked the build\n' >&2
+  failures=$((failures + 1))
+elif ! grep -Fq "logout ghcr.io" "$fixture_root/run-network/docker.log"; then
+  printf 'FAIL: failed lookup did not log out of GHCR\n' >&2
+  failures=$((failures + 1))
+fi
+
+if run_publish existing; then
+  printf 'FAIL: existing immutable tag reached publication\n' >&2
+  failures=$((failures + 1))
+elif grep -Fq "buildx build" "$fixture_root/run-existing/docker.log"; then
+  printf 'FAIL: existing immutable tag invoked the build\n' >&2
+  failures=$((failures + 1))
+elif ! grep -Fq "logout ghcr.io" "$fixture_root/run-existing/docker.log"; then
+  printf 'FAIL: existing manifest path did not log out of GHCR\n' >&2
+  failures=$((failures + 1))
+fi
 
 if ((failures > 0)); then
   printf 'FAIL: %d workflow mutation(s) accepted\n' "$failures" >&2

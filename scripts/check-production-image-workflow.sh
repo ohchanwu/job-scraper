@@ -16,6 +16,9 @@ grep -Fqx "      release_sha:" "$workflow" || fail
 grep -Fqx "        required: true" "$workflow" || fail
 grep -Fqx "        type: string" "$workflow" || fail
 grep -Eq '^  (push|pull_request|schedule|workflow_call):' "$workflow" && fail
+grep -Fqx '  group: publish-production-image-${{ inputs.release_sha }}' \
+  "$workflow" || fail
+grep -Fqx "  cancel-in-progress: false" "$workflow" || fail
 
 permissions="$(
   awk '
@@ -37,15 +40,22 @@ grep -Fq 'GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}' "$workflow" || fail
 grep -Fq 'docker login ghcr.io --username "$GHCR_USER" --password-stdin >/dev/null 2>&1' \
   "$workflow" || fail
 grep -Fq 'image="ghcr.io/${owner}/jobcron:sha-${RELEASE_SHA:0:12}"' "$workflow" || fail
-grep -Fq 'docker buildx imagetools inspect "$image" >/dev/null 2>&1' "$workflow" || fail
+grep -Fq 'docker buildx imagetools inspect "$image" >"$manifest_lookup" 2>&1' \
+  "$workflow" || fail
+grep -Fq \
+  'elif grep -Fqx "ERROR: ${image}: not found" "$manifest_lookup"; then' \
+  "$workflow" || fail
+grep -Fq 'rm -f "$manifest_lookup"' "$workflow" || fail
 test "$(grep -Fxc '            exit 1' "$workflow")" -ge 1 || fail
 
 grep -Fq -- '--platform linux/arm64' "$workflow" || fail
 grep -Fq -- '--file deploy/production/Dockerfile' "$workflow" || fail
 grep -Fq -- ' --push ' "$workflow" || fail
 grep -Fq ' >"$build_log" 2>&1' "$workflow" || fail
-grep -Fq 'chmod 600 "$build_log" "$metadata_file"' "$workflow" || fail
-grep -Fq 'trap '\''rm -f "$build_log" "$metadata_file" "$package_response"'\'' EXIT' \
+grep -Fq 'chmod 600 "$build_log" "$metadata_file" "$package_response" "$manifest_lookup"' \
+  "$workflow" || fail
+grep -Fq 'docker logout ghcr.io >/dev/null 2>&1 || true' "$workflow" || fail
+grep -Fq 'rm -f "$build_log" "$metadata_file" "$package_response" "$manifest_lookup"' \
   "$workflow" || fail
 
 grep -Fq 'curl --fail --silent --show-error' "$workflow" || fail

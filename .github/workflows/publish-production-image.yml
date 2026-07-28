@@ -12,6 +12,10 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: publish-production-image-${{ inputs.release_sha }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-24.04-arm
@@ -50,16 +54,23 @@ jobs:
           build_log="$(mktemp "${RUNNER_TEMP}/jobcron-build.XXXXXX")"
           metadata_file="$(mktemp "${RUNNER_TEMP}/jobcron-metadata.XXXXXX")"
           package_response="$(mktemp "${RUNNER_TEMP}/jobcron-package.XXXXXX")"
-          trap 'rm -f "$build_log" "$metadata_file" "$package_response"' EXIT
-          chmod 600 "$build_log" "$metadata_file"
+          manifest_lookup="$(mktemp "${RUNNER_TEMP}/jobcron-manifest.XXXXXX")"
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true; rm -f "$build_log" "$metadata_file" "$package_response" "$manifest_lookup"' EXIT
+          chmod 600 "$build_log" "$metadata_file" "$package_response" "$manifest_lookup"
 
           printf '%s' "$GHCR_TOKEN" |
             docker login ghcr.io --username "$GHCR_USER" --password-stdin >/dev/null 2>&1
 
-          if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
+          if docker buildx imagetools inspect "$image" >"$manifest_lookup" 2>&1; then
             printf 'Immutable image tag already exists\n' >&2
             exit 1
+          elif grep -Fqx "ERROR: ${image}: not found" "$manifest_lookup"; then
+            :
+          else
+            printf 'Image manifest lookup failed\n' >&2
+            exit 1
           fi
+          rm -f "$manifest_lookup"
 
           if ! docker buildx build --platform linux/arm64 \
             --file deploy/production/Dockerfile \
