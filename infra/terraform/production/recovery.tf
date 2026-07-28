@@ -44,33 +44,26 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "recovery" {
   }
 }
 
-data "aws_iam_policy_document" "recovery_bucket" {
-  statement {
-    sid    = "DenyInsecureTransport"
-    effect = "Deny"
-
-    principals {
-      type        = "*"
-      identifiers = ["*"]
-    }
-
-    actions = ["s3:*"]
-    resources = [
-      aws_s3_bucket.recovery.arn,
-      "${aws_s3_bucket.recovery.arn}/*",
-    ]
-
-    condition {
-      test     = "Bool"
-      variable = "aws:SecureTransport"
-      values   = ["false"]
-    }
-  }
-}
-
 resource "aws_s3_bucket_policy" "recovery" {
   bucket = aws_s3_bucket.recovery.id
-  policy = data.aws_iam_policy_document.recovery_bucket.json
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "DenyInsecureTransport"
+      Effect    = "Deny"
+      Principal = "*"
+      Action    = "s3:*"
+      Resource = [
+        aws_s3_bucket.recovery.arn,
+        "${aws_s3_bucket.recovery.arn}/*",
+      ]
+      Condition = {
+        Bool = {
+          "aws:SecureTransport" = "false"
+        }
+      }
+    }]
+  })
 
   lifecycle {
     prevent_destroy = true

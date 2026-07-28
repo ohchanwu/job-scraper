@@ -1,10 +1,4 @@
-mock_provider "aws" {
-  mock_data "aws_iam_policy_document" {
-    defaults = {
-      json = "{}"
-    }
-  }
-}
+mock_provider "aws" {}
 
 override_resource {
   target          = aws_route_table.public
@@ -132,20 +126,33 @@ run "protected_recovery_bucket_contract" {
   }
 
   assert {
-    condition = (
-      one(data.aws_iam_policy_document.recovery_bucket.statement).effect == "Deny" &&
-      toset(one(data.aws_iam_policy_document.recovery_bucket.statement).actions) == toset(["s3:*"]) &&
-      toset(one(data.aws_iam_policy_document.recovery_bucket.statement).resources) == toset([
-        "arn:aws:s3:::jobcron-recovery-test-only",
-        "arn:aws:s3:::jobcron-recovery-test-only/*",
-      ]) &&
-      one(one(data.aws_iam_policy_document.recovery_bucket.statement).principals).type == "*" &&
-      toset(one(one(data.aws_iam_policy_document.recovery_bucket.statement).principals).identifiers) == toset(["*"]) &&
-      one(one(data.aws_iam_policy_document.recovery_bucket.statement).condition).test == "Bool" &&
-      one(one(data.aws_iam_policy_document.recovery_bucket.statement).condition).variable == "aws:SecureTransport" &&
-      toset(one(one(data.aws_iam_policy_document.recovery_bucket.statement).condition).values) == toset(["false"])
-    )
+    condition = jsonencode(jsondecode(aws_s3_bucket_policy.recovery.policy)) == jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Sid       = "DenyInsecureTransport"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          "arn:aws:s3:::jobcron-recovery-test-only",
+          "arn:aws:s3:::jobcron-recovery-test-only/*",
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      }]
+    })
     error_message = "The recovery bucket policy must deny every insecure S3 action on the bucket and objects."
+  }
+
+  assert {
+    condition = length(regexall(
+      "data\\s+\"aws_iam_policy_document\"\\s+\"recovery_bucket\"",
+      try(file("${path.module}/recovery.tf"), "")
+    )) == 0
+    error_message = "The recovery policy must remain inline so Slice 3 plans contain no deferred policy-document read."
   }
 
   assert {
