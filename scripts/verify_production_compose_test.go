@@ -13,7 +13,8 @@ import (
 const (
 	productionVerifier      = "scripts/verify-production-compose.sh"
 	productionTextInspector = "scripts/inspect-production-compose-render.sh"
-	syntheticImage          = "example.invalid/jobcron:sha-0123456789ab"
+	syntheticImage          = "ghcr.io/example-owner/jobcron@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	syntheticCommitTag      = "ghcr.io/example-owner/jobcron:sha-0123456789ab"
 	syntheticDatabase       = "postgres://synthetic:synthetic@db.example.invalid/jobcron?sslmode=require"
 	syntheticSession        = "synthetic-session-secret-at-least-32-bytes"
 	syntheticKey            = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
@@ -155,25 +156,25 @@ func TestProductionSurfacesUseExistingDailyScrapeTimeVariable(t *testing.T) {
 	}
 }
 
-func TestProductionComposeVerifierAcceptsImmutableReferences(t *testing.T) {
-	tests := []struct {
-		name  string
-		image string
-	}{
-		{name: "commit tag", image: syntheticImage},
-		{name: "sha256 digest", image: "example.invalid/jobcron@sha256:" + strings.Repeat("a", 64)},
+func TestProductionComposeVerifierAcceptsDigestReference(t *testing.T) {
+	result := runProductionVerifier(t, nil, syntheticProductionEnvironment)
+	if result.err != nil {
+		t.Fatalf("verifier rejected digest image reference: %v\n%s", result.err, result.output)
 	}
+	if !strings.Contains(result.output, "production Compose contract verified") {
+		t.Fatalf("success output = %q, want contract confirmation", result.output)
+	}
+}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			result := runProductionVerifier(t, nil, replaceEnvironment(syntheticProductionEnvironment, "JOBCRON_IMAGE", test.image))
-			if result.err != nil {
-				t.Fatalf("verifier rejected immutable image reference: %v\n%s", result.err, result.output)
-			}
-			if !strings.Contains(result.output, "production Compose contract verified") {
-				t.Fatalf("success output = %q, want contract confirmation", result.output)
-			}
-		})
+func TestProductionComposeVerifierRejectsMutableImageReference(t *testing.T) {
+	result := runProductionVerifier(
+		t,
+		nil,
+		replaceEnvironment(syntheticProductionEnvironment, "JOBCRON_IMAGE", syntheticCommitTag),
+	)
+	assertRejectedContract(t, result, "services.app.image must use private GHCR sha256 digest")
+	if strings.Contains(result.output, syntheticCommitTag) {
+		t.Fatalf("rejection output disclosed candidate image reference: %q", result.output)
 	}
 }
 
@@ -231,38 +232,62 @@ func TestProductionComposeVerifierRejectsUnsafeTopology(t *testing.T) {
 			),
 		},
 		{
-			name:     "app publishes container port directly",
+			name:     "app omits loopback port",
 			contract: "services.app.ports",
 			mutate: replaceOnce(
-				"    expose:\n      - \"7777\"",
-				"    ports:\n      - \"8888:7777\"",
+				"    ports:\n      - target: 7777\n        published: \"7777\"\n        host_ip: 127.0.0.1\n        protocol: tcp",
+				"    ports: []",
+			),
+		},
+		{
+			name:     "app publishes on all interfaces",
+			contract: "services.app.ports",
+			mutate: replaceOnce(
+				"    ports:\n      - target: 7777\n        published: \"7777\"\n        host_ip: 127.0.0.1\n        protocol: tcp",
+				"    ports:\n      - target: 7777\n        published: \"7777\"\n        host_ip: 0.0.0.0\n        protocol: tcp",
 			),
 		},
 		{
 			name:     "app publishes Caddy HTTP port",
 			contract: "services.app.ports",
 			mutate: replaceOnce(
-				"    expose:\n      - \"7777\"",
-				"    expose:\n      - \"7777\"\n    ports:\n      - \"80:7777\"",
+				"    ports:\n      - target: 7777\n        published: \"7777\"\n        host_ip: 127.0.0.1\n        protocol: tcp",
+				"    ports:\n      - target: 7777\n        published: \"80\"\n        host_ip: 127.0.0.1\n        protocol: tcp",
 			),
 		},
 		{
-			name:     "Caddy omits HTTP port",
+			name:     "Caddy omits private TLS port",
 			contract: "services.caddy.ports",
-			mutate:   replaceOnce("      - \"80:80\"\n", ""),
+			mutate: replaceOnce(
+				"    ports:\n      - target: 443\n        published: \"8443\"\n        host_ip: 127.0.0.1\n        protocol: tcp",
+				"    ports: []",
+			),
 		},
 		{
-			name:     "Caddy omits HTTPS port",
+			name:     "Caddy publishes on all interfaces",
 			contract: "services.caddy.ports",
-			mutate:   replaceOnce("      - \"443:443\"\n", ""),
+			mutate: replaceOnce(
+				"    ports:\n      - target: 443\n        published: \"8443\"\n        host_ip: 127.0.0.1\n        protocol: tcp",
+				"    ports:\n      - target: 443\n        published: \"8443\"\n        host_ip: 0.0.0.0\n        protocol: tcp",
+			),
 		},
 		{
 			name:     "Caddy publishes an extra port",
 			contract: "services.caddy.ports",
 			mutate: replaceOnce(
-				"      - \"443:443\"",
-				"      - \"443:443\"\n      - \"8080:8080\"",
+				"    ports:\n      - target: 443\n        published: \"8443\"\n        host_ip: 127.0.0.1\n        protocol: tcp",
+				"    ports:\n      - target: 443\n        published: \"8443\"\n        host_ip: 127.0.0.1\n        protocol: tcp\n      - \"8080:8080\"",
 			),
+		},
+		{
+			name:     "runtime network is externally routable",
+			contract: "networks.runtime",
+			mutate:   replaceOnce("    internal: true", "    internal: false"),
+		},
+		{
+			name:     "Caddy omits transient certificate mount",
+			contract: "services.caddy.volumes",
+			mutate:   replaceOnce("      - /run/jobcron/caddy:/run/jobcron/caddy:ro\n", ""),
 		},
 		{
 			name:     "legacy app volume remains declared",
@@ -291,6 +316,7 @@ func TestProductionComposeVerifierRejectsMissingAppEnvironment(t *testing.T) {
 		"JOBCRON_HOST",
 		"JOBCRON_PORT",
 		"JOBCRON_NO_OPEN",
+		"AWS_EC2_METADATA_DISABLED",
 		"JOBCRON_SCHEDULER_ENABLED",
 		"JOBCRON_DAILY_SCRAPE_TIME",
 	} {
@@ -299,6 +325,13 @@ func TestProductionComposeVerifierRejectsMissingAppEnvironment(t *testing.T) {
 			assertRejectedContract(t, result, "services.app.environment."+name)
 		})
 	}
+	t.Run("Caddy AWS_EC2_METADATA_DISABLED", func(t *testing.T) {
+		result := runProductionVerifier(t, replaceOnce(
+			"    environment:\n      JOBCRON_PROXY_SECRET: \"${JOBCRON_PROXY_SECRET:?set JOBCRON_PROXY_SECRET in .env}\"\n      AWS_EC2_METADATA_DISABLED: \"true\"",
+			"    environment:\n      JOBCRON_PROXY_SECRET: \"${JOBCRON_PROXY_SECRET:?set JOBCRON_PROXY_SECRET in .env}\"",
+		), syntheticProductionEnvironment)
+		assertRejectedContract(t, result, "services.caddy.environment.AWS_EC2_METADATA_DISABLED")
+	})
 	t.Run("JOBCRON_PROXY_SECRET", func(t *testing.T) {
 		result := runProductionVerifier(t, replaceOnce(
 			"      JOBCRON_STAGE1_SPONSOR_USER_ID:\n      JOBCRON_PROXY_SECRET: \"${JOBCRON_PROXY_SECRET:?set JOBCRON_PROXY_SECRET in .env}\"",

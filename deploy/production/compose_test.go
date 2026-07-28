@@ -197,8 +197,8 @@ func TestProductionComposeMountsOriginCertificateReadOnly(t *testing.T) {
 		t.Fatalf("read Caddyfile: %v", err)
 	}
 	want := "tls /run/jobcron/caddy/origin.crt /run/jobcron/caddy/origin.key"
-	if !strings.Contains(string(caddyfile), want) {
-		t.Fatalf("Caddyfile does not use Origin CA files: want %q", want)
+	if got := strings.Count(string(caddyfile), want); got != 2 {
+		t.Fatalf("Caddyfile Origin CA TLS directives = %d, want 2", got)
 	}
 }
 

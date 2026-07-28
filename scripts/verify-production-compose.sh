@@ -71,16 +71,43 @@ check_contract "services.app" '.services.app | type == "object"'
 check_contract "services.caddy" '.services.caddy | type == "object"'
 check_contract "services.app.volumes must be absent" \
 	'((.services.app.volumes // []) | length) == 0'
-check_contract "services.app.ports must be absent" \
-	'((.services.app.ports // []) | length) == 0'
-check_contract "services.caddy.ports must publish only 80 and 443" '
+check_contract "services.app.ports must bind only loopback 7777" '
+	(.services.app.ports // []) as $ports |
+	($ports | length) == 1 and
+	$ports[0].host_ip == "127.0.0.1" and
+	($ports[0].published | tostring) == "7777" and
+	$ports[0].target == 7777 and
+	$ports[0].protocol == "tcp"
+'
+check_contract "services.caddy.ports must bind only loopback 8443 to 443" '
 	(.services.caddy.ports // []) as $ports |
-	($ports | length) == 2 and
-	any($ports[]; (.published | tostring) == "80" and .target == 80 and .protocol == "tcp") and
-	any($ports[]; (.published | tostring) == "443" and .target == 443 and .protocol == "tcp") and
-	([.services | to_entries[] | select(.key != "caddy") |
-	  (.value.ports // [])[] | .published | tostring |
-	  select(. == "80" or . == "443")] | length) == 0
+	($ports | length) == 1 and
+	$ports[0].host_ip == "127.0.0.1" and
+	($ports[0].published | tostring) == "8443" and
+	$ports[0].target == 443 and
+	$ports[0].protocol == "tcp"
+'
+check_contract "networks.runtime must be internal and shared only by app and Caddy" '
+	.networks.runtime.internal == true and
+	(.services.app.networks | has("runtime")) and
+	(.services.caddy.networks | has("runtime"))
+'
+check_contract "services.caddy.volumes must mount transient Origin CA read-only" '
+	[.services.caddy.volumes[] |
+	 select(.type == "bind" and
+	        .source == "/run/jobcron/caddy" and
+	        .target == "/run/jobcron/caddy" and
+	        .read_only == true)] | length == 1
+'
+check_contract "services.app.logging must rotate local JSON logs" '
+	.services.app.logging.driver == "json-file" and
+	.services.app.logging.options["max-size"] == "10m" and
+	.services.app.logging.options["max-file"] == "3"
+'
+check_contract "services.caddy.logging must rotate local JSON logs" '
+	.services.caddy.logging.driver == "json-file" and
+	.services.caddy.logging.options["max-size"] == "10m" and
+	.services.caddy.logging.options["max-file"] == "3"
 '
 
 check_contract "services.app.environment.DATABASE_URL" \
@@ -97,6 +124,8 @@ check_contract "services.app.environment.JOBCRON_PORT must be 7777" \
 	'.services.app.environment.JOBCRON_PORT == "7777"'
 check_contract "services.app.environment.JOBCRON_NO_OPEN must be 1" \
 	'.services.app.environment.JOBCRON_NO_OPEN == "1"'
+check_contract "services.app.environment.AWS_EC2_METADATA_DISABLED must be true" \
+	'.services.app.environment.AWS_EC2_METADATA_DISABLED == "true"'
 check_contract "services.app.environment.JOBCRON_DEMO must be absent" \
 	'(.services.app.environment | has("JOBCRON_DEMO")) | not'
 check_contract "services.app.environment.JOBCRON_ADMIN_TOKEN must be absent" \
@@ -107,6 +136,8 @@ check_contract "services.app.environment.JOBCRON_PROXY_SECRET" \
 	'.services.app.environment.JOBCRON_PROXY_SECRET == env.JOBCRON_PROXY_SECRET'
 check_contract "services.caddy.environment.JOBCRON_PROXY_SECRET" \
 	'.services.caddy.environment.JOBCRON_PROXY_SECRET == env.JOBCRON_PROXY_SECRET'
+check_contract "services.caddy.environment.AWS_EC2_METADATA_DISABLED must be true" \
+	'.services.caddy.environment.AWS_EC2_METADATA_DISABLED == "true"'
 check_contract "services.app.environment.JOBCRON_SCHEDULER_ENABLED must be 1" \
 	'.services.app.environment.JOBCRON_SCHEDULER_ENABLED == "1"'
 check_contract "services.app.environment.JOBCRON_DAILY_SCRAPE_TIME must preserve the same-name input or default to 05:00" '
@@ -119,8 +150,9 @@ check_contract "services.app.command must enforce no-open host and port" '
 '
 check_contract "services.app.image must equal JOBCRON_IMAGE" \
 	'.services.app.image == env.JOBCRON_IMAGE'
-check_contract "services.app.image must use sha-<12-hex> or sha256 digest" \
+check_contract "services.app.image must use private GHCR sha256 digest" \
 	'(.services.app.image | type == "string") and
-	 (.services.app.image | test("(:sha-[0-9a-f]{12}|@sha256:[0-9a-f]{64})$"))'
+	 (.services.app.image |
+	  test("^ghcr[.]io/[a-z0-9._-]+/jobcron@sha256:[0-9a-f]{64}$"))'
 
 printf '%s\n' "production Compose contract verified"

@@ -38,7 +38,7 @@ jobs:
         run: sh scripts/check-production-image-workflow_test.sh
       - name: production Compose contract
         env:
-          JOBCRON_IMAGE: example.invalid/jobcron:sha-0123456789ab
+          JOBCRON_IMAGE: ghcr.io/example-owner/jobcron@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
           DATABASE_URL: postgres://synthetic:synthetic@db.example.invalid/jobcron?sslmode=require
           SESSION_SECRET: synthetic-session-secret-at-least-32-bytes
           JOBCRON_CREDENTIAL_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=

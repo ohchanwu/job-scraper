@@ -4,10 +4,12 @@
 # Docker network. A shared secret authenticates Caddy's client-IP headers.
 
 www.jobcron.app {
+	tls /run/jobcron/caddy/origin.crt /run/jobcron/caddy/origin.key
 	redir https://jobcron.app{uri} permanent
 }
 
 jobcron.app {
+	tls /run/jobcron/caddy/origin.crt /run/jobcron/caddy/origin.key
 	reverse_proxy app:7777 {
 		header_up X-Jobcron-Proxy {$JOBCRON_PROXY_SECRET}
 	}
