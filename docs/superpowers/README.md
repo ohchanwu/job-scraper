@@ -9,6 +9,7 @@ decision records needed for the current task.
 - [Terraform AWS foundation and Cloudflare ingress automation][terraform-aws-foundation]
 - [Terraform-first production launch human-blocked steps][terraform-launch-human-steps]
 - [Pre-Batch-1 human input checklist][pre-batch-1-checklist]
+- [Pre-Batch-1 Window 1 authorization contract][pre-batch-1-contract]
 - [Terraform-first production launch roadmap][terraform-launch-roadmap]
 - [Terraform Slice 2: canonical VPC and EIP adoption][terraform-slice-2-spec]
 - [Terraform Slice 2 implementation][terraform-slice-2-plan]
@@ -100,6 +101,8 @@ decision records needed for the current task.
   specs/260726-terraform-first-production-launch-human-blocked-steps.md
 [pre-batch-1-checklist]:
   specs/260728-pre-batch-1-human-input-checklist.md
+[pre-batch-1-contract]:
+  specs/260728-pre-batch-1-window-1-authorization-contract.md
 [terraform-launch-roadmap]:
   plans/260726-terraform-first-production-launch-roadmap.md
 [terraform-slice-2-spec]:

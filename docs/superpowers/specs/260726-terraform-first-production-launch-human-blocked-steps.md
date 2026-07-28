@@ -11,6 +11,9 @@ authorization][two-window-decision]
 <br>
 **Remote checklist:** [Pre-Batch-1 human input checklist][pre-batch-1-checklist]
 
+**Input contract:** [Pre-Batch-1 Window 1 authorization
+contract][pre-batch-1-contract]
+
 ## Purpose
 
 Define the decisions, private inputs, approval gates, and real-world verification
@@ -120,8 +123,9 @@ These gates apply to every implementation slice:
 
 ## Human-Controlled Inputs
 
-Prepare these values privately. Checkbox completion belongs in the
-access-controlled operator log, not in this public file.
+Prepare private values outside Git. This public file may record only a
+value-blind completion state; the underlying values and evidence belong in the
+access-controlled operator log.
 
 ### Window 1 Inputs And Authority
 
@@ -129,12 +133,15 @@ access-controlled operator log, not in this public file.
       Center and MFA
 - [x] Expected AWS account, role, and region, checked without publishing their
       exact values
-- [ ] Cloud account access not held by the agent, including Cloudflare account
-      and zone access
-- [ ] OCI registry access and credentials for image publication and host pulls
-- [ ] Maximum approved infrastructure spend
+- [x] Human access to the intended Cloudflare account and zone, with later
+      ability to authorize Origin CA and DNS work
+- [x] OCI registry selection, image-visibility decision, workflow publication
+      authority, and human recovery capability
+- [ ] Least-privilege private replacement-host image-pull credential or
+      equivalent approved pull mechanism
+- [x] Maximum approved infrastructure spend
 - [x] Access-controlled operator-log location
-- [ ] Private rollback decision owner and the condition that ends the rollback
+- [x] Private rollback decision owner and the condition that ends the rollback
       window
 
 ### Application And Data
@@ -460,5 +467,7 @@ This human-blocked specification is complete only when:
 [archived-spec]: ../archive/2026-07-26-first-production-launch-human-blocked-steps/260716-first-production-launch-human-blocked-steps.md
 [terraform-spec]: 260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md
 [pre-batch-1-checklist]: 260728-pre-batch-1-human-input-checklist.md
+[pre-batch-1-contract]:
+  260728-pre-batch-1-window-1-authorization-contract.md
 [two-window-decision]:
   ../decisions/260727-two-window-first-production-launch-authorization.md

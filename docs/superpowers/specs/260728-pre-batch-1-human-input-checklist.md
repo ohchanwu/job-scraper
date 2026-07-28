@@ -1,6 +1,6 @@
 # Pre-Batch-1 Human Input Checklist
 
-**Status:** Human input requested before Batch 1
+**Status:** Partially complete; production-profile confirmation remains open
 
 **Recorded:** 2026-07-28
 
@@ -10,6 +10,8 @@
 
 **Standing authorization:** [Two-window first-production-launch
 authorization][two-window]
+
+**Interpretation:** [Pre-Batch-1 Window 1 authorization contract][contract]
 
 ## Purpose
 
@@ -317,6 +319,8 @@ traffic, deletion of rollback resources, or closure of the rollback window.
 
 [human-steps]:
   260726-terraform-first-production-launch-human-blocked-steps.md
+[contract]:
+  260728-pre-batch-1-window-1-authorization-contract.md
 [roadmap]:
   ../plans/260726-terraform-first-production-launch-roadmap.md
 [two-window]:
