@@ -136,6 +136,49 @@ func TestProductionComposeOperatorDocsUseFailClosedInspector(t *testing.T) {
 	}
 }
 
+func TestProductionDocsUseTransientSSMOperations(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join(".."))
+	for _, name := range []string{
+		filepath.Join("deploy", "production", "HUMAN_DEPLOY_GUIDE.md"),
+		filepath.Join("deploy", "production", "README.md"),
+	} {
+		contents, err := os.ReadFile(filepath.Join(repoRoot, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		text := strings.ToLower(string(contents))
+		for _, stale := range []string{
+			"ssh -",
+			"docker buildx build",
+			"--env-file .env config",
+			"existing ec2 `.env`",
+			"docker compose up",
+			"make rds public",
+			"associate-address",
+			"cloudflare record",
+			"dns record",
+			"0.0.0.0:",
+		} {
+			if strings.Contains(text, stale) {
+				t.Errorf("%s retains stale production operation %q", name, stale)
+			}
+		}
+		for _, required := range []string{
+			"session manager",
+			"/run/jobcron",
+			"digest",
+			"systemd",
+			"private verification",
+			"recovery manifest",
+			"stop condition",
+		} {
+			if !strings.Contains(text, required) {
+				t.Errorf("%s does not document %q", name, required)
+			}
+		}
+	}
+}
+
 func TestProductionSurfacesUseExistingDailyScrapeTimeVariable(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join(".."))
 	standaloneInventedName := "JOBCRON_DAILY_" + "TIME"
