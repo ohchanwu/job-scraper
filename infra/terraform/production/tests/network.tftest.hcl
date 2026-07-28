@@ -60,6 +60,25 @@ variables {
       }
     }
   }
+
+  private_database_config = {
+    private_subnets = {
+      database_a = {
+        availability_zone = "example-1a"
+        cidr_block        = "10.255.0.64/28"
+      }
+      database_b = {
+        availability_zone = "example-1b"
+        cidr_block        = "10.255.0.80/28"
+      }
+    }
+    database_identifier       = "jobcron-test-only"
+    database_name             = "jobcron"
+    master_username           = "jobcron_admin"
+    final_snapshot_identifier = "jobcron-final-test-only"
+    runtime_secret_name       = "jobcron/test/runtime"
+    recovery_bucket_name      = "jobcron-recovery-test-only"
+  }
 }
 
 run "network_contract" {
