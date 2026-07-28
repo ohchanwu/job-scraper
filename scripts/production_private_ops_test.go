@@ -105,6 +105,22 @@ func TestProductionPrivateOpsRDSUsesOneLeastPrivilegeTransaction(t *testing.T) {
 	}
 }
 
+func TestProductionPrivateOpsRDSValidatesRuntimeSecretBeforeRotation(t *testing.T) {
+	requirePrivateOpsHelper(t, rdsRoleHelper)
+	fixture := newPrivateOpsFixture(t)
+	writeFile(t, fixture.runtimeSecret, "{\n", 0o600)
+	result := fixture.run(t, rdsRoleHelper, "master-password\napplication-password\n")
+	if result.err == nil {
+		t.Fatal("RDS helper accepted malformed runtime-secret.json")
+	}
+	if log := readOptionalFile(t, fixture.commandLog); strings.Contains(log, "psql ") {
+		t.Fatalf("password rotated before runtime secret validation:\n%s", log)
+	}
+	if _, err := os.Stat(fixture.roleEnv); !os.IsNotExist(err) {
+		t.Fatalf("failed role operation wrote success state: %v", err)
+	}
+}
+
 func TestProductionPrivateOpsRecoveryDownloadsMissingThenTagsVerified(t *testing.T) {
 	requirePrivateOpsHelper(t, recoveryHelper)
 	fixture := newPrivateOpsFixture(t)

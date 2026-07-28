@@ -25,7 +25,8 @@ printf '%s\n' "$app_user" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$' || fail
 [ "$(mode "$runtime_secret")" = 600 ] || fail
 
 if [ -t 0 ]; then
-	trap 'stty echo 2>/dev/null || true' EXIT HUP INT TERM
+	trap 'stty echo 2>/dev/null || true' EXIT
+	trap 'exit 1' HUP INT TERM
 	stty -echo
 fi
 IFS= read -r master_password || fail
@@ -43,6 +44,21 @@ database=${database_url##*/}
 connection=${master_url#postgres://}
 connection=${connection#*@}
 escaped_application_password=$(printf '%s' "$application_password" | sed "s/'/''/g")
+encoded_application_password=$(printf '%s' "$application_password" | jq -sRr @uri)
+application_url="postgres://$app_user:$encoded_application_password@$connection"
+runtime_tmp=$(mktemp "$runtime_secret.XXXXXX")
+role_tmp=$(mktemp "$role_env.XXXXXX")
+cleanup() {
+	rm -f "$runtime_tmp" "$role_tmp"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+if ! APP_DATABASE_URL=$application_url jq \
+	'.DATABASE_URL = env.APP_DATABASE_URL' "$runtime_secret" >"$runtime_tmp"; then
+	fail
+fi
+printf '%s\n' "DATABASE_ROLE_READY=true" >"$role_tmp"
+chmod 600 "$runtime_tmp" "$role_tmp"
 
 if ! PGPASSWORD=$master_password psql "$master_url" -X -q -v ON_ERROR_STOP=1 \
 	>/dev/null 2>&1 <<SQL
@@ -67,20 +83,6 @@ then
 	fail
 fi
 
-encoded_application_password=$(printf '%s' "$application_password" | jq -sRr @uri)
-application_url="postgres://$app_user:$encoded_application_password@$connection"
-runtime_tmp=$(mktemp "$runtime_secret.XXXXXX")
-role_tmp=$(mktemp "$role_env.XXXXXX")
-cleanup() {
-	rm -f "$runtime_tmp" "$role_tmp"
-}
-trap cleanup EXIT HUP INT TERM
-if ! APP_DATABASE_URL=$application_url jq \
-	'.DATABASE_URL = env.APP_DATABASE_URL' "$runtime_secret" >"$runtime_tmp"; then
-	fail
-fi
-printf '%s\n' "DATABASE_ROLE_READY=true" >"$role_tmp"
-chmod 600 "$runtime_tmp" "$role_tmp"
 mv "$runtime_tmp" "$runtime_secret"
 mv "$role_tmp" "$role_env"
 trap - EXIT HUP INT TERM

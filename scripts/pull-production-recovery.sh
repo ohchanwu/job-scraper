@@ -22,20 +22,26 @@ archive_dir=$recovery_dir/${prefix##*/}
 mkdir -p "$archive_dir"
 chmod 700 "$archive_dir"
 keys_file=$(mktemp "$recovery_dir/.keys.XXXXXX")
+keys_raw=$(mktemp "$recovery_dir/.keys-raw.XXXXXX")
 cleanup() {
-	rm -f "$keys_file"
+	rm -f "$keys_file" "$keys_raw"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 if ! aws s3api list-objects-v2 \
 	--bucket "$bucket" \
 	--prefix "$prefix/" \
 	--query 'Contents[].Key' \
-	--output text 2>/dev/null |
-	tr '[:space:]' '\n' |
-	sed '/^$/d' >"$keys_file"; then
+	--output text >"$keys_raw" 2>/dev/null; then
 	fail
 fi
+tr '[:space:]' '\n' <"$keys_raw" | sed '/^$/d' >"$keys_file"
+rm -f "$keys_raw"
+
+for name in database.dump database.dump.sha256 jobcron.log jobcron.log.sha256 caddy.log caddy.log.sha256; do
+	[ "$(grep -Fxc "$prefix/$name" "$keys_file")" = 1 ] || fail
+done
 
 key_count=0
 while IFS= read -r key; do
