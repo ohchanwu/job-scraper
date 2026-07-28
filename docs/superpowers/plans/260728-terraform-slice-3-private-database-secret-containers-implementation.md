@@ -468,7 +468,7 @@ object({
   `aws_secretsmanager_secret.runtime.arn`, and
   `aws_s3_bucket.recovery.id`; none is a tracked output.
 
-- [ ] **Step 1: Write failing variable and network tests**
+- [x] **Step 1: Write failing variable and network tests**
 
 Use `mock_provider "aws" {}` and a documentation-only
 `private_database_config`. Assert:
@@ -500,7 +500,7 @@ PATH=/opt/homebrew/bin:$PATH \
 
 Expected: FAIL because the variable and resources do not exist.
 
-- [ ] **Step 2: Add the sensitive input boundary**
+- [x] **Step 2: Add the sensitive input boundary**
 
 Add validation that:
 
@@ -514,7 +514,7 @@ names, `database_name` matching `^[a-z][a-z0-9_]*$`, and `master_username`
 matching PostgreSQL's identifier form. Error messages must not interpolate a
 private value.
 
-- [ ] **Step 3: Add private networking and security groups**
+- [x] **Step 3: Add private networking and security groups**
 
 Implement:
 
@@ -568,7 +568,7 @@ Do not tag or update `aws_vpc.canonical`. The Step 1 tests and
 reject it on the VPC or any other resource, and reject any additional origin
 tag. This gives Slice 5 one deterministic SG-only discovery selector.
 
-- [ ] **Step 4: Write failing PostgreSQL assertions**
+- [x] **Step 4: Write failing PostgreSQL assertions**
 
 Assert exact settings:
 
@@ -597,7 +597,7 @@ uses only the database security group, the parameter-group family is
 `postgres18`, and its sole parameter is `rds.force_ssl = 1`.
 Assert `aws_db_instance.production` has `prevent_destroy = true`.
 
-- [ ] **Step 5: Add the subnet group, parameter group, and RDS**
+- [x] **Step 5: Add the subnet group, parameter group, and RDS**
 
 Use `var.private_database_config` for the identifier, database name, master
 username, and final snapshot identifier. Set:
@@ -613,7 +613,7 @@ parameter {
 Do not add a password, master-user-secret data source, public output,
 `password` variable, or secret-version resource.
 
-- [ ] **Step 6: Run GREEN verification**
+- [x] **Step 6: Run GREEN verification**
 
 ```bash
 PATH=/opt/homebrew/bin:$PATH \
@@ -626,7 +626,7 @@ git diff --check
 
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add infra/terraform/production/variables.tf \
