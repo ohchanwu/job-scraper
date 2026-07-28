@@ -152,6 +152,14 @@ run "private_database_network_contract" {
   command = plan
 
   assert {
+    condition = !strcontains(
+      file("${path.module}/database.tf"),
+      "nonsensitive(var.private_database_config"
+    )
+    error_message = "Production database resources must not declassify private database configuration."
+  }
+
+  assert {
     condition     = toset(keys(aws_subnet.database)) == toset(["database_a", "database_b"])
     error_message = "The database subnet addresses must remain stable."
   }
@@ -171,6 +179,15 @@ run "private_database_network_contract" {
       length(distinct(values(aws_subnet.database)[*].cidr_block)) == 2
     )
     error_message = "Database subnets must use two distinct AZs and CIDRs."
+  }
+
+  assert {
+    condition = alltrue([
+      for subnet in values(aws_subnet.database) :
+      issensitive(subnet.availability_zone) &&
+      issensitive(subnet.cidr_block)
+    ])
+    error_message = "Database subnet AZs and CIDRs must remain sensitive in plans."
   }
 
   assert {
@@ -255,6 +272,16 @@ run "private_database_network_contract" {
 
 run "postgres_contract" {
   command = plan
+
+  assert {
+    condition = (
+      issensitive(aws_db_instance.production.identifier) &&
+      issensitive(aws_db_instance.production.db_name) &&
+      issensitive(aws_db_instance.production.username) &&
+      issensitive(aws_db_instance.production.final_snapshot_identifier)
+    )
+    error_message = "Private RDS names must remain sensitive in plans."
+  }
 
   assert {
     condition     = toset(aws_db_subnet_group.production.subnet_ids) == toset(values(aws_subnet.database)[*].id)

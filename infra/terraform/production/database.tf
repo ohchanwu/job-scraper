@@ -1,13 +1,9 @@
-locals {
-  private_database_subnets = nonsensitive(var.private_database_config.private_subnets)
-}
-
 resource "aws_subnet" "database" {
   for_each = toset(["database_a", "database_b"])
 
   vpc_id                  = aws_vpc.canonical.id
-  availability_zone       = local.private_database_subnets[each.key].availability_zone
-  cidr_block              = local.private_database_subnets[each.key].cidr_block
+  availability_zone       = var.private_database_config.private_subnets[each.key].availability_zone
+  cidr_block              = var.private_database_config.private_subnets[each.key].cidr_block
   map_public_ip_on_launch = false
 
   lifecycle {
