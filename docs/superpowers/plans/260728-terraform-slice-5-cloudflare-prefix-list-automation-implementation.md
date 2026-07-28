@@ -19,7 +19,7 @@ reads and tagged writes required by those two resources.
 **Tech Stack:** Terraform `1.15.8`, AWS provider `6.33.0`, Python 3 standard
 library, Bash, and pinned GitHub Actions.
 
-**Authoritative planning baseline:** Mayor `main` commit `95d8c59`.
+**Authoritative planning baseline:** Mayor `main` commit `ec1e206`.
 
 ## Global Constraints
 
@@ -263,15 +263,23 @@ private-value diagnostics.
 Add `data.aws_iam_policy_document.edge_prefix_list` and attach its customer
 managed policy only to `aws_iam_role.edge`.
 
-The read statement uses `Resource = "*"` and exactly:
+The Describe-only read statement uses `Resource = "*"` and exactly:
 
 ```text
 ec2:DescribeManagedPrefixLists
 ec2:DescribeSecurityGroups
 ec2:DescribeSecurityGroupRules
 ec2:DescribeTags
-ec2:GetManagedPrefixListEntries
 ```
+
+Put `ec2:GetManagedPrefixListEntries` in a separate read statement scoped to:
+
+```text
+arn:aws:ec2:ap-northeast-2:${data.aws_caller_identity.current.account_id}:prefix-list/*
+```
+
+That statement requires the resource-tag condition
+`aws:ResourceTag/jobcron:edge-source = cloudflare-ipv4`.
 
 The write statements permit exactly:
 
@@ -533,11 +541,20 @@ git commit -m "feat: declare the Cloudflare edge allow-list"
 
 In Terraform tests, compare the policy document's statement action sets,
 resource patterns, tag conditions, and attachment to the exact ceiling above.
+Assert that the wildcard-resource statement contains only the four Describe
+actions, and that `GetManagedPrefixListEntries` is isolated in its own
+regional, account-scoped prefix-list statement with the required
+`jobcron:edge-source = cloudflare-ipv4` resource-tag condition.
 
 In the static check fixture path, add a rejection for:
 
 ```text
 ec2:*
+GetManagedPrefixListEntries in a Resource = "*" statement
+GetManagedPrefixListEntries grouped with the four Describe actions
+GetManagedPrefixListEntries without the prefix-list ARN scope
+GetManagedPrefixListEntries without the required resource-tag condition
+GetManagedPrefixListEntries with the wrong resource-tag value
 CreateSecurityGroup
 DeleteManagedPrefixList
 RevokeSecurityGroupIngress
@@ -571,9 +588,10 @@ patterns with the fixed `aws` partition, approved `ap-northeast-2` region, and
 `data.aws_caller_identity.current.account_id`. The account ID remains in state
 and generated policy JSON, never in tracked HCL or logs.
 
-Keep the exact read and write action sets from **Narrow Edge IAM Ceiling**.
-Use request-tag and resource-tag conditions so a similarly named untagged
-resource is outside the write boundary.
+Keep the exact read and write action sets from **Narrow Edge IAM Ceiling**,
+including the separate resource-scoped `GetManagedPrefixListEntries`
+statement. Use request-tag and resource-tag conditions so a similarly named
+untagged resource is outside the write boundary.
 
 - [ ] **Step 3: Bind destroy protection and the edge-only attachment**
 
