@@ -20,6 +20,12 @@ cp "$repo_root/infra/terraform/production/network.tf" \
   "$fixture_root/repo/infra/terraform/production/"
 cp "$repo_root/infra/terraform/production/variables.tf" \
   "$fixture_root/repo/infra/terraform/production/"
+cp "$repo_root/infra/terraform/production/database.tf" \
+  "$fixture_root/repo/infra/terraform/production/"
+cp "$repo_root/infra/terraform/production/secrets.tf" \
+  "$fixture_root/repo/infra/terraform/production/"
+cp "$repo_root/infra/terraform/production/recovery.tf" \
+  "$fixture_root/repo/infra/terraform/production/"
 
 cat >"$fixture_root/bin/terraform" <<'EOF'
 #!/usr/bin/env bash
@@ -37,6 +43,12 @@ reset_fixtures() {
   cp "$repo_root/infra/terraform/production/network.tf" \
     "$fixture_root/repo/infra/terraform/production/"
   cp "$repo_root/infra/terraform/production/variables.tf" \
+    "$fixture_root/repo/infra/terraform/production/"
+  cp "$repo_root/infra/terraform/production/database.tf" \
+    "$fixture_root/repo/infra/terraform/production/"
+  cp "$repo_root/infra/terraform/production/secrets.tf" \
+    "$fixture_root/repo/infra/terraform/production/"
+  cp "$repo_root/infra/terraform/production/recovery.tf" \
     "$fixture_root/repo/infra/terraform/production/"
 }
 
@@ -67,6 +79,25 @@ remove_exact_line() {
     { print }
     END {
       if (!removed) {
+        exit 1
+      }
+    }
+  ' "$file" >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
+duplicate_exact_line() {
+  local file="$1"
+  local target="$2"
+
+  awk -v target="$target" '
+    $0 == target && !duplicated {
+      print
+      duplicated = 1
+    }
+    { print }
+    END {
+      if (!duplicated) {
         exit 1
       }
     }
@@ -150,6 +181,9 @@ state_file="$fixture_root/repo/infra/terraform/bootstrap/state.tf"
 identity_file="$fixture_root/repo/infra/terraform/bootstrap/identity.tf"
 network_file="$fixture_root/repo/infra/terraform/production/network.tf"
 variables_file="$fixture_root/repo/infra/terraform/production/variables.tf"
+database_file="$fixture_root/repo/infra/terraform/production/database.tf"
+secrets_file="$fixture_root/repo/infra/terraform/production/secrets.tf"
+recovery_file="$fixture_root/repo/infra/terraform/production/recovery.tf"
 failures=0
 
 reset_fixtures
@@ -157,6 +191,12 @@ if ! grep -Fq \
   "uses: aws-actions/configure-aws-credentials@$aws_action_sha" \
   "$production_workflow"; then
   printf 'FAIL: production workflow does not use the reviewed Node.js 24 AWS credentials action pin\n' >&2
+  exit 1
+fi
+if ! grep -Fqx \
+  '      TF_VAR_private_database_config: ${{ secrets.TF_VAR_PRIVATE_DATABASE_CONFIG }}' \
+  "$production_workflow"; then
+  printf 'FAIL: production workflow does not map the private database config\n' >&2
   exit 1
 fi
 if ! run_checker; then
@@ -175,6 +215,21 @@ expect_rejected "printed private network config" \
   insert_into_first_run_block "$production_workflow" \
   '          printf '\''%s\n'\'' "$TF_VAR_canonical_network_config"' ||
   failures=$((failures + 1))
+expect_rejected "missing private database config mapping" \
+  "production workflow must map but never print private database config" \
+  remove_exact_line "$production_workflow" \
+  '      TF_VAR_private_database_config: ${{ secrets.TF_VAR_PRIVATE_DATABASE_CONFIG }}' ||
+  failures=$((failures + 1))
+expect_rejected "duplicate private database config mapping" \
+  "production workflow must map but never print private database config" \
+  duplicate_exact_line "$production_workflow" \
+  '      TF_VAR_private_database_config: ${{ secrets.TF_VAR_PRIVATE_DATABASE_CONFIG }}' ||
+  failures=$((failures + 1))
+expect_rejected "printed private database config" \
+  "production workflow must map but never print private database config" \
+  insert_into_first_run_block "$production_workflow" \
+  '          printf '\''%s\n'\'' "$TF_VAR_private_database_config"' ||
+  failures=$((failures + 1))
 expect_rejected "bare env environment dump" \
   "production workflow must map but never print private network config" \
   insert_into_first_run_block "$production_workflow" \
@@ -183,6 +238,10 @@ expect_rejected "bare printenv environment dump" \
   "production workflow must map but never print private network config" \
   insert_into_first_run_block "$production_workflow" \
   '          printenv' || failures=$((failures + 1))
+expect_rejected "uploaded production plan artifact" \
+  "production workflow must not publish Terraform plan artifacts" \
+  sh -c 'printf "\n      - uses: actions/upload-artifact@0000000000000000000000000000000000000000\n" >>"$1"' \
+  sh "$production_workflow" || failures=$((failures + 1))
 expect_rejected "renamed origin EIP resource" \
   "Terraform resource is missing bound destroy protection: aws_eip.origin" \
   replace_once "$network_file" \
@@ -209,6 +268,130 @@ expect_rejected "canonical public subnet validation message" \
   replace_once "$variables_file" \
   "Canonical public subnet keys must be public_a through public_d." \
   "Canonical public subnet keys must include four entries." ||
+  failures=$((failures + 1))
+expect_rejected "exact aws_route resource in production" \
+  "Slice 3 production contains a forbidden Terraform resource type" \
+  sh -c 'printf "\nresource \"aws_route\" \"database\" {}\n" >>"$1"' \
+  sh "$database_file" || failures=$((failures + 1))
+expect_rejected "NAT gateway resource in production" \
+  "Slice 3 production contains a forbidden Terraform resource type" \
+  sh -c 'printf "\nresource \"aws_nat_gateway\" \"unexpected\" {}\n" >>"$1"' \
+  sh "$database_file" || failures=$((failures + 1))
+expect_rejected "EC2 instance resource in production" \
+  "Slice 3 production contains a forbidden Terraform resource type" \
+  sh -c 'printf "\nresource \"aws_instance\" \"unexpected\" {}\n" >>"$1"' \
+  sh "$database_file" || failures=$((failures + 1))
+expect_rejected "secret version resource in production" \
+  "Slice 3 production contains a forbidden Terraform resource type" \
+  sh -c 'printf "\nresource \"aws_secretsmanager_secret_version\" \"unexpected\" {}\n" >>"$1"' \
+  sh "$secrets_file" || failures=$((failures + 1))
+expect_rejected "inline database route" \
+  "Production database route table must remain empty" \
+  replace_once "$database_file" \
+  'resource "aws_route_table" "database" {' \
+  $'resource "aws_route_table" "database" {\n  route {}' ||
+  failures=$((failures + 1))
+expect_rejected "renamed origin discovery tag" \
+  "Origin security group discovery tag contract changed" \
+  replace_once "$database_file" \
+  '"jobcron:edge-target" = "origin-security-group"' \
+  '"jobcron:edge-target-renamed" = "origin-security-group"' ||
+  failures=$((failures + 1))
+expect_rejected "origin discovery tag copied to database security group" \
+  "Origin security group discovery tag contract changed" \
+  replace_once "$database_file" \
+  'tags   = {}' \
+  'tags   = { "jobcron:edge-target" = "origin-security-group" }' ||
+  failures=$((failures + 1))
+expect_rejected "database subnet missing destroy protection" \
+  "Terraform resource is missing bound destroy protection: aws_subnet.database" \
+  replace_once "$database_file" \
+  'resource "aws_subnet" "database" {' \
+  'resource "aws_subnet" "renamed_database" {' ||
+  failures=$((failures + 1))
+expect_rejected "database route table missing destroy protection" \
+  "Terraform resource is missing bound destroy protection: aws_route_table.database" \
+  replace_once "$database_file" \
+  'resource "aws_route_table" "database" {' \
+  'resource "aws_route_table" "renamed_database" {' ||
+  failures=$((failures + 1))
+expect_rejected "origin security group missing destroy protection" \
+  "Terraform resource is missing bound destroy protection: aws_security_group.origin" \
+  replace_once "$database_file" \
+  'resource "aws_security_group" "origin" {' \
+  'resource "aws_security_group" "renamed_origin" {' ||
+  failures=$((failures + 1))
+expect_rejected "database security group missing destroy protection" \
+  "Terraform resource is missing bound destroy protection: aws_security_group.database" \
+  replace_once "$database_file" \
+  'resource "aws_security_group" "database" {' \
+  'resource "aws_security_group" "renamed_database" {' ||
+  failures=$((failures + 1))
+expect_rejected "database ingress missing destroy protection" \
+  "Terraform resource is missing bound destroy protection: aws_vpc_security_group_ingress_rule.database_postgresql_from_origin" \
+  replace_once "$database_file" \
+  'resource "aws_vpc_security_group_ingress_rule" "database_postgresql_from_origin" {' \
+  'resource "aws_vpc_security_group_ingress_rule" "renamed" {' ||
+  failures=$((failures + 1))
+expect_rejected "RDS instance missing destroy protection" \
+  "Terraform resource is missing bound destroy protection: aws_db_instance.production" \
+  replace_once "$database_file" \
+  'resource "aws_db_instance" "production" {' \
+  'resource "aws_db_instance" "renamed_production" {' ||
+  failures=$((failures + 1))
+expect_rejected "runtime secret missing destroy protection" \
+  "Terraform resource is missing bound destroy protection: aws_secretsmanager_secret.runtime" \
+  replace_once "$secrets_file" \
+  'resource "aws_secretsmanager_secret" "runtime" {' \
+  'resource "aws_secretsmanager_secret" "renamed_runtime" {' ||
+  failures=$((failures + 1))
+expect_rejected "recovery lifecycle missing destroy protection" \
+  "Terraform resource is missing bound destroy protection: aws_s3_bucket_lifecycle_configuration.recovery" \
+  replace_once "$recovery_file" \
+  'resource "aws_s3_bucket_lifecycle_configuration" "recovery" {' \
+  'resource "aws_s3_bucket_lifecycle_configuration" "renamed_recovery" {' ||
+  failures=$((failures + 1))
+expect_rejected "recovery lifecycle missing versioning dependency" \
+  "Recovery bucket lifecycle contract changed" \
+  remove_exact_line "$recovery_file" \
+  '  depends_on = [aws_s3_bucket_versioning.recovery]' ||
+  failures=$((failures + 1))
+expect_rejected "recovery verified lifecycle delay changed" \
+  "Recovery bucket lifecycle contract changed" \
+  replace_once "$recovery_file" \
+  '      days = 14' \
+  '      days = 15' || failures=$((failures + 1))
+expect_rejected "recovery all-object lifecycle delay changed" \
+  "Recovery bucket lifecycle contract changed" \
+  replace_once "$recovery_file" \
+  '      days = 90' \
+  '      days = 91' || failures=$((failures + 1))
+expect_rejected "recovery lifecycle noncurrent delay changed" \
+  "Recovery bucket lifecycle contract changed" \
+  replace_once "$recovery_file" \
+  '      noncurrent_days = 1' \
+  '      noncurrent_days = 2' || failures=$((failures + 1))
+expect_rejected "recovery lifecycle retained-version exception" \
+  "Recovery bucket lifecycle contract changed" \
+  replace_once "$recovery_file" \
+  '      noncurrent_days = 1' \
+  $'      noncurrent_days = 1\n      newer_noncurrent_versions = 1' ||
+  failures=$((failures + 1))
+expect_rejected "recovery lifecycle third rule" \
+  "Recovery bucket lifecycle contract changed" \
+  sh -c 'printf "\n  rule { id = \"unexpected\" }\n" >>"$1"' \
+  sh "$recovery_file" || failures=$((failures + 1))
+expect_rejected "recovery lifecycle transition" \
+  "Recovery bucket lifecycle contract changed" \
+  replace_once "$recovery_file" \
+  '    expiration {' \
+  $'    transition {\n      days = 7\n      storage_class = \"GLACIER\"\n    }\n\n    expiration {' ||
+  failures=$((failures + 1))
+expect_rejected "recovery lifecycle delete-marker expiration" \
+  "Recovery bucket lifecycle contract changed" \
+  replace_once "$recovery_file" \
+  '      days = 14' \
+  $'      days = 14\n      expired_object_delete_marker = true' ||
   failures=$((failures + 1))
 expect_rejected "wildcard network read action" \
   "Slice 2 network read policy actions differ from the approved ceiling." \

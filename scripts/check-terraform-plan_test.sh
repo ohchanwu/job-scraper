@@ -7,6 +7,7 @@ fixture_root="$(mktemp -d)"
 trap 'rm -rf "$fixture_root"' EXIT
 
 generic_error="Terraform saved plan violates the Slice 2 contract"
+slice3_generic_error="Terraform saved plan violates the Slice 3 contract"
 failures=0
 
 expect_verified() {
@@ -35,6 +36,11 @@ expect_rejected() {
   local plan_json="$3"
   local output
   local rc
+  local expected_error="$generic_error"
+
+  if [[ "$mode" == slice3-* || "$mode" == unknown ]]; then
+    expected_error="$slice3_generic_error"
+  fi
 
   set +e
   output="$("$checker" "$mode" "$plan_json" 2>&1)"
@@ -46,7 +52,7 @@ expect_rejected() {
     failures=$((failures + 1))
     return
   fi
-  if [[ "$output" != "$generic_error" ]]; then
+  if [[ "$output" != "$expected_error" ]]; then
     printf 'FAIL: %s did not fail with only the generic contract error\n' \
       "$name" >&2
     failures=$((failures + 1))
@@ -207,6 +213,163 @@ for action in no-op update delete; do
     >"$fixture_root/adoption-eip-$action.json"
 done
 
+jq -n '{
+  resource_changes: (
+    [
+      "aws_iam_policy.production_slice3_read",
+      "aws_iam_role_policy_attachment.production_slice3_read"
+    ] |
+    map({
+      address: .,
+      change: {
+        actions: ["create"],
+        before: null,
+        after: {value: "test-only-private-plan-value"}
+      }
+    })
+  ) + [
+    {
+      address: "aws_iam_role.production",
+      change: {
+        actions: ["no-op"],
+        before: {name: "existing-test-only-role"},
+        after: {name: "existing-test-only-role"}
+      }
+    }
+  ]
+}' >"$fixture_root/slice3-bootstrap-valid.json"
+
+jq -n '{
+  resource_changes: (
+    [
+      "aws_subnet.database[\"database_a\"]",
+      "aws_subnet.database[\"database_b\"]",
+      "aws_route_table.database",
+      "aws_route_table_association.database[\"database_a\"]",
+      "aws_route_table_association.database[\"database_b\"]",
+      "aws_security_group.origin",
+      "aws_security_group.database",
+      "aws_vpc_security_group_ingress_rule.database_postgresql_from_origin",
+      "aws_db_subnet_group.production",
+      "aws_db_parameter_group.production",
+      "aws_db_instance.production",
+      "aws_secretsmanager_secret.runtime",
+      "aws_s3_bucket.recovery",
+      "aws_s3_bucket_public_access_block.recovery",
+      "aws_s3_bucket_versioning.recovery",
+      "aws_s3_bucket_server_side_encryption_configuration.recovery",
+      "aws_s3_bucket_policy.recovery",
+      "aws_s3_bucket_lifecycle_configuration.recovery"
+    ] |
+    map({
+      address: .,
+      change: {
+        actions: ["create"],
+        before: null,
+        after: {value: "test-only-private-plan-value"}
+      }
+    })
+  ) + [
+    {
+      address: "aws_vpc.canonical",
+      change: {
+        actions: ["no-op"],
+        before: {value: "existing-test-only-value"},
+        after: {value: "existing-test-only-value"}
+      }
+    }
+  ]
+}' >"$fixture_root/slice3-production-valid.json"
+
+for mode in bootstrap production; do
+  source="$fixture_root/slice3-$mode-valid.json"
+
+  jq 'del(.resource_changes[0])' "$source" \
+    >"$fixture_root/slice3-$mode-missing.json"
+  jq '.resource_changes += [.resource_changes[0]]' "$source" \
+    >"$fixture_root/slice3-$mode-duplicate.json"
+  jq '.resource_changes += [{
+    address: "aws_iam_policy.test_only_extra",
+    change: {
+      actions: ["create"],
+      before: null,
+      after: {value: "test-only-private-plan-value"}
+    }
+  }]' "$source" >"$fixture_root/slice3-$mode-extra.json"
+  jq '.resource_changes[0].change.importing = {
+    id: "test-only-private-import-id"
+  }' "$source" >"$fixture_root/slice3-$mode-import.json"
+
+  for action in no-op update delete replace; do
+    if [[ "$action" == replace ]]; then
+      actions='["delete", "create"]'
+    else
+      actions="[\"$action\"]"
+    fi
+    jq --argjson actions "$actions" \
+      '.resource_changes[0].change.actions = $actions' \
+      "$source" >"$fixture_root/slice3-$mode-create-$action.json"
+  done
+done
+
+for action in create update delete; do
+  jq --arg action "$action" \
+    '(.resource_changes[] |
+      select(.address == "aws_iam_role.production") |
+      .change.actions) = [$action]' \
+    "$fixture_root/slice3-bootstrap-valid.json" \
+    >"$fixture_root/slice3-bootstrap-adopted-$action.json"
+  jq --arg action "$action" \
+    '(.resource_changes[] |
+      select(.address == "aws_vpc.canonical") |
+      .change.actions) = [$action]' \
+    "$fixture_root/slice3-production-valid.json" \
+    >"$fixture_root/slice3-production-adopted-$action.json"
+done
+
+jq 'del(
+  .resource_changes[] |
+  select(.address == "aws_s3_bucket_lifecycle_configuration.recovery")
+)' "$fixture_root/slice3-production-valid.json" \
+  >"$fixture_root/slice3-production-missing-lifecycle.json"
+jq '(
+  .resource_changes[] |
+  select(.address == "aws_s3_bucket_lifecycle_configuration.recovery") |
+  .address
+) = "aws_s3_bucket_lifecycle_configuration.different"' \
+  "$fixture_root/slice3-production-valid.json" \
+  >"$fixture_root/slice3-production-different-lifecycle.json"
+jq '.resource_changes += [{
+  address: "aws_s3_bucket_lifecycle_configuration.extra",
+  change: {
+    actions: ["create"],
+    before: null,
+    after: {value: "test-only-private-plan-value"}
+  }
+}]' "$fixture_root/slice3-production-valid.json" \
+  >"$fixture_root/slice3-production-extra-lifecycle.json"
+
+for forbidden in \
+  aws_route.unexpected \
+  aws_nat_gateway.unexpected \
+  aws_instance.unexpected \
+  aws_eip.unexpected \
+  aws_eip_association.unexpected \
+  aws_secretsmanager_secret_version.unexpected \
+  cloudflare_record.unexpected \
+  aws_route53_record.unexpected; do
+  fixture_name="${forbidden//[^a-zA-Z0-9]/-}"
+  jq --arg address "$forbidden" '.resource_changes += [{
+    address: $address,
+    change: {
+      actions: ["create"],
+      before: null,
+      after: {value: "test-only-private-plan-value"}
+    }
+  }]' "$fixture_root/slice3-production-valid.json" \
+    >"$fixture_root/slice3-production-$fixture_name.json"
+done
+
 printf '{malformed-json\n' >"$fixture_root/malformed.json"
 
 expect_verified \
@@ -289,9 +452,85 @@ for action in no-op update delete; do
     "$fixture_root/adoption-eip-$action.json"
 done
 
+expect_verified \
+  "Slice 3 bootstrap" \
+  slice3-bootstrap \
+  "$fixture_root/slice3-bootstrap-valid.json" \
+  "Slice 3 bootstrap plan contract verified"
+expect_verified \
+  "Slice 3 production" \
+  slice3-production \
+  "$fixture_root/slice3-production-valid.json" \
+  "Slice 3 production plan contract verified"
+
+for mode in bootstrap production; do
+  expect_rejected \
+    "Slice 3 $mode missing allow-listed address" \
+    "slice3-$mode" \
+    "$fixture_root/slice3-$mode-missing.json"
+  expect_rejected \
+    "Slice 3 $mode duplicate address" \
+    "slice3-$mode" \
+    "$fixture_root/slice3-$mode-duplicate.json"
+  expect_rejected \
+    "Slice 3 $mode extra address" \
+    "slice3-$mode" \
+    "$fixture_root/slice3-$mode-extra.json"
+  expect_rejected \
+    "Slice 3 $mode import metadata" \
+    "slice3-$mode" \
+    "$fixture_root/slice3-$mode-import.json"
+
+  for action in no-op update delete replace; do
+    expect_rejected \
+      "Slice 3 $mode allow-listed $action action" \
+      "slice3-$mode" \
+      "$fixture_root/slice3-$mode-create-$action.json"
+  done
+  for action in create update delete; do
+    expect_rejected \
+      "Slice 3 $mode adopted-resource $action action" \
+      "slice3-$mode" \
+      "$fixture_root/slice3-$mode-adopted-$action.json"
+  done
+done
+
+expect_rejected \
+  "Slice 3 production missing lifecycle configuration" \
+  slice3-production \
+  "$fixture_root/slice3-production-missing-lifecycle.json"
+expect_rejected \
+  "Slice 3 production differently addressed lifecycle configuration" \
+  slice3-production \
+  "$fixture_root/slice3-production-different-lifecycle.json"
+expect_rejected \
+  "Slice 3 production extra lifecycle configuration" \
+  slice3-production \
+  "$fixture_root/slice3-production-extra-lifecycle.json"
+
+for forbidden in \
+  aws_route.unexpected \
+  aws_nat_gateway.unexpected \
+  aws_instance.unexpected \
+  aws_eip.unexpected \
+  aws_eip_association.unexpected \
+  aws_secretsmanager_secret_version.unexpected \
+  cloudflare_record.unexpected \
+  aws_route53_record.unexpected; do
+  fixture_name="${forbidden//[^a-zA-Z0-9]/-}"
+  expect_rejected \
+    "Slice 3 production forbidden $forbidden address" \
+    slice3-production \
+    "$fixture_root/slice3-production-$fixture_name.json"
+done
+
 expect_rejected \
   "malformed JSON" \
   bootstrap \
+  "$fixture_root/malformed.json"
+expect_rejected \
+  "Slice 3 malformed JSON" \
+  slice3-production \
   "$fixture_root/malformed.json"
 expect_rejected \
   "unknown mode" \

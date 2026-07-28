@@ -15,6 +15,9 @@ done
 state_file="$repo_root/infra/terraform/bootstrap/state.tf"
 network_file="$repo_root/infra/terraform/production/network.tf"
 variables_file="$repo_root/infra/terraform/production/variables.tf"
+database_file="$repo_root/infra/terraform/production/database.tf"
+secrets_file="$repo_root/infra/terraform/production/secrets.tf"
+recovery_file="$repo_root/infra/terraform/production/recovery.tf"
 
 require_resource_prevent_destroy() {
   local resource_type="$1"
@@ -61,6 +64,24 @@ require_resource_prevent_destroy aws_subnet public "$network_file"
 require_resource_prevent_destroy aws_route_table public "$network_file"
 require_resource_prevent_destroy aws_route public_ipv4_default "$network_file"
 require_resource_prevent_destroy aws_eip origin "$network_file"
+require_resource_prevent_destroy aws_subnet database "$database_file"
+require_resource_prevent_destroy aws_route_table database "$database_file"
+require_resource_prevent_destroy aws_security_group origin "$database_file"
+require_resource_prevent_destroy aws_security_group database "$database_file"
+require_resource_prevent_destroy \
+  aws_vpc_security_group_ingress_rule database_postgresql_from_origin \
+  "$database_file"
+require_resource_prevent_destroy aws_db_instance production "$database_file"
+require_resource_prevent_destroy \
+  aws_secretsmanager_secret runtime "$secrets_file"
+require_resource_prevent_destroy aws_s3_bucket recovery "$recovery_file"
+require_resource_prevent_destroy \
+  aws_s3_bucket_versioning recovery "$recovery_file"
+require_resource_prevent_destroy \
+  aws_s3_bucket_server_side_encryption_configuration recovery "$recovery_file"
+require_resource_prevent_destroy aws_s3_bucket_policy recovery "$recovery_file"
+require_resource_prevent_destroy \
+  aws_s3_bucket_lifecycle_configuration recovery "$recovery_file"
 
 if ! grep -Fqx \
   '    error_message = "Canonical public subnet keys must be public_a through public_d."' \
@@ -86,6 +107,78 @@ if grep -Eq \
   "$network_file" ||
   grep -Eq '^resource[[:space:]]+"aws_eip_association"' "$network_file"; then
   printf 'Production origin EIP must remain unassociated until cutover.\n' >&2
+  exit 1
+fi
+
+if grep -Eq '^[[:space:]]*route[[:space:]]*\{' "$database_file"; then
+  printf 'Production database route table must remain empty\n' >&2
+  exit 1
+fi
+
+if grep -Eq '^resource[[:space:]]+"aws_route"' "$database_file" ||
+  grep -ERq \
+    '^resource[[:space:]]+"(aws_nat_gateway|aws_instance|aws_eip_association|aws_secretsmanager_secret_version|cloudflare_[^"]+)"' \
+    "$repo_root/infra/terraform/production"; then
+  printf 'Slice 3 production contains a forbidden Terraform resource type\n' \
+    >&2
+  exit 1
+fi
+
+origin_discovery_tag='"jobcron:edge-target" = "origin-security-group"'
+origin_discovery_tag_count="$(
+  grep -Fh "$origin_discovery_tag" \
+    "$repo_root/infra/terraform/production/"*.tf |
+    wc -l |
+    tr -d ' '
+)"
+origin_resource="$(
+  awk '
+    $0 == "resource \"aws_security_group\" \"origin\" {" {
+      found = 1
+      depth = 1
+    }
+    found {
+      print
+      line = $0
+      opens = gsub(/\{/, "{", line)
+      closes = gsub(/\}/, "}", line)
+      if (NR > 1 || $0 != "resource \"aws_security_group\" \"origin\" {") {
+        depth += opens - closes
+      }
+      if (depth == 0) {
+        exit
+      }
+    }
+  ' "$database_file"
+)"
+if [[ "$origin_discovery_tag_count" -ne 1 ]] ||
+  ! grep -Fq "$origin_discovery_tag" <<<"$origin_resource"; then
+  printf 'Origin security group discovery tag contract changed\n' >&2
+  exit 1
+fi
+
+recovery_lifecycle="$(
+  awk '
+    $0 == "resource \"aws_s3_bucket_lifecycle_configuration\" \"recovery\" {" {
+      found = 1
+      depth = 1
+      print
+      next
+    }
+    found {
+      print
+      line = $0
+      depth += gsub(/\{/, "{", line) - gsub(/\}/, "}", line)
+      if (depth == 0) {
+        exit
+      }
+    }
+  ' "$recovery_file" |
+    tr -d '[:space:]'
+)"
+expected_recovery_lifecycle='resource"aws_s3_bucket_lifecycle_configuration""recovery"{bucket=aws_s3_bucket.recovery.idrule{id="expire-verified-after-off-cloud-copy"status="Enabled"filter{tag{key="macbook-copy"value="verified"}}expiration{days=14}noncurrent_version_expiration{noncurrent_days=1}}rule{id="expire-all-objects"status="Enabled"filter{}expiration{days=90}noncurrent_version_expiration{noncurrent_days=1}}lifecycle{prevent_destroy=true}depends_on=[aws_s3_bucket_versioning.recovery]}'
+if [[ "$recovery_lifecycle" != "$expected_recovery_lifecycle" ]]; then
+  printf 'Recovery bucket lifecycle contract changed\n' >&2
   exit 1
 fi
 
@@ -287,10 +380,40 @@ if [[ "$mapping_count" -ne 1 ||
     >&2
   exit 1
 fi
+
+private_database_mapping_count="$(
+  grep -Fxc \
+    '      TF_VAR_private_database_config: ${{ secrets.TF_VAR_PRIVATE_DATABASE_CONFIG }}' \
+    "$production_workflow" || true
+)"
+private_database_variable_count="$(
+  grep -Fo 'TF_VAR_private_database_config' "$production_workflow" |
+    wc -l |
+    tr -d ' ' || true
+)"
+private_database_secret_count="$(
+  grep -Fo 'TF_VAR_PRIVATE_DATABASE_CONFIG' "$production_workflow" |
+    wc -l |
+    tr -d ' ' || true
+)"
+if [[ "$private_database_mapping_count" -ne 1 ||
+  "$private_database_variable_count" -ne 1 ||
+  "$private_database_secret_count" -ne 1 ]]; then
+  printf 'production workflow must map but never print private database config\n' \
+    >&2
+  exit 1
+fi
 if grep -Eq '^[[:space:]]*(env|printenv)[[:space:]]*$' \
   "$production_workflow"; then
   printf 'production workflow must map but never print private network config\n' \
     >&2
+  exit 1
+fi
+
+if grep -Eq \
+  '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+actions/upload-artifact@' \
+  "$production_workflow"; then
+  printf 'production workflow must not publish Terraform plan artifacts\n' >&2
   exit 1
 fi
 
