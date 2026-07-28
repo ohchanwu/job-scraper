@@ -108,7 +108,7 @@ func TestJobcronRuntimePrepareValidatesIdentifier(t *testing.T) {
 	}
 }
 
-func TestJobcronRuntimePullUsesTransientCredentials(t *testing.T) {
+func TestJobcronRuntimePullUsesImageOwnerAndTransientCredentials(t *testing.T) {
 	fixture := newRuntimeFixture(t)
 	if result := fixture.run(t, validRuntimeSecret(), "prepare"); result.err != nil {
 		t.Fatalf("prepare: %v\n%s", result.err, result.output)
@@ -121,7 +121,7 @@ func TestJobcronRuntimePullUsesTransientCredentials(t *testing.T) {
 	}
 	assertNoRuntimeSecret(t, result.output+token)
 	log := readFile(t, fixture.logPath)
-	if !strings.Contains(log, "login ghcr.io --username token --password-stdin") ||
+	if !strings.Contains(log, "login ghcr.io --username example --password-stdin") ||
 		!strings.Contains(log, "pull "+runtimeSecretFields["JOBCRON_IMAGE"]) ||
 		!strings.Contains(log, "logout ghcr.io") {
 		t.Fatalf("unexpected docker operations:\n%s", log)
@@ -137,6 +137,24 @@ func TestJobcronRuntimePullUsesTransientCredentials(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("transient credential path remained: %s (%v)", path, err)
 		}
+	}
+}
+
+func TestJobcronRuntimePrepareRejectsUnapprovedImageShape(t *testing.T) {
+	digest := "@sha256:" + strings.Repeat("b", 64)
+	for _, image := range []string{
+		"registry.example.invalid/example/jobcron" + digest,
+		"ghcr.io/example/other" + digest,
+		"ghcr.io/example/nested/jobcron" + digest,
+	} {
+		t.Run(image, func(t *testing.T) {
+			fixture := newRuntimeFixture(t)
+			result := fixture.run(t, replaceRuntimeSecret(t, "JOBCRON_IMAGE", image), "prepare")
+			if result.err == nil {
+				t.Fatalf("prepare accepted unapproved image %q", image)
+			}
+			assertNoRuntimeSecret(t, result.output)
+		})
 	}
 }
 
@@ -222,7 +240,14 @@ func TestJobcronRuntimeArchiveIsWriteOnlyAndSanitized(t *testing.T) {
 	}
 	for _, name := range []string{"jobcron.log", "caddy.log"} {
 		sanitized := readFile(t, filepath.Join(fixture.runDir, "archive", name))
-		for _, forbidden := range []string{"Bearer", "cookie-secret", "password-secret"} {
+		for _, forbidden := range []string{
+			"bearer-header-secret",
+			"cookie-header-secret",
+			"password-header-secret",
+			"secret-json-secret",
+			"token-json-secret",
+			"password-key-value-secret",
+		} {
 			if strings.Contains(sanitized, forbidden) {
 				t.Fatalf("%s retained %q: %s", name, forbidden, sanitized)
 			}
@@ -233,11 +258,36 @@ func TestJobcronRuntimeArchiveIsWriteOnlyAndSanitized(t *testing.T) {
 	}
 }
 
+func TestJobcronRuntimeArchiveFailsClosedWhenComposeLogsFail(t *testing.T) {
+	fixture := newRuntimeFixture(t)
+	if result := fixture.run(t, validRuntimeSecret(), "prepare"); result.err != nil {
+		t.Fatalf("prepare: %v\n%s", result.err, result.output)
+	}
+	fixture.env = append(fixture.env, "FAKE_DOCKER_LOGS_FAIL=1")
+	result := fixture.run(t, validRuntimeSecret(), "archive")
+	if result.err == nil {
+		t.Fatal("archive succeeded despite synthetic Compose log failure")
+	}
+	if log := readFile(t, fixture.logPath); strings.Contains(log, "aws s3 cp ") {
+		t.Fatalf("failed archive uploaded partial artifacts:\n%s", log)
+	}
+	err := filepath.WalkDir(filepath.Join(fixture.runDir, "archive"), func(path string, entry os.DirEntry, err error) error {
+		if err == nil && strings.Contains(entry.Name(), ".raw") {
+			t.Errorf("failed archive retained raw log: %s", path)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestJobcronRuntimeVerifyLocalStateIsValueBlind(t *testing.T) {
 	fixture := newRuntimeFixture(t)
 	if result := fixture.run(t, validRuntimeSecret(), "prepare"); result.err != nil {
 		t.Fatalf("prepare: %v\n%s", result.err, result.output)
 	}
+	fixture.env = append(fixture.env, "FAKE_IMAGE_PRESENT=1")
 	result := fixture.run(t, validRuntimeSecret(), "verify-local-state")
 	if result.err != nil {
 		t.Fatalf("verify-local-state failed: %v\n%s", result.err, result.output)
@@ -251,6 +301,20 @@ func TestJobcronRuntimeVerifyLocalStateIsValueBlind(t *testing.T) {
 		if value != "true" && value != "false" && !onlyDigits(value) {
 			t.Fatalf("verification disclosed non-boolean/count value: %q", line)
 		}
+	}
+	for _, want := range []string{
+		"docker_json_file_logging=true",
+		"docker_log_rotation=true",
+		"current_digest_count=1",
+		"previous_digest_count=1",
+	} {
+		if !strings.Contains(result.output, want+"\n") {
+			t.Errorf("verification missing %q:\n%s", want, result.output)
+		}
+	}
+	if strings.Contains(result.output, runtimeSecretFields["JOBCRON_IMAGE"]) ||
+		strings.Contains(result.output, strings.Repeat("b", 64)) {
+		t.Fatalf("verification disclosed an image digest:\n%s", result.output)
 	}
 }
 
@@ -324,12 +388,25 @@ if [ "$1" = image ] && [ "$2" = inspect ]; then
   [ "${FAKE_IMAGE_PRESENT:-0}" = 1 ]
   exit
 fi
+if [ "$1" = image ] && [ "$2" = ls ]; then
+  printf '%s\n' \
+    'ghcr.io/example/jobcron@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    'ghcr.io/example/jobcron@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  exit 0
+fi
 if [ "$1" = login ]; then cat >/dev/null; mkdir -p "$DOCKER_CONFIG"; printf '{}' >"$DOCKER_CONFIG/config.json"; fi
 if [ "$1" = pull ] && [ "${FAKE_DOCKER_PULL_FAIL:-0}" = 1 ]; then exit 1; fi
+if [ "$1" = compose ] && [ "$2" = config ]; then
+  printf '%s\n' '{"services":{"app":{"logging":{"driver":"json-file","options":{"max-size":"10m","max-file":"3"}}},"caddy":{"logging":{"driver":"json-file","options":{"max-size":"10m","max-file":"3"}}}}}'
+  exit 0
+fi
 if [ "$1" = compose ] && [ "$2" = logs ]; then
+  [ "${FAKE_DOCKER_LOGS_FAIL:-0}" != 1 ] || exit 1
   printf '%s\n' \
-    '2026-07-28T12:00:00Z app INFO ready authorization=Bearer-secret' \
-    '2026-07-28T12:00:01Z app WARN request cookie=cookie-secret password=password-secret'
+    '2026-07-28T12:00:00Z app INFO ready Authorization: Bearer bearer-header-secret' \
+    '2026-07-28T12:00:01Z app WARN Cookie: session=cookie-header-secret Password: password-header-secret' \
+    '2026-07-28T12:00:02Z app WARN {"secret":"secret-json-secret","token":"token-json-secret"}' \
+    '2026-07-28T12:00:03Z app WARN password=password-key-value-secret'
 fi
 exit 0
 `)

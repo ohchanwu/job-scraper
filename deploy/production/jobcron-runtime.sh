@@ -64,7 +64,7 @@ prepare() {
 			(.key | startswith("ORIGIN_CA_")) or
 			((.value | contains("\n") or contains("\r")) | not)
 		)
-		and (.JOBCRON_IMAGE | test("@sha256:[0-9a-f]{64}$"))
+		and (.JOBCRON_IMAGE | test("^ghcr\\.io/[a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?/jobcron@sha256:[0-9a-f]{64}$"))
 		and (.ORIGIN_CA_CERT | startswith("-----BEGIN CERTIFICATE-----"))
 		and (.ORIGIN_CA_KEY | test("^-----BEGIN ([A-Z ]+ )?PRIVATE KEY-----"))
 	' "$tmp_dir/secret.json" >/dev/null 2>&1; then
@@ -97,7 +97,10 @@ compose_value() {
 pull() {
 	[ -f "$run_dir/compose.env" ] || fail
 	image=$(compose_value JOBCRON_IMAGE)
-	printf '%s\n' "$image" | grep -Eq '@sha256:[0-9a-f]{64}$' || fail
+	printf '%s\n' "$image" |
+		grep -Eq '^ghcr\.io/[a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?/jobcron@sha256:[0-9a-f]{64}$' || fail
+	registry_owner=${image#ghcr.io/}
+	registry_owner=${registry_owner%%/jobcron@sha256:*}
 	if docker image inspect "$image" >/dev/null 2>&1; then
 		return
 	fi
@@ -118,7 +121,7 @@ pull() {
 	}
 	trap 'cleanup_pull' EXIT HUP INT TERM
 	DOCKER_CONFIG=$docker_config docker login ghcr.io \
-		--username token --password-stdin <"$token_file" >/dev/null 2>&1 || fail
+		--username "$registry_owner" --password-stdin <"$token_file" >/dev/null 2>&1 || fail
 	DOCKER_CONFIG=$docker_config docker pull "$image" >/dev/null 2>&1 || fail
 	cleanup_pull
 	trap - EXIT HUP INT TERM
@@ -126,8 +129,11 @@ pull() {
 
 sanitize_logs() {
 	sed -E \
-		-e 's/([Aa]uthorization|[Cc]ookie|[Pp]assword|[Ss]ecret|[Tt]oken)=[^[:space:]]+/\1=[redacted]/g' \
-		-e 's/[Bb]earer[-_A-Za-z0-9.]+/[redacted]/g'
+		-e 's/([Aa]uthorization:[[:space:]]*[Bb]earer[[:space:]]+)[^[:space:]",}]+/\1[redacted]/g' \
+		-e 's/([Cc]ookie:[[:space:]]*).*/\1[redacted]/g' \
+		-e 's/(([Pp]assword|[Ss]ecret|[Tt]oken):[[:space:]]*)[^[:space:]",}]+/\1[redacted]/g' \
+		-e 's/("([Pp]assword|[Ss]ecret|[Tt]oken)"[[:space:]]*:[[:space:]]*)"[^"]*"/\1"[redacted]"/g' \
+		-e 's/(([Aa]uthorization|[Cc]ookie|[Pp]assword|[Ss]ecret|[Tt]oken)=[[:space:]]*)[^[:space:]",}]+/\1[redacted]/g'
 }
 
 archive() {
@@ -140,12 +146,21 @@ archive() {
 	archive_dir=$run_dir/archive
 	mkdir -p "$archive_dir"
 	chmod 700 "$archive_dir"
+	jobcron_raw=$(mktemp "$archive_dir/.jobcron.XXXXXX.raw")
+	caddy_raw=$(mktemp "$archive_dir/.caddy.XXXXXX.raw")
+	chmod 600 "$jobcron_raw" "$caddy_raw"
+	cleanup_archive_raw() {
+		rm -f "$jobcron_raw" "$caddy_raw"
+	}
+	trap 'cleanup_archive_raw' EXIT HUP INT TERM
 
 	PGDATABASE=$database_url pg_dump -Fc -f "$archive_dir/database.dump" >/dev/null 2>&1 || fail
-	(cd "$deploy_dir" && docker compose logs --no-color app) |
-		sanitize_logs >"$archive_dir/jobcron.log"
-	(cd "$deploy_dir" && docker compose logs --no-color caddy) |
-		sanitize_logs >"$archive_dir/caddy.log"
+	(cd "$deploy_dir" && docker compose logs --no-color app >"$jobcron_raw") || fail
+	(cd "$deploy_dir" && docker compose logs --no-color caddy >"$caddy_raw") || fail
+	sanitize_logs <"$jobcron_raw" >"$archive_dir/jobcron.log"
+	sanitize_logs <"$caddy_raw" >"$archive_dir/caddy.log"
+	cleanup_archive_raw
+	trap - EXIT HUP INT TERM
 	chmod 600 "$archive_dir/database.dump" "$archive_dir/jobcron.log" "$archive_dir/caddy.log"
 
 	for name in database.dump jobcron.log caddy.log; do
@@ -173,10 +188,35 @@ verify_local_state() {
 	compose_env=$run_dir/compose.env
 	image=
 	[ ! -f "$compose_env" ] || image=$(compose_value JOBCRON_IMAGE)
-	image_count=0
-	if [ -n "$image" ] && docker image inspect "$image" >/dev/null 2>&1; then
-		image_count=1
+	current_digest_count=0
+	previous_digest_count=0
+	if [ -n "$image" ]; then
+		images=$(docker image ls --digests --format '{{.Repository}}@{{.Digest}}' 2>/dev/null || true)
+		repository=${image%@sha256:*}
+		current_digest_count=$(printf '%s\n' "$images" |
+			awk -v current="$image" '$0 == current { count++ } END { print count + 0 }')
+		previous_digest_count=$(printf '%s\n' "$images" |
+			awk -v prefix="$repository@" -v current="$image" \
+				'index($0, prefix) == 1 && $0 != current { count++ } END { print count + 0 }')
 	fi
+	docker_config=$(mktemp "$run_dir/.docker-config.XXXXXX")
+	trap 'rm -f "$docker_config"' EXIT HUP INT TERM
+	docker_json_file_logging=false
+	docker_log_rotation=false
+	if (cd "$deploy_dir" && docker compose config --no-interpolate --format json >"$docker_config" 2>/dev/null); then
+		if jq -e '[.services.app.logging.driver, .services.caddy.logging.driver] | all(. == "json-file")' \
+			"$docker_config" >/dev/null 2>&1; then
+			docker_json_file_logging=true
+		fi
+		if jq -e '
+			[.services.app.logging.options, .services.caddy.logging.options]
+			| all(."max-size" == "10m" and ."max-file" == "3")
+		' "$docker_config" >/dev/null 2>&1; then
+			docker_log_rotation=true
+		fi
+	fi
+	rm -f "$docker_config"
+	trap - EXIT HUP INT TERM
 	disk_free_kib=$(df -Pk "$run_dir" | awk 'NR == 2 { print $4 }')
 	disk_free_bytes=$((disk_free_kib * 1024))
 	printf 'run_dir_private=%s\n' "$(bool_mode "$run_dir" 700)"
@@ -184,7 +224,10 @@ verify_local_state() {
 	printf 'origin_cert_private=%s\n' "$(bool_mode "$run_dir/caddy/origin.crt" 600)"
 	printf 'origin_key_private=%s\n' "$(bool_mode "$run_dir/caddy/origin.key" 600)"
 	printf 'persistent_docker_credentials=%s\n' "$([ ! -e "${HOME:?}/.docker/config.json" ] && printf false || printf true)"
-	printf 'current_digest_count=%s\n' "$image_count"
+	printf 'docker_json_file_logging=%s\n' "$docker_json_file_logging"
+	printf 'docker_log_rotation=%s\n' "$docker_log_rotation"
+	printf 'current_digest_count=%s\n' "$current_digest_count"
+	printf 'previous_digest_count=%s\n' "$previous_digest_count"
 	printf 'disk_free_bytes=%s\n' "$disk_free_bytes"
 }
 
