@@ -652,7 +652,7 @@ git commit -m "feat: declare the private PostgreSQL tier"
 - Produces the final seven production allow-list addresses.
 - Produces no secret version and no Terraform output.
 
-- [ ] **Step 1: Write failing secret tests**
+- [x] **Step 1: Write failing secret tests**
 
 Assert `aws_secretsmanager_secret.runtime` uses the private name, has a
 30-day recovery window, and has `prevent_destroy = true`. Scan all production
@@ -669,7 +669,7 @@ PATH=/opt/homebrew/bin:$PATH \
 
 Expected: FAIL.
 
-- [ ] **Step 2: Add only the secret container**
+- [x] **Step 2: Add only the secret container**
 
 ```hcl
 resource "aws_secretsmanager_secret" "runtime" {
@@ -685,7 +685,7 @@ resource "aws_secretsmanager_secret" "runtime" {
 No task in this slice writes a value. Slice 4 may put the lower-privilege,
 TLS-required `DATABASE_URL` after it creates the host and SSM tunnel.
 
-- [ ] **Step 3: Write failing recovery-bucket tests**
+- [x] **Step 3: Write failing recovery-bucket tests**
 
 Assert:
 
@@ -719,7 +719,7 @@ PATH=/opt/homebrew/bin:$PATH \
 
 Expected: FAIL.
 
-- [ ] **Step 4: Implement the protected bucket**
+- [x] **Step 4: Implement the protected bucket**
 
 Follow the existing bootstrap state-bucket pattern with:
 
@@ -793,7 +793,7 @@ to permanently expire that data one day later, the minimum S3-supported delay.
 The bucket starts empty. Slice 4 owns archive upload behavior; do not add
 objects, credentials, replication, transitions, or any other expiration rule.
 
-- [ ] **Step 5: Run GREEN verification**
+- [x] **Step 5: Run GREEN verification**
 
 ```bash
 PATH=/opt/homebrew/bin:$PATH \
@@ -807,7 +807,7 @@ git diff --check
 
 Expected: pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add infra/terraform/production/secrets.tf \
