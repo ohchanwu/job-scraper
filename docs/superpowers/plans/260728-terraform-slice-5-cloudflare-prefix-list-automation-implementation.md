@@ -655,7 +655,7 @@ Every failure prints only:
 Terraform saved plan violates the Slice 5 contract
 ```
 
-- [ ] **Step 1: Write RED accepted fixtures**
+- [x] **Step 1: Write RED accepted fixtures**
 
 Use Python standard-library JSON and temporary files. Build one accepted
 fixture per mode from the exact allow-lists above. The cost fixture must:
@@ -683,7 +683,7 @@ requires every checkpoint field and passing value, but does not reject
 timestamp age alone because this protected value is the durable Slice 4 exit
 checkpoint rather than a daily rotating credential.
 
-- [ ] **Step 2: Add one mutation per rejection class**
+- [x] **Step 2: Add one mutation per rejection class**
 
 Reject:
 
@@ -721,7 +721,7 @@ python3 scripts/check-terraform-slice-5-plan_test.py
 
 Expected: FAIL because the checker does not exist.
 
-- [ ] **Step 3: Implement the minimal JSON checker**
+- [x] **Step 3: Implement the minimal JSON checker**
 
 Parse into dictionaries, reject unknown keys where the schema is controlled,
 compare sorted `(address, actions)` tuples, and never include an input value in
@@ -733,14 +733,14 @@ The refresh mode accepts exactly one `["update"]` for the prefix list and one
 `["no-op"]` for the ingress rule. The no-change case is handled by Terraform
 exit code `0` before this command.
 
-- [ ] **Step 4: Wire the complete infrastructure gate**
+- [x] **Step 4: Wire the complete infrastructure gate**
 
 Add both Python test commands to `scripts/check-terraform.sh`. Keep the
 fixture-mode recursion guard. The existing
 `.github/workflows/terraform-check.yml` continues to call the one
 `./scripts/check-terraform.sh` entry point, so no workflow edit is needed.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 ```sh
 python3 scripts/check-terraform-slice-5-plan_test.py
@@ -749,7 +749,7 @@ python3 scripts/check-terraform-slice-5-plan_test.py
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add scripts/check-terraform-slice-5-plan.py \
@@ -781,7 +781,7 @@ git commit -m "test: enforce Terraform Slice 5 plan contracts"
 - Concurrency group: `terraform-edge-prefix-list`, with
   `cancel-in-progress: false`.
 
-- [ ] **Step 1: Write RED workflow mutations**
+- [x] **Step 1: Write RED workflow mutations**
 
 Require:
 
@@ -818,7 +818,7 @@ Run:
 
 Expected: FAIL because the workflow is absent.
 
-- [ ] **Step 2: Implement fail-before-mutation ordering**
+- [x] **Step 2: Implement fail-before-mutation ordering**
 
 The workflow order is exact:
 
@@ -844,7 +844,7 @@ Use `curl --fail --silent --show-error --proto '=https' --tlsv1.2`, a bounded
 timeout, no redirect following, and an output file. Do not pipe the response
 through logs.
 
-- [ ] **Step 3: Pin the action versions**
+- [x] **Step 3: Pin the action versions**
 
 Reuse the repository's reviewed full SHAs:
 
@@ -854,7 +854,7 @@ hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e
 aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
 ```
 
-- [ ] **Step 4: Run workflow and infrastructure gates**
+- [x] **Step 4: Run workflow and infrastructure gates**
 
 ```sh
 ./scripts/check-terraform-workflows_test.sh
@@ -863,7 +863,7 @@ aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add .github/workflows/terraform-edge-prefix-list.yml \
@@ -882,7 +882,7 @@ git commit -m "ci: automate validated Cloudflare edge refresh"
 - Consumes the exact implementation tip.
 - Produces a clean, publication-safe candidate for independent code review.
 
-- [ ] **Step 1: Run all repository gates**
+- [x] **Step 1: Run all repository gates**
 
 ```sh
 python3 scripts/normalize-cloudflare-ipv4_test.py
@@ -899,13 +899,13 @@ git diff --check
 
 Expected: every command passes.
 
-- [ ] **Step 2: Review the complete implementation diff**
+- [x] **Step 2: Review the complete implementation diff**
 
 Compare against the integrated Slice 4 baseline. Confirm the diff contains only
 the exact file map, no dependency, no Cloudflare provider, no production-root
 mutation, no private ID, and no state-changing workflow outside the edge root.
 
-- [ ] **Step 3: Run publication security**
+- [x] **Step 3: Run publication security**
 
 Inspect the complete staged diff, run the configured Gitleaks scanner over the
 exact implementation range, and manually reject credentials, private
@@ -913,7 +913,7 @@ identifiers, personal data, raw logs, plan bodies, state, backend values, and
 unnecessary production topology. Verify every apparent secret fixture is
 synthetic before allowing it.
 
-- [ ] **Step 4: Commit gate-only corrections**
+- [x] **Step 4: Commit gate-only corrections**
 
 ```sh
 git add -A
