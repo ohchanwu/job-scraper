@@ -12,6 +12,8 @@ decision records needed for the current task.
 - [Pre-Batch-1 Window 1 authorization contract][pre-batch-1-contract]
 - [Terraform-first production launch roadmap][terraform-launch-roadmap]
 - [Terraform Slice 3 private database and secret containers implementation][terraform-slice-3-plan]
+- [Terraform Slice 4 replacement EC2 and transient runtime implementation][terraform-slice-4-plan]
+- [Terraform Slice 5 Cloudflare prefix-list automation implementation][terraform-slice-5-plan]
 - [PostgreSQL local convergence and per-user AI credentials](specs/260714-postgresql-local-convergence-user-ai-credentials.md)
 
 ## Recently Archived
@@ -109,6 +111,10 @@ decision records needed for the current task.
   plans/260726-terraform-first-production-launch-roadmap.md
 [terraform-slice-3-plan]:
   plans/260728-terraform-slice-3-private-database-secret-containers-implementation.md
+[terraform-slice-4-plan]:
+  plans/260728-terraform-slice-4-replacement-ec2-transient-runtime-implementation.md
+[terraform-slice-5-plan]:
+  plans/260728-terraform-slice-5-cloudflare-prefix-list-automation-implementation.md
 [terraform-slice-2-spec]:
   archive/2026-07-27-terraform-slice-2/260727-terraform-slice-2-canonical-vpc-eip-adoption.md
 [terraform-slice-2-plan]:

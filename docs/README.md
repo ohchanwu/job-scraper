@@ -35,6 +35,8 @@ Use this index instead of recursively loading the entire documentation tree.
 - [Two-window first-production-launch authorization][two-window-authorization]
 - [Pre-Batch-1 human input checklist][pre-batch-1-checklist]
 - [Pre-Batch-1 Window 1 authorization contract][pre-batch-1-contract]
+- [Terraform Slice 4 replacement EC2 and transient runtime][terraform-slice-4]
+- [Terraform Slice 5 Cloudflare prefix-list automation][terraform-slice-5]
 - [Contextual dealbreaker match-provenance contract][dealbreaker-provenance-spec]
 - [Contextual dealbreaker match-provenance implementation][dealbreaker-provenance-plan]
 - [Stage 1 contextual dealbreaker validation and exclusion evidence][contextual-dealbreaker-spec]
@@ -80,6 +82,10 @@ Compose, Caddy, CI, and EC2 commands consume those paths directly.
   superpowers/specs/260728-pre-batch-1-human-input-checklist.md
 [pre-batch-1-contract]:
   superpowers/specs/260728-pre-batch-1-window-1-authorization-contract.md
+[terraform-slice-4]:
+  superpowers/plans/260728-terraform-slice-4-replacement-ec2-transient-runtime-implementation.md
+[terraform-slice-5]:
+  superpowers/plans/260728-terraform-slice-5-cloudflare-prefix-list-automation-implementation.md
 [ponytail-campaign-plan]:
   superpowers/archive/2026-07-18-ponytail-codebase-reduction/260717-campaign-plan.md
 [ponytail-campaign-ledger]:
