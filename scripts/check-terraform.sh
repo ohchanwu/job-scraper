@@ -129,22 +129,22 @@ origin_discovery_tag_count="$(
   grep -Fh "$origin_discovery_tag" \
     "$repo_root/infra/terraform/production/"*.tf |
     wc -l |
-    tr -d ' '
+    tr -d ' ' || true
 )"
 origin_resource="$(
   awk '
     $0 == "resource \"aws_security_group\" \"origin\" {" {
       found = 1
       depth = 1
+      print
+      next
     }
     found {
       print
       line = $0
       opens = gsub(/\{/, "{", line)
       closes = gsub(/\}/, "}", line)
-      if (NR > 1 || $0 != "resource \"aws_security_group\" \"origin\" {") {
-        depth += opens - closes
-      }
+      depth += opens - closes
       if (depth == 0) {
         exit
       }

@@ -148,6 +148,94 @@ insert_inline_route() {
   mv "$file.tmp" "$file"
 }
 
+insert_inline_database_route() {
+  local file="$1"
+
+  awk '
+    !inserted && $0 == "resource \"aws_route_table\" \"database\" {" {
+      print
+      print "  route {}"
+      inserted = 1
+      next
+    }
+    { print }
+    END { if (!inserted) exit 1 }
+  ' "$file" >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
+insert_lifecycle_newer_noncurrent_versions() {
+  local file="$1"
+
+  awk '
+    !inserted && $0 == "      noncurrent_days = 1" {
+      print
+      print "      newer_noncurrent_versions = 1"
+      inserted = 1
+      next
+    }
+    { print }
+    END { if (!inserted) exit 1 }
+  ' "$file" >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
+insert_lifecycle_third_rule() {
+  local file="$1"
+
+  awk '
+    $0 == "resource \"aws_s3_bucket_lifecycle_configuration\" \"recovery\" {" {
+      in_resource = 1
+    }
+    in_resource && !inserted && $0 == "  lifecycle {" {
+      print "  rule {"
+      print "    id     = \"unexpected\""
+      print "    status = \"Enabled\""
+      print "    filter {}"
+      print "  }"
+      print ""
+      inserted = 1
+    }
+    { print }
+    END { if (!inserted) exit 1 }
+  ' "$file" >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
+insert_lifecycle_transition() {
+  local file="$1"
+
+  awk '
+    !inserted && $0 == "    expiration {" {
+      print "    transition {"
+      print "      days          = 7"
+      print "      storage_class = \"GLACIER\""
+      print "    }"
+      print ""
+      inserted = 1
+    }
+    { print }
+    END { if (!inserted) exit 1 }
+  ' "$file" >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
+insert_lifecycle_delete_marker() {
+  local file="$1"
+
+  awk '
+    !inserted && $0 == "      days = 14" {
+      print
+      print "      expired_object_delete_marker = true"
+      inserted = 1
+      next
+    }
+    { print }
+    END { if (!inserted) exit 1 }
+  ' "$file" >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
 run_checker() {
   CHECK_TERRAFORM_FIXTURE_MODE=1 \
     PATH="$fixture_root/bin:$PATH" \
@@ -287,9 +375,7 @@ expect_rejected "secret version resource in production" \
   sh "$secrets_file" || failures=$((failures + 1))
 expect_rejected "inline database route" \
   "Production database route table must remain empty" \
-  replace_once "$database_file" \
-  'resource "aws_route_table" "database" {' \
-  $'resource "aws_route_table" "database" {\n  route {}' ||
+  insert_inline_database_route "$database_file" ||
   failures=$((failures + 1))
 expect_rejected "renamed origin discovery tag" \
   "Origin security group discovery tag contract changed" \
@@ -373,25 +459,19 @@ expect_rejected "recovery lifecycle noncurrent delay changed" \
   '      noncurrent_days = 2' || failures=$((failures + 1))
 expect_rejected "recovery lifecycle retained-version exception" \
   "Recovery bucket lifecycle contract changed" \
-  replace_once "$recovery_file" \
-  '      noncurrent_days = 1' \
-  $'      noncurrent_days = 1\n      newer_noncurrent_versions = 1' ||
+  insert_lifecycle_newer_noncurrent_versions "$recovery_file" ||
   failures=$((failures + 1))
 expect_rejected "recovery lifecycle third rule" \
   "Recovery bucket lifecycle contract changed" \
-  sh -c 'printf "\n  rule { id = \"unexpected\" }\n" >>"$1"' \
-  sh "$recovery_file" || failures=$((failures + 1))
+  insert_lifecycle_third_rule "$recovery_file" ||
+  failures=$((failures + 1))
 expect_rejected "recovery lifecycle transition" \
   "Recovery bucket lifecycle contract changed" \
-  replace_once "$recovery_file" \
-  '    expiration {' \
-  $'    transition {\n      days = 7\n      storage_class = \"GLACIER\"\n    }\n\n    expiration {' ||
+  insert_lifecycle_transition "$recovery_file" ||
   failures=$((failures + 1))
 expect_rejected "recovery lifecycle delete-marker expiration" \
   "Recovery bucket lifecycle contract changed" \
-  replace_once "$recovery_file" \
-  '      days = 14' \
-  $'      days = 14\n      expired_object_delete_marker = true' ||
+  insert_lifecycle_delete_marker "$recovery_file" ||
   failures=$((failures + 1))
 expect_rejected "wildcard network read action" \
   "Slice 2 network read policy actions differ from the approved ceiling." \
