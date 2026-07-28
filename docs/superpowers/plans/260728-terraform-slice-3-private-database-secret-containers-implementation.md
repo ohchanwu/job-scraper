@@ -991,6 +991,7 @@ Write full JSON responses, never stdout, for:
 
 ```text
 ec2 describe-availability-zones
+ec2 describe-vpcs
 ec2 describe-subnets
 ec2 describe-route-tables
 ec2 describe-security-groups
@@ -1026,9 +1027,9 @@ not distinct, or live inventory differs from the reviewed assumptions.
 
 - [ ] **Step 4: Derive deterministic private resource names**
 
-Capture the account ID in a shell variable without printing it. Hash the
-account ID and repository name with SHA-256, use the first twelve lowercase hex
-characters as a private namespace suffix, and derive:
+Capture the account ID in a shell variable without printing it. Hash the UTF-8
+string `account_id + ":" + repository_name` with SHA-256, use the first twelve
+lowercase hex characters as a private namespace suffix, and derive:
 
 ```text
 database_identifier = "jobcron-production-" + namespace_suffix
@@ -1059,7 +1060,8 @@ upper bound, and cumulative launch total. Use 744 hours/month and include:
 1 Single-AZ db.t4g.micro PostgreSQL instance
 20 GiB-month gp3 RDS storage
 7-day automated backup worst-case above the free allocation
-1 Secrets Manager secret
+2 Secrets Manager secrets: the RDS-managed master secret and the empty runtime
+container
 recovery-bucket storage and requests at a conservative first-month bound,
 including 14-day verified and 90-day all-current-version retention plus
 one-day noncurrent data-version expiration
