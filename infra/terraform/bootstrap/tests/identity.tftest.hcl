@@ -112,6 +112,25 @@ override_data {
   }
 }
 
+override_data {
+  target          = data.aws_caller_identity.current
+  override_during = plan
+  values = {
+    account_id = "123456789012"
+  }
+}
+
+override_data {
+  target          = data.aws_iam_policy_document.edge_prefix_list
+  override_during = plan
+  values = {
+    json = jsonencode({
+      Version   = "2012-10-17"
+      Statement = []
+    })
+  }
+}
+
 override_resource {
   target          = aws_iam_policy.production_state
   override_during = plan
@@ -141,6 +160,14 @@ override_resource {
   override_during = plan
   values = {
     arn = "arn:aws:iam::123456789012:policy/JobcronTerraformEdgeState"
+  }
+}
+
+override_resource {
+  target          = aws_iam_policy.edge_prefix_list
+  override_during = plan
+  values = {
+    arn = "arn:aws:iam::123456789012:policy/JobcronTerraformEdgePrefixList"
   }
 }
 
@@ -346,6 +373,130 @@ run "identity_contract" {
       aws_iam_policy.production_slice3_read.arn
     )
     error_message = "Production must attach the approved Slice 3 refresh-only policy document."
+  }
+
+  assert {
+    condition = (
+      length(data.aws_iam_policy_document.edge_prefix_list.statement) == 7 &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[0].actions ==
+      toset([
+        "ec2:DescribeManagedPrefixLists",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSecurityGroupRules",
+        "ec2:DescribeTags",
+      ]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[0].resources ==
+      toset(["*"]) &&
+      length(data.aws_iam_policy_document.edge_prefix_list.statement[0].condition) == 0 &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[1].actions ==
+      toset(["ec2:GetManagedPrefixListEntries"]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[1].resources ==
+      toset(["arn:aws:ec2:ap-northeast-2:123456789012:prefix-list/*"]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[1].condition ==
+      toset([{
+        test     = "StringEquals"
+        variable = "aws:ResourceTag/jobcron:edge-source"
+        values   = tolist(["cloudflare-ipv4"])
+      }]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[2].actions ==
+      toset(["ec2:CreateManagedPrefixList"]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[2].resources ==
+      toset(["arn:aws:ec2:ap-northeast-2:123456789012:prefix-list/*"]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[2].condition ==
+      toset([
+        {
+          test     = "StringEquals"
+          variable = "aws:RequestTag/jobcron:edge-source"
+          values   = tolist(["cloudflare-ipv4"])
+        },
+        {
+          test     = "ForAllValues:StringEquals"
+          variable = "aws:TagKeys"
+          values   = tolist(["jobcron:edge-source"])
+        },
+      ]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[3].actions ==
+      toset(["ec2:ModifyManagedPrefixList"]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[3].resources ==
+      toset(["arn:aws:ec2:ap-northeast-2:123456789012:prefix-list/*"]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[3].condition ==
+      toset([{
+        test     = "StringEquals"
+        variable = "aws:ResourceTag/jobcron:edge-source"
+        values   = tolist(["cloudflare-ipv4"])
+      }]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[4].actions ==
+      toset(["ec2:AuthorizeSecurityGroupIngress"]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[4].resources ==
+      toset(["arn:aws:ec2:ap-northeast-2:123456789012:security-group/*"]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[4].condition ==
+      toset([
+        {
+          test     = "StringEquals"
+          variable = "aws:ResourceTag/jobcron:edge-target"
+          values   = tolist(["origin-security-group"])
+        },
+        {
+          test     = "StringEquals"
+          variable = "aws:RequestTag/jobcron:edge-rule"
+          values   = tolist(["origin-https-from-cloudflare"])
+        },
+        {
+          test     = "ForAllValues:StringEquals"
+          variable = "aws:TagKeys"
+          values   = tolist(["jobcron:edge-rule"])
+        },
+      ]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[5].actions ==
+      toset(["ec2:CreateTags"]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[5].resources ==
+      toset(["arn:aws:ec2:ap-northeast-2:123456789012:prefix-list/*"]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[5].condition ==
+      toset([
+        {
+          test     = "StringEquals"
+          variable = "ec2:CreateAction"
+          values   = tolist(["CreateManagedPrefixList"])
+        },
+        {
+          test     = "ForAllValues:StringEquals"
+          variable = "aws:TagKeys"
+          values   = tolist(["jobcron:edge-source"])
+        },
+      ]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[6].actions ==
+      toset(["ec2:CreateTags"]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[6].resources ==
+      toset(["arn:aws:ec2:ap-northeast-2:123456789012:security-group-rule/*"]) &&
+      data.aws_iam_policy_document.edge_prefix_list.statement[6].condition ==
+      toset([
+        {
+          test     = "StringEquals"
+          variable = "ec2:CreateAction"
+          values   = tolist(["AuthorizeSecurityGroupIngress"])
+        },
+        {
+          test     = "ForAllValues:StringEquals"
+          variable = "aws:TagKeys"
+          values   = tolist(["jobcron:edge-rule"])
+        },
+      ])
+    )
+    error_message = "Edge prefix-list access must stay within the exact action, resource, and tag ceiling."
+  }
+
+  assert {
+    condition = (
+      aws_iam_policy.edge_prefix_list.name ==
+      "JobcronTerraformEdgePrefixList" &&
+      aws_iam_policy.edge_prefix_list.policy ==
+      data.aws_iam_policy_document.edge_prefix_list.json &&
+      aws_iam_role_policy_attachment.edge_prefix_list.role ==
+      aws_iam_role.edge.name &&
+      aws_iam_role_policy_attachment.edge_prefix_list.policy_arn ==
+      aws_iam_policy.edge_prefix_list.arn
+    )
+    error_message = "Only the edge role may attach the protected prefix-list policy."
   }
 
   assert {

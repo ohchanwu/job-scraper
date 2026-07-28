@@ -8,6 +8,7 @@ trap 'rm -rf "$fixture_root"' EXIT
 mkdir -p \
   "$fixture_root/repo/.github/workflows" \
   "$fixture_root/repo/infra/terraform/bootstrap" \
+  "$fixture_root/repo/infra/terraform/edge" \
   "$fixture_root/repo/infra/terraform/production" \
   "$fixture_root/repo/scripts" \
   "$fixture_root/bin"
@@ -16,6 +17,8 @@ cp "$repo_root/infra/terraform/bootstrap/state.tf" \
   "$fixture_root/repo/infra/terraform/bootstrap/"
 cp "$repo_root/infra/terraform/bootstrap/identity.tf" \
   "$fixture_root/repo/infra/terraform/bootstrap/"
+cp "$repo_root/infra/terraform/edge/cloudflare.tf" \
+  "$fixture_root/repo/infra/terraform/edge/"
 cp "$repo_root/infra/terraform/production/network.tf" \
   "$fixture_root/repo/infra/terraform/production/"
 cp "$repo_root/infra/terraform/production/variables.tf" \
@@ -42,6 +45,8 @@ reset_fixtures() {
     "$fixture_root/repo/infra/terraform/bootstrap/"
   cp "$repo_root/infra/terraform/bootstrap/identity.tf" \
     "$fixture_root/repo/infra/terraform/bootstrap/"
+  cp "$repo_root/infra/terraform/edge/cloudflare.tf" \
+    "$fixture_root/repo/infra/terraform/edge/"
   cp "$repo_root/infra/terraform/production/network.tf" \
     "$fixture_root/repo/infra/terraform/production/"
   cp "$repo_root/infra/terraform/production/variables.tf" \
@@ -63,7 +68,8 @@ replace_once() {
 
   awk -v old="$old" -v new="$new" '
     !replaced && index($0, old) {
-      sub(old, new)
+      start = index($0, old)
+      $0 = substr($0, 1, start - 1) new substr($0, start + length(old))
       replaced = 1
     }
     { print }
@@ -105,6 +111,74 @@ duplicate_exact_line() {
         exit 1
       }
     }
+  ' "$file" >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
+replace_in_block() {
+  local file="$1"
+  local header="$2"
+  local old="$3"
+  local new="$4"
+
+  awk -v header="$header" -v old="$old" -v new="$new" '
+    $0 == header {
+      in_resource = 1
+      depth = 0
+    }
+    in_resource && !replaced && index($0, old) {
+      start = index($0, old)
+      $0 = substr($0, 1, start - 1) new substr($0, start + length(old))
+      replaced = 1
+    }
+    {
+      print
+      if (in_resource) {
+        line = $0
+        depth += gsub(/\{/, "{", line) - gsub(/\}/, "}", line)
+        if (depth == 0) {
+          in_resource = 0
+        }
+      }
+    }
+    END { if (!replaced) exit 1 }
+  ' "$file" >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
+remove_condition() {
+  local file="$1"
+  local variable="$2"
+  local occurrence="${3:-1}"
+
+  awk -v variable="$variable" -v occurrence="$occurrence" '
+    !in_condition && $0 ~ /^[[:space:]]*condition \{$/ {
+      in_condition = 1
+      block = $0 ORS
+      next
+    }
+    in_condition {
+      block = block $0 ORS
+      if (index($0, "variable = \"" variable "\"")) {
+        matched = 1
+      }
+      if ($0 ~ /^[[:space:]]*\}$/) {
+        if (matched) {
+          matches++
+        }
+        if (!matched || matches != occurrence) {
+          printf "%s", block
+        } else {
+          removed = 1
+        }
+        in_condition = 0
+        matched = 0
+        block = ""
+      }
+      next
+    }
+    { print }
+    END { if (!removed) exit 1 }
   ' "$file" >"$file.tmp"
   mv "$file.tmp" "$file"
 }
@@ -271,6 +345,7 @@ static_workflow="$fixture_root/repo/.github/workflows/terraform-check.yml"
 production_workflow="$fixture_root/repo/.github/workflows/terraform-production-plan.yml"
 state_file="$fixture_root/repo/infra/terraform/bootstrap/state.tf"
 identity_file="$fixture_root/repo/infra/terraform/bootstrap/identity.tf"
+cloudflare_file="$fixture_root/repo/infra/terraform/edge/cloudflare.tf"
 network_file="$fixture_root/repo/infra/terraform/production/network.tf"
 variables_file="$fixture_root/repo/infra/terraform/production/variables.tf"
 database_file="$fixture_root/repo/infra/terraform/production/database.tf"
@@ -514,6 +589,91 @@ expect_rejected "network write action" \
   replace_once "$identity_file" \
   '"ec2:DescribeVpcs"' \
   '"ec2:CreateVpc"' || failures=$((failures + 1))
+expect_rejected "wildcard edge action" \
+  "Slice 5 edge policy contract changed" \
+  replace_in_block "$identity_file" \
+  'data "aws_iam_policy_document" "edge_prefix_list" {' \
+  '"ec2:DescribeTags",' \
+  '"ec2:*",' || failures=$((failures + 1))
+expect_rejected "prefix-list entries read on wildcard resource" \
+  "Slice 5 edge policy contract changed" \
+  replace_once "$identity_file" \
+  'resources = [local.edge_prefix_list_arn]' \
+  'resources = ["*"]' || failures=$((failures + 1))
+expect_rejected "prefix-list entries read grouped with describes" \
+  "Slice 5 edge policy contract changed" \
+  replace_in_block "$identity_file" \
+  'data "aws_iam_policy_document" "edge_prefix_list" {' \
+  '"ec2:DescribeTags",' \
+  '"ec2:DescribeTags", "ec2:GetManagedPrefixListEntries",' ||
+  failures=$((failures + 1))
+expect_rejected "missing prefix-list resource tag condition" \
+  "Slice 5 edge policy contract changed" \
+  remove_condition "$identity_file" \
+  "aws:ResourceTag/jobcron:edge-source" || failures=$((failures + 1))
+expect_rejected "wrong prefix-list resource tag value" \
+  "Slice 5 edge policy contract changed" \
+  replace_once "$identity_file" \
+  'values   = ["cloudflare-ipv4"]' \
+  'values   = ["other-source"]' || failures=$((failures + 1))
+for forbidden_action in \
+  "ec2:CreateSecurityGroup" \
+  "ec2:DeleteManagedPrefixList" \
+  "ec2:RevokeSecurityGroupIngress" \
+  "ec2:DeleteTags"; do
+  expect_rejected "$forbidden_action" \
+    "Slice 5 edge policy contract changed" \
+    replace_once "$identity_file" \
+    '"ec2:ModifyManagedPrefixList"' \
+    "\"$forbidden_action\"" || failures=$((failures + 1))
+done
+expect_rejected "unconditioned managed prefix-list creation" \
+  "Slice 5 edge policy contract changed" \
+  remove_condition "$identity_file" \
+  "aws:RequestTag/jobcron:edge-source" || failures=$((failures + 1))
+expect_rejected "unconditioned managed prefix-list modification" \
+  "Slice 5 edge policy contract changed" \
+  remove_condition "$identity_file" \
+  "aws:ResourceTag/jobcron:edge-source" 2 || failures=$((failures + 1))
+expect_rejected "unconditioned ingress authorization" \
+  "Slice 5 edge policy contract changed" \
+  remove_condition "$identity_file" \
+  "aws:ResourceTag/jobcron:edge-target" || failures=$((failures + 1))
+expect_rejected "additional managed prefix-list tag key" \
+  "Slice 5 edge policy contract changed" \
+  replace_once "$identity_file" \
+  'values   = ["jobcron:edge-source"]' \
+  'values   = ["jobcron:edge-source", "Name"]' ||
+  failures=$((failures + 1))
+expect_rejected "wrong origin semantic tag" \
+  "Slice 5 edge policy contract changed" \
+  replace_once "$identity_file" \
+  'values   = ["origin-security-group"]' \
+  'values   = ["other-security-group"]' || failures=$((failures + 1))
+expect_rejected "edge policy attached to production role" \
+  "Slice 5 edge policy contract changed" \
+  replace_in_block "$identity_file" \
+  'resource "aws_iam_role_policy_attachment" "edge_prefix_list" {' \
+  'aws_iam_role.edge.name' \
+  'aws_iam_role.production.name' || failures=$((failures + 1))
+expect_rejected "missing edge policy destroy protection" \
+  "Terraform resource is missing bound destroy protection" \
+  replace_in_block "$identity_file" \
+  'resource "aws_iam_policy" "edge_prefix_list" {' \
+  'prevent_destroy = true' \
+  'prevent_destroy = false' || failures=$((failures + 1))
+expect_rejected "missing prefix-list destroy protection" \
+  "Terraform resource is missing bound destroy protection" \
+  replace_in_block "$cloudflare_file" \
+  'resource "aws_ec2_managed_prefix_list" "cloudflare_ipv4" {' \
+  'prevent_destroy = true' \
+  'prevent_destroy = false' || failures=$((failures + 1))
+expect_rejected "missing ingress-rule destroy protection" \
+  "Terraform resource is missing bound destroy protection" \
+  replace_in_block "$cloudflare_file" \
+  'resource "aws_vpc_security_group_ingress_rule" "origin_https_from_cloudflare" {' \
+  'prevent_destroy = true' \
+  'prevent_destroy = false' || failures=$((failures + 1))
 expect_rejected "semantic action tag" \
   "Terraform workflows must pin actions by full commit SHA" \
   replace_once "$static_workflow" "$checkout_sha" "v6.0.0" || failures=$((failures + 1))
