@@ -266,7 +266,7 @@ Expected safe output: the ignored workspace path only.
   `availability_zone` and `cidr_block`.
 - Prints only `Slice 3 private subnet selection written` on success.
 
-- [ ] **Step 1: Write failing selector tests**
+- [x] **Step 1: Write failing selector tests**
 
 Use `unittest` with documentation-only RFC 5737-style fixtures. Assert:
 
@@ -289,7 +289,7 @@ python3 scripts/select-terraform-slice3-cidrs_test.py
 
 Expected: FAIL because the selector does not exist.
 
-- [ ] **Step 2: Implement the minimum selector**
+- [x] **Step 2: Implement the minimum selector**
 
 Use only `argparse`, `ipaddress`, `json`, `os`, `pathlib`, and `tempfile`.
 Implement this exact algorithm:
@@ -312,7 +312,7 @@ and capacity stop, not permission to silently create smaller subnets. A `/24`
 provides 251 AWS-usable IPv4 addresses per AZ, leaving maintenance and
 replacement headroom without adding cost.
 
-- [ ] **Step 3: Run GREEN verification**
+- [x] **Step 3: Run GREEN verification**
 
 ```bash
 python3 scripts/select-terraform-slice3-cidrs_test.py
@@ -321,7 +321,7 @@ git diff --check
 
 Expected: all selector tests pass and no whitespace errors appear.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/select-terraform-slice3-cidrs.py \
@@ -345,7 +345,7 @@ git commit -m "test: make Slice 3 CIDR selection deterministic"
 - The policy attaches to `aws_iam_role.production` and contains only read
   actions needed by a plan-only refresh.
 
-- [ ] **Step 1: Write the failing IAM assertions**
+- [x] **Step 1: Write the failing IAM assertions**
 
 Add a Terraform test that compares the statement action sets exactly:
 
@@ -399,7 +399,7 @@ PATH=/opt/homebrew/bin:$PATH \
 
 Expected: FAIL because the policy does not exist.
 
-- [ ] **Step 2: Add the policy and attachment**
+- [x] **Step 2: Add the policy and attachment**
 
 Add one policy document with the exact actions above, one managed policy named
 `JobcronTerraformProductionSlice3Read`, and one attachment to the existing
@@ -408,13 +408,13 @@ production role. Add `prevent_destroy = true` to the managed policy.
 Do not modify `production_network_read`; creation-only bootstrap policy is
 reviewable without updating a working Slice 2 policy.
 
-- [ ] **Step 3: Lock the static ceiling**
+- [x] **Step 3: Lock the static ceiling**
 
 Teach `scripts/check-terraform.sh` to compare the exact action multiset and
 reject all write verbs and secret-value reads. Do not replace the existing
 Slice 2 network ceiling.
 
-- [ ] **Step 4: Run GREEN verification**
+- [x] **Step 4: Run GREEN verification**
 
 ```bash
 PATH=/opt/homebrew/bin:$PATH \
@@ -426,7 +426,7 @@ git diff --check
 
 Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add infra/terraform/bootstrap/identity.tf \
