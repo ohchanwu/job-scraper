@@ -660,16 +660,28 @@ Terraform saved plan violates the Slice 5 contract
 Use Python standard-library JSON and temporary files. Build one accepted
 fixture per mode from the exact allow-lists above. The cost fixture must:
 
-- have an RFC 3339 `checked_at` no older than 24 hours;
+- have an RFC 3339 `checked_at`; bootstrap and edge-create modes require it to
+  be no older than 24 hours;
 - contain source name and source date per category;
 - include AWS compute, public IPv4, database, storage, backup, registry, and
   Cloudflare;
 - keep aggregate recurring cost `<= 100`; and
 - keep aggregate one-time cost `<= 200`.
 
+The refresh mode still validates the complete schema, category coverage,
+sources, quantities, and both ceilings, but does not reject age alone. Its
+exact allow-list can update only the already-created prefix list while the
+ingress rule remains a no-op, so stale pricing cannot authorize a new billable
+resource. Requiring a 24-hour timestamp there would disable unattended daily
+refreshes after the protected packet's first day.
+
 The Slice 4 checkpoint fixture must record an exact integrated commit, current
 state binding, replacement-host health, origin-group attachment, rollback
-preservation, and zero public-cutover actions.
+preservation, and zero public-cutover actions. Bootstrap and edge-create modes
+require its `checked_at` value to be no older than 24 hours. Refresh mode still
+requires every checkpoint field and passing value, but does not reject
+timestamp age alone because this protected value is the durable Slice 4 exit
+checkpoint rather than a daily rotating credential.
 
 - [ ] **Step 2: Add one mutation per rejection class**
 
@@ -683,8 +695,11 @@ create/update/delete/replace/import/move/forget outside the exact mode
 unknown action
 any output change
 private-value marker or plan diagnostic
-stale or incomplete Slice 4 checkpoint
-cost evidence older than 24 hours
+stale Slice 4 checkpoint in either creation mode
+refresh mode that relaxes any checkpoint check other than timestamp age
+incomplete Slice 4 checkpoint in every mode
+cost evidence older than 24 hours in either creation mode
+refresh mode that relaxes any cost check other than timestamp age
 missing cost category or source date
 aggregate recurring cost above 100
 aggregate one-time cost above 200
@@ -757,6 +772,10 @@ git commit -m "test: enforce Terraform Slice 5 plan contracts"
 - Environment: protected `edge`.
 - Protected values: `AWS_ROLE_ARN`, `TF_STATE_BUCKET`,
   `TF_AGGREGATE_COST_JSON`, and `TF_SLICE4_CHECKPOINT_JSON`.
+- Scope each protected value only to its consuming step: the role ARN to the
+  credentials action, the state bucket to initialization, and the cost plus
+  checkpoint JSON to the staging step. Do not expose them through job-wide
+  `env`.
 - Repository variable: `EDGE_AUTOMATION_ENABLED`, set to `"true"` only after
   the initial reviewed apply and no-change checkpoint.
 - Concurrency group: `terraform-edge-prefix-list`, with
@@ -778,10 +797,14 @@ Require:
   `RUNNER_TEMP`;
 - the protected Slice 4 checkpoint is written only below `RUNNER_TEMP`, is
   never echoed, and is supplied to the saved-plan checker;
+- private writes use `umask 077`, and `TF_DATA_DIR` is below `RUNNER_TEMP` so
+  backend metadata is not written into the checkout;
 - `plan -detailed-exitcode -out=...`;
 - exit code `0` returns without apply;
 - exit code `2` runs the refresh checker before apply;
 - one apply command naming the saved plan;
+- Terraform init and apply output is redirected to private `RUNNER_TEMP` logs,
+  with only fixed value-blind status exposed;
 - no artifact upload, cache, `env`, `printenv`, plan-body print, unsaved apply,
   production root, Cloudflare credential, or Cloudflare action.
 
@@ -807,12 +830,14 @@ fetch official ips-v4 to RUNNER_TEMP
 normalize to RUNNER_TEMP tfvars JSON
 write protected aggregate-cost and Slice 4 checkpoint JSON to RUNNER_TEMP
   without echoing
-initialize only infra/terraform/edge
+initialize only infra/terraform/edge with TF_DATA_DIR and redirected logs below
+  RUNNER_TEMP
 terraform plan -detailed-exitcode -out=edge.tfplan with -var-file
 exit cleanly on 0
 terraform show -json to RUNNER_TEMP on 2
 run slice5-edge-refresh checker
-terraform apply -input=false edge.tfplan
+terraform apply -input=false edge.tfplan with output redirected below
+  RUNNER_TEMP
 ```
 
 Use `curl --fail --silent --show-error --proto '=https' --tlsv1.2`, a bounded
@@ -1166,13 +1191,16 @@ Old EC2/current RDS/rollback materials: preserved
 
 Keep identifiers and raw results private.
 
-- [ ] **Step 5: Store the checkpoint and enable the protected workflow**
+- [ ] **Step 5: Store the checkpoint and enable the workflow**
 
 Only after Steps 1-4 pass, store the approved private checkpoint as
-`TF_SLICE4_CHECKPOINT_JSON` in the protected `edge` environment, then set
-`EDGE_AUTOMATION_ENABLED` to `"true"` there. This enables daily and manual
-post-checkpoint refreshes. Do not put the checkpoint in a repository variable,
-artifact, tracked file, or default that bypasses the gate.
+`TF_SLICE4_CHECKPOINT_JSON` in the protected `edge` environment, then set the
+repository variable `EDGE_AUTOMATION_ENABLED` to `"true"`. Repository scope is
+intentional: GitHub makes environment-level variables available only after a
+runner declares the environment, which is too late for the job-level
+fail-before-runner gate. This enables daily and manual post-checkpoint
+refreshes. Do not put the checkpoint in a repository variable, artifact,
+tracked file, or default that bypasses the gate.
 
 - [ ] **Step 6: Update durable documentation**
 
