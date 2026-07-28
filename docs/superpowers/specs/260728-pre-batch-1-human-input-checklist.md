@@ -241,11 +241,25 @@ If no, profile will be corrected privately on the Mac:
 These actions may be completed at work, but only the completion state may be
 recorded here. Never copy the underlying value into Git.
 
-- [ ] Cloudflare access is ready, or the human knows how they will grant it
+- [x] Cloudflare access is ready, or the human knows how they will grant it
       privately when requested.
-- [ ] Registry access is ready, or the human knows how they will restore it
+      - **OF** To execute batch 1 autonomously, if you need me to grant you
+      (the agent) access to my Cloudflare resources, then this item is not
+      complete and you should request such access. On the other hand, if you
+      do not require access to my Cloudflare resources to execute batch 1
+      (slices 3 - 5 as I understand it) and it would suffice for me to set
+      up the requisite Cloudflare resources after batch 1 and before batch 2,
+      then this item is complete.
+- [x] Registry access is ready, or the human knows how they will restore it
       privately when requested.
-- [ ] A secure destination exists for the credential-encryption recovery copy.
+      - **OF** As I understand it, a GHCR is ready by default automatically
+      under my personal account. If, for some reason, you need it to be an
+      organization account, let me know. Also, I believe that, inside a
+      GH Actions workflow, a GH Personal Access Token isn't even required.
+      If these are true, then I believe this item is complete. You'll just
+      to remind me to make the packages (images) private in the package
+      settings.
+- [x] A secure destination exists for the credential-encryption recovery copy.
 - [x] The human can perform value-blind AWS SSO approval if the short-lived
       session expires.
 - [x] The human understands that Window 2 still requires a separate explicit
