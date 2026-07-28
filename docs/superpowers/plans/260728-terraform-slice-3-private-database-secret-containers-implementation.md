@@ -834,7 +834,7 @@ git commit -m "feat: add empty secret and protected recovery bucket"
 - Workflow maps protected secret `TF_VAR_PRIVATE_DATABASE_CONFIG` to
   `TF_VAR_private_database_config` exactly once.
 
-- [ ] **Step 1: Write failing plan-checker fixtures**
+- [x] **Step 1: Write failing plan-checker fixtures**
 
 Generate minimal JSON fixtures containing the exact allow-lists in this plan.
 Require acceptance only when every allow-listed address is present once with
@@ -870,7 +870,7 @@ Terraform saved plan violates the Slice 3 contract
 
 The error must not include an address, action, identifier, or plan value.
 
-- [ ] **Step 2: Write failing workflow mutations**
+- [x] **Step 2: Write failing workflow mutations**
 
 Require this exact mapping once:
 
@@ -891,7 +891,7 @@ Run:
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the two plan modes**
+- [x] **Step 3: Implement the two plan modes**
 
 Reuse the current Bash/`jq` checker. Compare sorted `address + actions` tuples
 to hard-coded public resource addresses. Keep the existing Slice 2 modes
@@ -909,7 +909,7 @@ or:
 Slice 3 production plan contract verified
 ```
 
-- [ ] **Step 4: Extend the static checker**
+- [x] **Step 4: Extend the static checker**
 
 Require the exact resources and safety attributes from Tasks 2 through 4.
 Reject forbidden Terraform resource types repo-wide. Reject every route in the
@@ -930,7 +930,7 @@ expiration.
 Require the workflow mapping once and forbid printing or artifact upload. The
 workflow remains `workflow_dispatch`, OIDC, masked-account, plan-only.
 
-- [ ] **Step 5: Run GREEN verification**
+- [x] **Step 5: Run GREEN verification**
 
 ```bash
 ./scripts/check-terraform-plan_test.sh
@@ -942,7 +942,7 @@ git diff --check
 
 Expected: pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add scripts/check-terraform-plan.sh \
@@ -973,7 +973,7 @@ git commit -m "ci: enforce the Slice 3 creation-only contract"
 - Produces one deterministic private configuration and a value-blind cost
   verdict.
 
-- [ ] **Step 1: Reauthenticate without printing identity**
+- [x] **Step 1: Reauthenticate without printing identity**
 
 ```bash
 aws sso login --profile jobcron-admin --no-browser
@@ -985,7 +985,7 @@ test "$(aws configure get region --profile jobcron-admin)" = "ap-northeast-2"
 Stop if the expected account/role/region check cannot run without printing a
 private value.
 
-- [ ] **Step 2: Capture current inventory privately**
+- [x] **Step 2: Capture current inventory privately**
 
 Write full JSON responses, never stdout, for:
 
@@ -1008,7 +1008,7 @@ secretsmanager list-secrets
 Use `--profile jobcron-admin --region ap-northeast-2 --output json` on every
 regional call and mode `0600` on every private file.
 
-- [ ] **Step 3: Derive and select the CIDRs**
+- [x] **Step 3: Derive and select the CIDRs**
 
 Privately derive the canonical VPC CIDR from the Terraform-managed VPC, all
 occupied subnet CIDRs in that VPC, and all enabled AZ names. Require the
@@ -1029,7 +1029,7 @@ Slice 3 private subnet selection written
 Stop if selection is ambiguous, fewer than two `/24`s remain, the two AZs are
 not distinct, or live inventory differs from the reviewed assumptions.
 
-- [ ] **Step 4: Derive deterministic private resource names**
+- [x] **Step 4: Derive deterministic private resource names**
 
 Capture the account ID in a shell variable without printing it. Hash the UTF-8
 string `account_id + ":" + repository_name` with SHA-256, use the first twelve
@@ -1049,7 +1049,7 @@ Merge these values with `private-subnets.json` into
 `{"private_database_config": ...}` in the ignored auto tfvars file. Set mode
 `0600` and verify both paths are ignored.
 
-- [ ] **Step 5: Prove absence and collision checks**
+- [x] **Step 5: Prove absence and collision checks**
 
 Privately require that the derived DB identifier, secret name, and bucket name
 do not already exist. Prove the PostgreSQL 18.4 offering is available, the
@@ -1058,7 +1058,7 @@ fingerprint the old EC2, old RDS, and unattached-EIP rollback resources. Stop
 instead of adopting, importing, renaming, replacing a collision, or proceeding
 with insufficient capacity.
 
-- [ ] **Step 6: Calculate the aggregate cost gate**
+- [x] **Step 6: Calculate the aggregate cost gate**
 
 Record the pricing source and date, quantities, recurring upper bound, one-time
 upper bound, and cumulative launch total. Use 744 hours/month and include:
@@ -1092,7 +1092,7 @@ Pricing source and date: recorded privately
 Stop if the total may exceed USD 100/month or USD 200 one-time, or if any
 component lacks a defensible upper bound.
 
-- [ ] **Step 7: Persist a value-blind checkpoint**
+- [x] **Step 7: Persist a value-blind checkpoint**
 
 Record on the task bead only that discovery is unambiguous, `/24` capacity and
 distinct-AZ gates pass, collision checks pass, and aggregate cost gates pass.
