@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	testImage            = "example.invalid/jobcron:sha-0123456789ab"
+	testImage            = "ghcr.io/example-owner/jobcron@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	testDatabaseURL      = "postgres://user:pass@db.example.invalid:5432/jobcron?sslmode=require"
 	testSessionSecret    = "synthetic-session-secret-at-least-32-bytes"
 	testCredentialKey    = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
@@ -26,18 +26,40 @@ const (
 type composeConfig struct {
 	Services map[string]composeService `yaml:"services"`
 	Volumes  map[string]any            `yaml:"volumes"`
+	Networks map[string]composeNetwork `yaml:"networks"`
 }
 
 type composeService struct {
 	Image       string            `yaml:"image"`
+	Build       any               `yaml:"build"`
 	Command     []string          `yaml:"command"`
 	Environment map[string]string `yaml:"environment"`
 	Volumes     []composeVolume   `yaml:"volumes"`
+	Ports       []composePort     `yaml:"ports"`
+	Networks    map[string]any    `yaml:"networks"`
+	Logging     composeLogging    `yaml:"logging"`
 }
 
 type composeVolume struct {
-	Source string `yaml:"source"`
-	Target string `yaml:"target"`
+	Type     string `yaml:"type"`
+	Source   string `yaml:"source"`
+	Target   string `yaml:"target"`
+	ReadOnly bool   `yaml:"read_only"`
+}
+
+type composePort struct {
+	HostIP    string `yaml:"host_ip"`
+	Published string `yaml:"published"`
+	Target    int    `yaml:"target"`
+}
+
+type composeLogging struct {
+	Driver  string            `yaml:"driver"`
+	Options map[string]string `yaml:"options"`
+}
+
+type composeNetwork struct {
+	Internal bool `yaml:"internal"`
 }
 
 func TestProductionComposeRequiresCredentialEncryptionKey(t *testing.T) {
@@ -101,12 +123,96 @@ func TestProductionComposeRetainsDatabaseSessionAndCaddyState(t *testing.T) {
 
 func TestProductionComposeUsesImmutableImageReference(t *testing.T) {
 	config := renderCompose(t)
-	immutableImage := regexp.MustCompile(`^(?:.+:sha-[0-9a-f]{12}|.+@sha256:[0-9a-f]{64})$`)
+	immutableImage := regexp.MustCompile(`^ghcr\.io/[a-z0-9._-]+/jobcron@sha256:[a-f0-9]{64}$`)
 	if got := config.Services["app"].Image; !immutableImage.MatchString(got) {
-		t.Fatalf("app image = %q, want sha-<12-hex> tag or sha256 digest", got)
+		t.Fatalf("app image = %q, want private GHCR sha256 digest", got)
 	}
 	if got := config.Services["app"].Image; got != testImage {
 		t.Fatalf("app image = %q, want requested candidate %q", got, testImage)
+	}
+	if config.Services["app"].Build != nil {
+		t.Fatal("app retains a local build configuration")
+	}
+}
+
+func TestProductionComposeBindsOnlyLoopbackPorts(t *testing.T) {
+	config := renderCompose(t)
+	want := map[string]composePort{
+		"app":   {HostIP: "127.0.0.1", Published: "7777", Target: 7777},
+		"caddy": {HostIP: "127.0.0.1", Published: "8443", Target: 443},
+	}
+	for service, expected := range want {
+		ports := config.Services[service].Ports
+		if len(ports) != 1 || ports[0] != expected {
+			t.Errorf("%s ports = %#v, want only %#v", service, ports, expected)
+		}
+	}
+}
+
+func TestProductionComposeUsesInternalRuntimeNetworkAndDisablesMetadata(t *testing.T) {
+	config := renderCompose(t)
+	network, ok := config.Networks["runtime"]
+	if !ok || !network.Internal {
+		t.Fatalf("runtime network = %#v (present %v), want internal network", network, ok)
+	}
+	for _, service := range []string{"app", "caddy"} {
+		if _, ok := config.Services[service].Networks["runtime"]; !ok {
+			t.Errorf("%s is not attached to the internal runtime network", service)
+		}
+		if got := config.Services[service].Environment["AWS_EC2_METADATA_DISABLED"]; got != "true" {
+			t.Errorf("%s AWS_EC2_METADATA_DISABLED = %q, want true", service, got)
+		}
+	}
+}
+
+func TestProductionComposeRotatesLocalLogs(t *testing.T) {
+	config := renderCompose(t)
+	for _, service := range []string{"app", "caddy"} {
+		logging := config.Services[service].Logging
+		if logging.Driver != "json-file" ||
+			logging.Options["max-size"] != "10m" ||
+			logging.Options["max-file"] != "3" {
+			t.Errorf("%s logging = %#v, want json-file rotation 10m x 3", service, logging)
+		}
+	}
+}
+
+func TestProductionComposeMountsOriginCertificateReadOnly(t *testing.T) {
+	caddy := renderCompose(t).Services["caddy"]
+	found := false
+	for _, volume := range caddy.Volumes {
+		if volume.Source == "/run/jobcron/caddy" {
+			found = true
+			if volume.Type != "bind" || volume.Target != "/run/jobcron/caddy" || !volume.ReadOnly {
+				t.Errorf("origin certificate mount = %#v, want read-only bind", volume)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("Caddy has no /run/jobcron/caddy origin certificate mount")
+	}
+
+	caddyfile, err := os.ReadFile("Caddyfile")
+	if err != nil {
+		t.Fatalf("read Caddyfile: %v", err)
+	}
+	want := "tls /run/jobcron/caddy/origin.crt /run/jobcron/caddy/origin.key"
+	if !strings.Contains(string(caddyfile), want) {
+		t.Fatalf("Caddyfile does not use Origin CA files: want %q", want)
+	}
+}
+
+func TestProductionComposeExampleDocumentsTransientEnvironment(t *testing.T) {
+	example, err := os.ReadFile(".env.example")
+	if err != nil {
+		t.Fatalf("read .env.example: %v", err)
+	}
+	text := string(example)
+	if !strings.Contains(text, "/run/jobcron/compose.env") {
+		t.Fatal(".env.example does not identify the transient production environment path")
+	}
+	if regexp.MustCompile(`(?m)^\s*(cp|install)\b`).MatchString(text) {
+		t.Fatal(".env.example contains a command that persists the synthetic environment")
 	}
 }
 
