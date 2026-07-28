@@ -1120,12 +1120,12 @@ Do not attach the files or values.
   and current credentials.
 - Produces two digested saved plans and one independent `APPROVED` verdict.
 
-- [ ] **Step 1: Initialize both protected backends**
+- [x] **Step 1: Initialize both protected backends**
 
 Copy the private bootstrap backend configuration for production. Run
 `terraform init -reconfigure` in both roots without printing backend values.
 
-- [ ] **Step 2: Save and check the bootstrap plan**
+- [x] **Step 2: Save and check the bootstrap plan**
 
 ```bash
 terraform -chdir=infra/terraform/bootstrap plan \
@@ -1144,7 +1144,7 @@ Expected safe output:
 Slice 3 bootstrap plan contract verified
 ```
 
-- [ ] **Step 3: Apply only the bootstrap saved plan**
+- [x] **Step 3: Apply only the bootstrap saved plan**
 
 The production plan workflow cannot refresh Slice 3 resources until the
 read-only policy exists. First record the saved-plan SHA-256 privately, confirm
@@ -1159,7 +1159,7 @@ terraform -chdir=infra/terraform/bootstrap apply \
 This apply may create only the two bootstrap allow-list addresses. Stop on any
 drift, changed digest, or reviewer verdict other than `APPROVED`.
 
-- [ ] **Step 4: Save and check the production plan**
+- [x] **Step 4: Save and check the production plan**
 
 Re-run live inventory, CIDR, collision, credentials, and aggregate cost gates.
 Then:
@@ -1181,7 +1181,7 @@ Expected safe output:
 Slice 3 production plan contract verified
 ```
 
-- [ ] **Step 5: Build the private controller report**
+- [x] **Step 5: Build the private controller report**
 
 Record:
 
@@ -1199,7 +1199,7 @@ Record:
 - publication/secret-scan results; and
 - recovery steps if either apply stops.
 
-- [ ] **Step 6: Obtain independent exact-digest review**
+- [x] **Step 6: Obtain independent exact-digest review**
 
 A reviewer other than the implementer must inspect the raw saved plan, plan
 JSON, private input, cost packet, state binding, tracked diff, fingerprints,
@@ -1209,7 +1209,7 @@ reviewed digests to the ignored reviewer packet.
 Do not send private digests through chat or mail. Mail may contain only the
 value-blind verdict and the local private packet path.
 
-- [ ] **Step 7: Enforce the final production policy gate**
+- [x] **Step 7: Enforce the final production policy gate**
 
 The value-blind summary must be exactly:
 
