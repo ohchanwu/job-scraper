@@ -43,8 +43,8 @@ must remain secret. Do not replace that phrase with the value.
 
 ### 1. Infrastructure Spending Ceiling
 
-- [ ] Monthly recurring ceiling approved
-- [ ] One-time launch ceiling approved
+- [x] Monthly recurring ceiling approved
+- [x] One-time launch ceiling approved
 
 **Why it is needed:** Window 1 cannot create the private database tier,
 replacement host, storage, or supporting infrastructure without a human-owned
@@ -67,15 +67,15 @@ invoices, or screenshots.
 **Human response:**
 
 ```text
-Monthly recurring ceiling: USD
-One-time launch ceiling: USD
+Monthly recurring ceiling: USD 100
+One-time launch ceiling: USD 200
 ```
 
 ### 2. Rollback Decision Owner And Close Condition
 
-- [ ] Rollback decision owner selected
-- [ ] Minimum rollback window selected
-- [ ] Measurable close condition approved
+- [x] Rollback decision owner selected
+- [x] Minimum rollback window selected
+- [x] Measurable close condition approved
 
 **Why it is needed:** Mayor may preserve rollback resources but may not decide
 when deleting them becomes acceptable. Closing the window can make rollback
@@ -103,16 +103,16 @@ channel.
 **Human response:**
 
 ```text
-Rollback owner:
-Minimum window:
-Close condition:
+Rollback owner: `Human operator`;
+Minimum window: seven consecutive days after public cutover; and
+Close condition: close only after login, signup gating, scrape, AI evaluation, daily briefing, archive/history, backup, restore rehearsal, monitoring, and browser checks pass with no unresolved Critical or P1 incident.
 ```
 
 ### 3. OCI Container Registry Choice
 
-- [ ] Registry selected
-- [ ] Human confirms they can restore access if existing authentication fails
-- [ ] Image visibility selected
+- [x] Registry selected
+- [x] Human confirms they can restore access if existing authentication fails
+- [x] Image visibility selected
 
 **Why it is needed:** Batch 1 publishes one immutable `linux/arm64` image and
 the replacement host pulls that exact digest. A mutable tag alone is not
@@ -135,9 +135,9 @@ private repository identifier.
 **Human response:**
 
 ```text
-Registry:
-Image visibility:
-Can restore publish/pull access if needed:
+Registry: I'll set up a GitHub container registry account.
+Image visibility: Private Image
+Can restore publish/pull access if needed: Yes
 ```
 
 ### 4. Cloudflare Account And Zone Access
@@ -165,9 +165,9 @@ key, exact hostname, or screenshots.
 **Human response:**
 
 ```text
-Correct Cloudflare account accessible:
-Correct DNS zone accessible:
-Can authorize Origin CA and DNS work if prompted:
+Correct Cloudflare account accessible: yes
+Correct DNS zone accessible: yes
+Can authorize Origin CA and DNS work if prompted: yes
 ```
 
 ### 5. Recovery-Copy Storage Class
@@ -246,9 +246,9 @@ recorded here. Never copy the underlying value into Git.
 - [ ] Registry access is ready, or the human knows how they will restore it
       privately when requested.
 - [ ] A secure destination exists for the credential-encryption recovery copy.
-- [ ] The human can perform value-blind AWS SSO approval if the short-lived
+- [x] The human can perform value-blind AWS SSO approval if the short-lived
       session expires.
-- [ ] The human understands that Window 2 still requires a separate explicit
+- [x] The human understands that Window 2 still requires a separate explicit
       approval before EIP attachment, DNS change, or public traffic.
 
 ## Already Approved Or Available
