@@ -41,7 +41,12 @@ jobs:
       - name: production transient runtime contract
         run: |
           sh -n deploy/production/jobcron-runtime.sh
-          go test ./scripts -run 'TestJobcronRuntime' -count=1
+          go test ./scripts -run 'TestJobcron(Systemd|Runtime)' -count=1
+      - name: production private operations contract
+        run: |
+          sh -n scripts/production-rds-role.sh
+          sh -n scripts/pull-production-recovery.sh
+          go test ./scripts -run 'TestProductionPrivateOps' -count=1
       - name: production Compose contract
         env:
           JOBCRON_IMAGE: ghcr.io/example-owner/jobcron@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
