@@ -73,6 +73,11 @@ replace_once() {
       replaced = 1
     }
     { print }
+    END {
+      if (!replaced) {
+        exit 1
+      }
+    }
   ' "$file" >"$file.tmp"
   mv "$file.tmp" "$file"
 }
@@ -327,7 +332,10 @@ expect_rejected() {
   shift 2
 
   reset_fixtures
-  "$@"
+  if ! "$@"; then
+    printf 'FAIL: mutation setup failed for %s\n' "$name" >&2
+    return 1
+  fi
   if run_checker; then
     printf 'FAIL: accepted %s\n' "$name" >&2
     return 1
@@ -343,6 +351,7 @@ checkout_sha="d23441a48e516b6c34aea4fa41551a30e30af803"
 aws_action_sha="e6de054238d6b7531b4efff3b6587d9aade6a06c"
 static_workflow="$fixture_root/repo/.github/workflows/terraform-check.yml"
 production_workflow="$fixture_root/repo/.github/workflows/terraform-production-plan.yml"
+edge_workflow="$fixture_root/repo/.github/workflows/terraform-edge-prefix-list.yml"
 state_file="$fixture_root/repo/infra/terraform/bootstrap/state.tf"
 identity_file="$fixture_root/repo/infra/terraform/bootstrap/identity.tf"
 cloudflare_file="$fixture_root/repo/infra/terraform/edge/cloudflare.tf"
@@ -354,6 +363,10 @@ recovery_file="$fixture_root/repo/infra/terraform/production/recovery.tf"
 failures=0
 
 reset_fixtures
+if [[ ! -f "$edge_workflow" ]]; then
+  printf 'FAIL: edge prefix-list workflow is absent\n' >&2
+  exit 1
+fi
 if ! grep -Fq \
   "uses: aws-actions/configure-aws-credentials@$aws_action_sha" \
   "$production_workflow"; then
@@ -371,6 +384,170 @@ if ! run_checker; then
   cat "$fixture_root/checker.out" >&2
   exit 1
 fi
+
+edge_error="edge prefix-list workflow violates the reviewed contract"
+expect_rejected "missing edge schedule" "$edge_error" \
+  remove_exact_line "$edge_workflow" \
+  '    - cron: "17 18 * * *"' || failures=$((failures + 1))
+expect_rejected "missing edge manual trigger" "$edge_error" \
+  replace_once "$edge_workflow" "workflow_dispatch:" "push:" ||
+  failures=$((failures + 1))
+expect_rejected "changed official Cloudflare URL" "$edge_error" \
+  replace_once "$edge_workflow" \
+  "https://www.cloudflare.com/ips-v4" \
+  "https://example.com/ips-v4" || failures=$((failures + 1))
+expect_rejected "disabled edge automation gate" "$edge_error" \
+  replace_once "$edge_workflow" \
+  "vars.EDGE_AUTOMATION_ENABLED == 'true'" \
+  "vars.EDGE_AUTOMATION_ENABLED == 'false'" || failures=$((failures + 1))
+expect_rejected "wrong edge environment" "$edge_error" \
+  replace_once "$edge_workflow" \
+  "environment: edge" "environment: production" ||
+  failures=$((failures + 1))
+expect_rejected "missing protected Slice 4 checkpoint" "$edge_error" \
+  remove_exact_line "$edge_workflow" \
+  '          TF_SLICE4_CHECKPOINT_JSON: ${{ secrets.TF_SLICE4_CHECKPOINT_JSON }}' ||
+  failures=$((failures + 1))
+expect_rejected "repository-variable Slice 4 checkpoint" "$edge_error" \
+  replace_once "$edge_workflow" \
+  'secrets.TF_SLICE4_CHECKPOINT_JSON' \
+  'vars.TF_SLICE4_CHECKPOINT_JSON' || failures=$((failures + 1))
+expect_rejected "job-wide state bucket secret" "$edge_error" \
+  replace_once "$edge_workflow" \
+  '          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}' \
+  '      TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}' ||
+  failures=$((failures + 1))
+expect_rejected "job-wide cost evidence secret" "$edge_error" \
+  replace_once "$edge_workflow" \
+  '          TF_AGGREGATE_COST_JSON: ${{ secrets.TF_AGGREGATE_COST_JSON }}' \
+  '      TF_AGGREGATE_COST_JSON: ${{ secrets.TF_AGGREGATE_COST_JSON }}' ||
+  failures=$((failures + 1))
+expect_rejected "job-wide checkpoint secret" "$edge_error" \
+  replace_once "$edge_workflow" \
+  '          TF_SLICE4_CHECKPOINT_JSON: ${{ secrets.TF_SLICE4_CHECKPOINT_JSON }}' \
+  '      TF_SLICE4_CHECKPOINT_JSON: ${{ secrets.TF_SLICE4_CHECKPOINT_JSON }}' ||
+  failures=$((failures + 1))
+expect_rejected "missing private-file umask" "$edge_error" \
+  remove_exact_line "$edge_workflow" \
+  '          umask 077' || failures=$((failures + 1))
+expect_rejected "TF_DATA_DIR outside runner temp" "$edge_error" \
+  replace_once "$edge_workflow" \
+  'TF_DATA_DIR: ${{ runner.temp }}/terraform-data' \
+  'TF_DATA_DIR: /tmp/terraform-data' || failures=$((failures + 1))
+expect_rejected "Slice 4 checkpoint outside runner temp" "$edge_error" \
+  replace_once "$edge_workflow" \
+  '${RUNNER_TEMP}/slice-4-checkpoint.json' \
+  'slice-4-checkpoint.json' || failures=$((failures + 1))
+expect_rejected "printed Slice 4 checkpoint" "$edge_error" \
+  insert_into_first_run_block "$edge_workflow" \
+  '          printf '\''%s\n'\'' "$TF_SLICE4_CHECKPOINT_JSON"' ||
+  failures=$((failures + 1))
+expect_rejected "extra edge workflow permission" "$edge_error" \
+  replace_once "$edge_workflow" \
+  "contents: read" "contents: write" || failures=$((failures + 1))
+expect_rejected "wrong edge checkout pin" "$edge_error" \
+  replace_once "$edge_workflow" "$checkout_sha" \
+  "0000000000000000000000000000000000000000" ||
+  failures=$((failures + 1))
+expect_rejected "wrong edge AWS action pin" "$edge_error" \
+  replace_once "$edge_workflow" "$aws_action_sha" \
+  "0000000000000000000000000000000000000000" ||
+  failures=$((failures + 1))
+expect_rejected "disabled edge account masking" "$edge_error" \
+  replace_once "$edge_workflow" \
+  "mask-aws-account-id: true" "mask-aws-account-id: false" ||
+  failures=$((failures + 1))
+expect_rejected "wrong edge concurrency group" "$edge_error" \
+  replace_once "$edge_workflow" \
+  "group: terraform-edge-prefix-list" "group: terraform-edge" ||
+  failures=$((failures + 1))
+expect_rejected "cancelled in-progress edge run" "$edge_error" \
+  replace_once "$edge_workflow" \
+  "cancel-in-progress: false" "cancel-in-progress: true" ||
+  failures=$((failures + 1))
+expect_rejected "raw response outside runner temp" "$edge_error" \
+  replace_once "$edge_workflow" \
+  '${RUNNER_TEMP}/cloudflare-ips-v4.txt' \
+  'cloudflare-ips-v4.txt' || failures=$((failures + 1))
+expect_rejected "missing detailed exit code" "$edge_error" \
+  remove_exact_line "$edge_workflow" \
+  '            -detailed-exitcode \' || failures=$((failures + 1))
+expect_rejected "no-change branch no longer exits" "$edge_error" \
+  replace_once "$edge_workflow" \
+  'if [[ "$plan_rc" -eq 0 ]]; then' \
+  'if [[ "$plan_rc" -eq 9 ]]; then' || failures=$((failures + 1))
+expect_rejected "change branch no longer requires exit 2" "$edge_error" \
+  replace_once "$edge_workflow" \
+  'if [[ "$plan_rc" -ne 2 ]]; then' \
+  'if [[ "$plan_rc" -ne 3 ]]; then' || failures=$((failures + 1))
+expect_rejected "missing refresh checker" "$edge_error" \
+  remove_exact_line "$edge_workflow" \
+  '          python3 scripts/check-terraform-slice-5-plan.py \' ||
+  failures=$((failures + 1))
+expect_rejected "unsaved edge apply" "$edge_error" \
+  replace_once "$edge_workflow" \
+  '          if terraform -chdir=infra/terraform/edge apply -input=false \' \
+  '          if terraform -chdir=infra/terraform/edge apply -input=false' ||
+  failures=$((failures + 1))
+expect_rejected "uploaded edge artifact" "$edge_error" \
+  sh -c 'printf "\n      - uses: actions/upload-artifact@0000000000000000000000000000000000000000\n" >>"$1"' \
+  sh "$edge_workflow" || failures=$((failures + 1))
+expect_rejected "cached edge artifact" "$edge_error" \
+  sh -c 'printf "\n      - uses: actions/cache@0000000000000000000000000000000000000000\n" >>"$1"' \
+  sh "$edge_workflow" || failures=$((failures + 1))
+expect_rejected "edge environment dump" "$edge_error" \
+  insert_into_first_run_block "$edge_workflow" \
+  '          env | sort' || failures=$((failures + 1))
+expect_rejected "edge printenv dump" "$edge_error" \
+  insert_into_first_run_block "$edge_workflow" \
+  '          printenv' || failures=$((failures + 1))
+expect_rejected "printed edge plan body" "$edge_error" \
+  replace_once "$edge_workflow" \
+  '            >"${RUNNER_TEMP}/edge-plan.log" 2>&1' \
+  '            2>&1' || failures=$((failures + 1))
+expect_rejected "visible Terraform init output" "$edge_error" \
+  replace_once "$edge_workflow" \
+  '            >"${RUNNER_TEMP}/edge-init.log" 2>&1; then' \
+  '            ; then' || failures=$((failures + 1))
+expect_rejected "visible Terraform apply output" "$edge_error" \
+  replace_once "$edge_workflow" \
+  '            >"${RUNNER_TEMP}/edge-apply.log" 2>&1; then' \
+  '            ; then' || failures=$((failures + 1))
+expect_rejected "missing fixed init status" "$edge_error" \
+  replace_once "$edge_workflow" \
+  "Terraform edge initialization succeeded" \
+  "Terraform edge initialization complete" ||
+  failures=$((failures + 1))
+expect_rejected "missing fixed init failure status" "$edge_error" \
+  replace_once "$edge_workflow" \
+  "Terraform edge initialization failed" \
+  "Terraform edge initialization error" ||
+  failures=$((failures + 1))
+expect_rejected "missing fixed apply status" "$edge_error" \
+  replace_once "$edge_workflow" \
+  "Terraform edge refresh applied" \
+  "Terraform edge refresh complete" ||
+  failures=$((failures + 1))
+expect_rejected "missing fixed apply failure status" "$edge_error" \
+  replace_once "$edge_workflow" \
+  "Terraform edge refresh apply failed" \
+  "Terraform edge refresh apply error" ||
+  failures=$((failures + 1))
+expect_rejected "tailed private Terraform log" "$edge_error" \
+  insert_into_first_run_block "$edge_workflow" \
+  '          tail "${RUNNER_TEMP}/edge-init.log"' ||
+  failures=$((failures + 1))
+expect_rejected "production root in edge workflow" "$edge_error" \
+  replace_once "$edge_workflow" \
+  "infra/terraform/edge" "infra/terraform/production" ||
+  failures=$((failures + 1))
+expect_rejected "Cloudflare credential in edge workflow" "$edge_error" \
+  insert_into_first_run_block "$edge_workflow" \
+  '          CLOUDFLARE_API_TOKEN=synthetic' ||
+  failures=$((failures + 1))
+expect_rejected "Cloudflare action in edge workflow" "$edge_error" \
+  sh -c 'printf "\n      - uses: cloudflare/wrangler-action@0000000000000000000000000000000000000000\n" >>"$1"' \
+  sh "$edge_workflow" || failures=$((failures + 1))
 
 expect_rejected "missing private network config mapping" \
   "production workflow must map but never print private network config" \

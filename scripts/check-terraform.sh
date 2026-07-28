@@ -500,6 +500,7 @@ if grep -Eq '^[[:space:]]*output[[:space:]]+"' \
 fi
 
 production_workflow="$repo_root/.github/workflows/terraform-production-plan.yml"
+edge_workflow="$repo_root/.github/workflows/terraform-edge-prefix-list.yml"
 workflow_files=("$repo_root/.github/workflows/"terraform-*.yml)
 
 mapping_count="$(
@@ -600,6 +601,156 @@ if ! awk '
   exit 1
 fi
 
+fail_edge_workflow() {
+  printf 'edge prefix-list workflow violates the reviewed contract\n' >&2
+  exit 1
+}
+
+[[ -f "$edge_workflow" ]] || fail_edge_workflow
+
+edge_permissions="$(
+  awk '
+    $0 == "permissions:" {
+      found = 1
+      next
+    }
+    found && /^[^[:space:]]/ {
+      exit
+    }
+    found && /:/ {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      print line
+    }
+  ' "$edge_workflow" | sort
+)"
+[[ "$edge_permissions" == $'contents: read\nid-token: write' ]] ||
+  fail_edge_workflow
+
+for literal in \
+  '    - cron: "17 18 * * *"' \
+  '  workflow_dispatch:' \
+  "    if: \${{ vars.EDGE_AUTOMATION_ENABLED == 'true' }}" \
+  '    environment: edge' \
+  '  group: terraform-edge-prefix-list' \
+  '  cancel-in-progress: false' \
+  '      TF_DATA_DIR: ${{ runner.temp }}/terraform-data' \
+  '          mask-aws-account-id: true' \
+  '            -detailed-exitcode \' \
+  '          if [[ "$plan_rc" -eq 0 ]]; then' \
+  '          if [[ "$plan_rc" -ne 2 ]]; then' \
+  '          python3 scripts/check-terraform-slice-5-plan.py \' \
+  '          if terraform -chdir=infra/terraform/edge apply -input=false \' \
+  "            printf 'Terraform edge initialization succeeded\\n'" \
+  "            printf 'Terraform edge initialization failed\\n' >&2" \
+  "            printf 'Terraform edge refresh applied\\n'" \
+  "            printf 'Terraform edge refresh apply failed\\n' >&2"; do
+  [[ "$(grep -Fxc "$literal" "$edge_workflow" || true)" -eq 1 ]] ||
+    fail_edge_workflow
+done
+[[ "$(grep -Fxc '          umask 077' "$edge_workflow" || true)" -eq 4 ]] ||
+  fail_edge_workflow
+
+[[ "$(grep -Foc 'https://www.cloudflare.com/ips-v4' "$edge_workflow" || true)" -eq 1 ]] ||
+  fail_edge_workflow
+for curl_flag in \
+  'curl --fail --silent --show-error' \
+  "--proto '=https'" \
+  '--tlsv1.2' \
+  '--max-time 30' \
+  '--output "${RUNNER_TEMP}/cloudflare-ips-v4.txt"'; do
+  grep -Fq -- "$curl_flag" "$edge_workflow" || fail_edge_workflow
+done
+
+for mapping in \
+  '          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}' \
+  '          TF_AGGREGATE_COST_JSON: ${{ secrets.TF_AGGREGATE_COST_JSON }}' \
+  '          TF_SLICE4_CHECKPOINT_JSON: ${{ secrets.TF_SLICE4_CHECKPOINT_JSON }}'; do
+  [[ "$(grep -Fxc "$mapping" "$edge_workflow" || true)" -eq 1 ]] ||
+    fail_edge_workflow
+done
+[[ "$(grep -Foc 'TF_STATE_BUCKET' "$edge_workflow" || true)" -eq 2 ]] ||
+  fail_edge_workflow
+[[ "$(grep -Foc 'TF_AGGREGATE_COST_JSON' "$edge_workflow" || true)" -eq 2 ]] ||
+  fail_edge_workflow
+[[ "$(grep -Foc 'TF_SLICE4_CHECKPOINT_JSON' "$edge_workflow" || true)" -eq 2 ]] ||
+  fail_edge_workflow
+grep -Fq 'role-to-assume: ${{ secrets.AWS_ROLE_ARN }}' "$edge_workflow" ||
+  fail_edge_workflow
+if grep -Eq \
+  'vars\.(TF_STATE_BUCKET|TF_AGGREGATE_COST_JSON|TF_SLICE4_CHECKPOINT_JSON)|^      (TF_STATE_BUCKET|TF_AGGREGATE_COST_JSON|TF_SLICE4_CHECKPOINT_JSON):' \
+  "$edge_workflow"; then
+  fail_edge_workflow
+fi
+[[ "$(grep -Foc 'TF_DATA_DIR' "$edge_workflow" || true)" -eq 1 ]] ||
+  fail_edge_workflow
+
+for artifact in \
+  cloudflare-ips-v4.txt \
+  cloudflare.auto.tfvars.json \
+  aggregate-cost.json \
+  slice-4-checkpoint.json \
+  edge.tfplan \
+  edge-plan.log \
+  edge-plan.json \
+  edge-init.log \
+  edge-apply.log; do
+  if grep -F "$artifact" "$edge_workflow" |
+    grep -Fv "\${RUNNER_TEMP}/$artifact" >/dev/null; then
+    fail_edge_workflow
+  fi
+done
+
+if grep -Eiq \
+  'actions/(upload-artifact|cache)|cloudflare/|CLOUDFLARE_(API_)?TOKEN|infra/terraform/production|^[[:space:]]+(env|printenv)([[:space:]|;&]|$)|(cat|tail|head|less)[[:space:]].*edge-(init|apply)\.log' \
+  "$edge_workflow"; then
+  fail_edge_workflow
+fi
+
+edge_line() {
+  local literal="$1"
+  local lines
+  lines="$(grep -nF "$literal" "$edge_workflow" || true)"
+  [[ "$(wc -l <<<"$lines" | tr -d ' ')" -eq 1 && -n "$lines" ]] ||
+    fail_edge_workflow
+  printf '%s\n' "${lines%%:*}"
+}
+
+edge_order=(
+  "$(edge_line 'uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803')"
+  "$(edge_line 'uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e')"
+  "$(edge_line 'uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c')"
+  "$(edge_line 'curl --fail --silent --show-error')"
+  "$(edge_line 'python3 scripts/normalize-cloudflare-ipv4.py')"
+  "$(edge_line 'printf '\''%s'\'' "$TF_AGGREGATE_COST_JSON"')"
+  "$(edge_line 'printf '\''%s'\'' "$TF_SLICE4_CHECKPOINT_JSON"')"
+  "$(edge_line 'if terraform -chdir=infra/terraform/edge init')"
+  "$(edge_line 'terraform -chdir=infra/terraform/edge plan')"
+  "$(edge_line 'if [[ "$plan_rc" -eq 0 ]]; then')"
+  "$(edge_line 'if [[ "$plan_rc" -ne 2 ]]; then')"
+  "$(edge_line 'terraform -chdir=infra/terraform/edge show -json')"
+  "$(edge_line 'python3 scripts/check-terraform-slice-5-plan.py')"
+  "$(edge_line 'if terraform -chdir=infra/terraform/edge apply -input=false')"
+)
+for ((index = 1; index < ${#edge_order[@]}; index++)); do
+  ((edge_order[index - 1] < edge_order[index])) || fail_edge_workflow
+done
+
+apply_line="${edge_order[${#edge_order[@]} - 1]}"
+apply_block="$(
+  sed -n "${apply_line},$((apply_line + 1))p" "$edge_workflow" |
+    tr -d '[:space:]'
+)"
+[[ "$apply_block" == \
+  'ifterraform-chdir=infra/terraform/edgeapply-input=false\"${RUNNER_TEMP}/edge.tfplan"\' ]] ||
+  fail_edge_workflow
+grep -Fq '            >"${RUNNER_TEMP}/edge-plan.log" 2>&1' "$edge_workflow" ||
+  fail_edge_workflow
+grep -Fq '            >"${RUNNER_TEMP}/edge-init.log" 2>&1; then' "$edge_workflow" ||
+  fail_edge_workflow
+grep -Fq '            >"${RUNNER_TEMP}/edge-apply.log" 2>&1; then' "$edge_workflow" ||
+  fail_edge_workflow
+
 if grep -Eh \
   '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+[^[:space:]]+@' \
   "${workflow_files[@]}" |
@@ -634,14 +785,16 @@ require_action_pin() {
 }
 
 require_action_pin \
-  2 "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803"
+  3 "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803"
 require_action_pin \
-  2 "hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e"
+  3 "hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e"
 require_action_pin \
-  1 "aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c"
+  2 "aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c"
 
 if [[ "${CHECK_TERRAFORM_FIXTURE_MODE:-0}" != 1 ]]; then
   "$repo_root/scripts/check-terraform-plan_test.sh"
   "$repo_root/scripts/check-terraform-slice-4-plan_test.sh"
+  python3 "$repo_root/scripts/normalize-cloudflare-ipv4_test.py"
+  python3 "$repo_root/scripts/check-terraform-slice-5-plan_test.py"
   "$repo_root/scripts/check-terraform-workflows_test.sh"
 fi

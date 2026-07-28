@@ -1,0 +1,121 @@
+name: Refresh Cloudflare IPv4 prefix list
+
+on:
+  schedule:
+    - cron: "17 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: terraform-edge-prefix-list
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: ${{ vars.EDGE_AUTOMATION_ENABLED == 'true' }}
+    environment: edge
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ap-northeast-2
+      TF_DATA_DIR: ${{ runner.temp }}/terraform-data
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - name: Configure short-lived edge credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Fetch and validate Cloudflare IPv4 ranges
+        shell: bash
+        run: |
+          umask 077
+          curl --fail --silent --show-error \
+            --proto '=https' \
+            --tlsv1.2 \
+            --max-time 30 \
+            --output "${RUNNER_TEMP}/cloudflare-ips-v4.txt" \
+            https://www.cloudflare.com/ips-v4
+          python3 scripts/normalize-cloudflare-ipv4.py \
+            "${RUNNER_TEMP}/cloudflare-ips-v4.txt" \
+            "${RUNNER_TEMP}/cloudflare.auto.tfvars.json"
+
+      - name: Stage protected controller evidence
+        shell: bash
+        env:
+          TF_AGGREGATE_COST_JSON: ${{ secrets.TF_AGGREGATE_COST_JSON }}
+          TF_SLICE4_CHECKPOINT_JSON: ${{ secrets.TF_SLICE4_CHECKPOINT_JSON }}
+        run: |
+          umask 077
+          printf '%s' "$TF_AGGREGATE_COST_JSON" \
+            >"${RUNNER_TEMP}/aggregate-cost.json"
+          printf '%s' "$TF_SLICE4_CHECKPOINT_JSON" \
+            >"${RUNNER_TEMP}/slice-4-checkpoint.json"
+
+      - name: Initialize edge state
+        shell: bash
+        env:
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+        run: |
+          umask 077
+          if terraform -chdir=infra/terraform/edge init \
+            -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="region=${AWS_REGION}" \
+            >"${RUNNER_TEMP}/edge-init.log" 2>&1; then
+            printf 'Terraform edge initialization succeeded\n'
+          else
+            printf 'Terraform edge initialization failed\n' >&2
+            exit 1
+          fi
+
+      - name: Apply only a validated saved refresh plan
+        shell: bash
+        run: |
+          umask 077
+          set +e
+          terraform -chdir=infra/terraform/edge plan \
+            -input=false \
+            -detailed-exitcode \
+            -var-file="${RUNNER_TEMP}/cloudflare.auto.tfvars.json" \
+            -out="${RUNNER_TEMP}/edge.tfplan" \
+            >"${RUNNER_TEMP}/edge-plan.log" 2>&1
+          plan_rc=$?
+          set -e
+
+          if [[ "$plan_rc" -eq 0 ]]; then
+            exit 0
+          fi
+          if [[ "$plan_rc" -ne 2 ]]; then
+            exit 1
+          fi
+
+          terraform -chdir=infra/terraform/edge show -json \
+            "${RUNNER_TEMP}/edge.tfplan" \
+            >"${RUNNER_TEMP}/edge-plan.json"
+          python3 scripts/check-terraform-slice-5-plan.py \
+            slice5-edge-refresh \
+            "${RUNNER_TEMP}/edge-plan.json" \
+            "${RUNNER_TEMP}/aggregate-cost.json" \
+            "${RUNNER_TEMP}/slice-4-checkpoint.json" \
+            "${RUNNER_TEMP}/cloudflare.auto.tfvars.json"
+          if terraform -chdir=infra/terraform/edge apply -input=false \
+            "${RUNNER_TEMP}/edge.tfplan" \
+            >"${RUNNER_TEMP}/edge-apply.log" 2>&1; then
+            printf 'Terraform edge refresh applied\n'
+          else
+            printf 'Terraform edge refresh apply failed\n' >&2
+            exit 1
+          fi
