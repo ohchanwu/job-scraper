@@ -102,3 +102,17 @@ variable "private_database_config" {
     error_message = "The master username must use PostgreSQL identifier form."
   }
 }
+
+variable "replacement_public_subnet_key" {
+  description = "Canonical public subnet selected for the replacement host."
+  type        = string
+  default     = "public_a"
+
+  validation {
+    condition = contains(
+      ["public_a", "public_b", "public_c", "public_d"],
+      var.replacement_public_subnet_key,
+    )
+    error_message = "The replacement host subnet must be public_a through public_d."
+  }
+}

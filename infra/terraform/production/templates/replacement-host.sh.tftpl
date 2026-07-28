@@ -1,0 +1,26 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+dnf install -y docker docker-compose-plugin awscli2 jq postgresql15
+
+install -d -m 0755 -o root -g root /opt/jobcron
+install -d -m 0700 -o root -g root /etc/jobcron
+
+%{ for target, asset in assets ~}
+install -d -m 0755 -o root -g root "$(dirname "${target}")"
+asset_tmp="$(mktemp)"
+printf '%s' '${asset.payload}' | base64 -d | gzip -d >"$asset_tmp"
+printf '%s  %s\n' '${asset.sha256}' "$asset_tmp" | sha256sum -c -
+install -m '${asset.mode}' -o root -g root "$asset_tmp" "${target}"
+rm -f "$asset_tmp"
+%{ endfor ~}
+
+printf '%s\n' '${runtime_secret_arn}' \
+  >"/etc/jobcron/runtime-secret-id"
+chmod 0600 /etc/jobcron/runtime-secret-id
+
+systemctl daemon-reload
+systemctl enable docker.service jobcron-recovery.timer
+systemctl start docker.service
+systemctl stop jobcron.service
