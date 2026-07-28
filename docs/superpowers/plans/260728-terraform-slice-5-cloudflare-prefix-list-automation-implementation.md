@@ -422,7 +422,7 @@ git commit -m "feat: validate Cloudflare public IPv4 input"
   `aws_vpc_security_group_ingress_rule.origin_https_from_cloudflare`.
 - Produces no Terraform output.
 
-- [ ] **Step 1: Write RED Terraform tests**
+- [x] **Step 1: Write RED Terraform tests**
 
 Use `mock_provider "aws" {}` and mock the origin data source with
 documentation-only IDs. Supply ten documentation-only IPv4 prefixes.
@@ -452,7 +452,7 @@ PATH=/opt/homebrew/bin:$PATH \
 
 Expected: FAIL because the variable and resources do not exist.
 
-- [ ] **Step 2: Add the input boundary**
+- [x] **Step 2: Add the input boundary**
 
 Declare the list with validation:
 
@@ -471,7 +471,7 @@ validation {
 The Python boundary owns semantic CIDR validation; Terraform repeats count and
 uniqueness to fail closed if a caller bypasses the script.
 
-- [ ] **Step 3: Add the exact edge HCL**
+- [x] **Step 3: Add the exact edge HCL**
 
 Use the dependency-interface data source. Configure:
 
@@ -502,7 +502,7 @@ Add the one `aws_vpc_security_group_ingress_rule` with the fields and exact tag
 from Step 1 plus `lifecycle.prevent_destroy = true`. Do not add descriptions
 that can churn or carry private identifiers.
 
-- [ ] **Step 4: Run edge tests and formatting**
+- [x] **Step 4: Run edge tests and formatting**
 
 ```sh
 PATH=/opt/homebrew/bin:$PATH \
@@ -513,7 +513,7 @@ PATH=/opt/homebrew/bin:$PATH \
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add infra/terraform/edge
@@ -537,7 +537,7 @@ git commit -m "feat: declare the Cloudflare edge allow-list"
 - Attaches only to `aws_iam_role.edge`.
 - Consumes no private resource ID in tracked HCL.
 
-- [ ] **Step 1: Write RED IAM assertions and static mutations**
+- [x] **Step 1: Write RED IAM assertions and static mutations**
 
 In Terraform tests, compare the policy document's statement action sets,
 resource patterns, tag conditions, and attachment to the exact ceiling above.
@@ -580,7 +580,7 @@ CHECK_TERRAFORM_FIXTURE_MODE=1 ./scripts/check-terraform.sh
 
 Expected: FAIL because the policy is absent.
 
-- [ ] **Step 2: Add the narrow policy**
+- [x] **Step 2: Add the narrow policy**
 
 Use `aws_iam_policy_document`; do not hand-build JSON. Add exactly
 `data "aws_caller_identity" "current" {}` and build the regional EC2 ARN
@@ -593,7 +593,7 @@ including the separate resource-scoped `GetManagedPrefixListEntries`
 statement. Use request-tag and resource-tag conditions so a similarly named
 untagged resource is outside the write boundary.
 
-- [ ] **Step 3: Bind destroy protection and the edge-only attachment**
+- [x] **Step 3: Bind destroy protection and the edge-only attachment**
 
 Add:
 
@@ -606,7 +606,7 @@ lifecycle {
 to `aws_iam_policy.edge_prefix_list`. Attach it only to
 `aws_iam_role.edge.name`.
 
-- [ ] **Step 4: Run IAM and static checks**
+- [x] **Step 4: Run IAM and static checks**
 
 ```sh
 PATH=/opt/homebrew/bin:$PATH \
@@ -618,7 +618,7 @@ CHECK_TERRAFORM_FIXTURE_MODE=1 ./scripts/check-terraform.sh
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add infra/terraform/bootstrap scripts/check-terraform.sh \
