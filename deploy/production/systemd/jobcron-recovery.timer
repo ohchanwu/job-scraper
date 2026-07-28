@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly Jobcron recovery archive
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=30m
+Unit=jobcron-recovery.service
+
+[Install]
+WantedBy=timers.target

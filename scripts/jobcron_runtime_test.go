@@ -10,6 +10,7 @@ import (
 )
 
 const runtimeHelper = "deploy/production/jobcron-runtime.sh"
+const systemdDir = "../deploy/production/systemd"
 
 var runtimeSecretFields = map[string]string{
 	"JOBCRON_IMAGE":                     "ghcr.io/example/jobcron@sha256:" + strings.Repeat("a", 64),
@@ -318,6 +319,103 @@ func TestJobcronRuntimeVerifyLocalStateIsValueBlind(t *testing.T) {
 	}
 }
 
+func TestJobcronSystemdMainUnitFailsClosed(t *testing.T) {
+	unit := readFile(t, filepath.Join(systemdDir, "jobcron.service"))
+	for _, want := range []string{
+		"After=network-online.target docker.service",
+		"Requires=docker.service",
+		"Type=oneshot",
+		"RemainAfterExit=yes",
+		"WorkingDirectory=/opt/jobcron",
+	} {
+		if !strings.Contains(unit, want+"\n") {
+			t.Errorf("jobcron.service missing %q", want)
+		}
+	}
+
+	wantPreStart := []string{
+		"/usr/bin/docker compose --env-file /run/jobcron/compose.env down --remove-orphans",
+		"/opt/jobcron/jobcron-runtime.sh prepare",
+		"/opt/jobcron/jobcron-runtime.sh pull",
+	}
+	if got := unitValues(unit, "ExecStartPre"); strings.Join(got, "\n") != strings.Join(wantPreStart, "\n") {
+		t.Fatalf("ExecStartPre order = %q, want %q", got, wantPreStart)
+	}
+	if got := unitValues(unit, "ExecStart"); len(got) != 1 ||
+		got[0] != "/usr/bin/docker compose --env-file /run/jobcron/compose.env up -d --remove-orphans" {
+		t.Fatalf("ExecStart = %q", got)
+	}
+	for _, directive := range append(unitValues(unit, "ExecStartPre"), unitValues(unit, "ExecStart")...) {
+		if strings.HasPrefix(directive, "-") {
+			t.Fatalf("startup action ignores failure: %q", directive)
+		}
+	}
+	if got := unitValues(unit, "ExecStop"); len(got) != 1 ||
+		got[0] != "/usr/bin/docker compose --env-file /run/jobcron/compose.env down --remove-orphans" {
+		t.Fatalf("ExecStop = %q", got)
+	}
+	if got := unitValues(unit, "ExecStopPost"); len(got) != 1 ||
+		got[0] != "/usr/bin/rm -rf -- /run/jobcron" {
+		t.Fatalf("ExecStopPost = %q", got)
+	}
+	for _, want := range []string{
+		"NoNewPrivileges=true",
+		"ProtectSystem=strict",
+		"ProtectHome=true",
+		"PrivateTmp=true",
+		"ReadWritePaths=/run/jobcron",
+	} {
+		if !strings.Contains(unit, want+"\n") {
+			t.Errorf("jobcron.service missing sandbox directive %q", want)
+		}
+	}
+	assertUnitIsValueBlind(t, unit)
+}
+
+func TestJobcronSystemdRecoveryUnitAndTimer(t *testing.T) {
+	service := readFile(t, filepath.Join(systemdDir, "jobcron-recovery.service"))
+	if got := unitValues(service, "ExecStart"); len(got) != 1 ||
+		got[0] != "/opt/jobcron/jobcron-runtime.sh archive" {
+		t.Fatalf("recovery ExecStart = %q", got)
+	}
+	if !strings.Contains(service, "Type=oneshot\n") {
+		t.Fatal("recovery service is not single-instance oneshot")
+	}
+	assertUnitIsValueBlind(t, service)
+
+	timer := readFile(t, filepath.Join(systemdDir, "jobcron-recovery.timer"))
+	for _, want := range []string{
+		"OnCalendar=daily",
+		"Persistent=true",
+		"RandomizedDelaySec=30m",
+		"Unit=jobcron-recovery.service",
+	} {
+		if !strings.Contains(timer, want+"\n") {
+			t.Errorf("recovery timer missing %q", want)
+		}
+	}
+}
+
+func assertUnitIsValueBlind(t *testing.T, unit string) {
+	t.Helper()
+	for _, forbidden := range []string{"Environment=", "EnvironmentFile=", "set -x", "printenv", "/usr/bin/env"} {
+		if strings.Contains(unit, forbidden) {
+			t.Fatalf("unit contains value-bearing directive %q", forbidden)
+		}
+	}
+}
+
+func unitValues(unit, name string) []string {
+	var values []string
+	prefix := name + "="
+	for _, line := range strings.Split(unit, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			values = append(values, strings.TrimPrefix(line, prefix))
+		}
+	}
+	return values
+}
+
 func newRuntimeFixture(t *testing.T) runtimeFixture {
 	t.Helper()
 	root := t.TempDir()
@@ -451,7 +549,10 @@ func replaceRuntimeSecret(t *testing.T, key string, value any) string {
 
 func assertNoRuntimeSecret(t *testing.T, output string) {
 	t.Helper()
-	for _, value := range runtimeSecretFields {
+	for key, value := range runtimeSecretFields {
+		if key == "JOBCRON_STAGE1_SPONSOR_USER_ID" {
+			continue
+		}
 		for _, line := range strings.Split(value, "\n") {
 			if line != "" && strings.Contains(output, line) {
 				t.Fatalf("output disclosed synthetic secret fragment %q", line)

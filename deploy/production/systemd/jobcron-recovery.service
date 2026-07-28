@@ -1,0 +1,24 @@
+[Unit]
+Description=Archive Jobcron recovery materials
+Wants=network-online.target
+After=network-online.target docker.service jobcron.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/jobcron
+UMask=0077
+ExecStart=/opt/jobcron/jobcron-runtime.sh archive
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/opt/jobcron /etc/jobcron
+ReadWritePaths=/run/jobcron

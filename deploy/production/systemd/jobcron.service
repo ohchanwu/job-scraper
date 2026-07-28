@@ -1,0 +1,33 @@
+[Unit]
+Description=Jobcron production stack
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/jobcron
+UMask=0077
+ExecStartPre=/usr/bin/docker compose --env-file /run/jobcron/compose.env down --remove-orphans
+ExecStartPre=/opt/jobcron/jobcron-runtime.sh prepare
+ExecStartPre=/opt/jobcron/jobcron-runtime.sh pull
+ExecStart=/usr/bin/docker compose --env-file /run/jobcron/compose.env up -d --remove-orphans
+ExecStop=/usr/bin/docker compose --env-file /run/jobcron/compose.env down --remove-orphans
+ExecStopPost=/usr/bin/rm -rf -- /run/jobcron
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/opt/jobcron /etc/jobcron
+ReadWritePaths=/run/jobcron
+
+[Install]
+WantedBy=multi-user.target
