@@ -75,6 +75,7 @@ After this slice:
 - RDS owns the master password in its own managed secret;
 - Terraform owns one empty application runtime-secret container but no value;
 - Terraform owns one private, encrypted, versioned, TLS-only recovery bucket;
+  verified objects expire after 14 days and every object expires after 90 days;
   and
 - the old EC2, old RDS, unattached reserved EIP, DNS, and Cloudflare remain
   unchanged for rollback.
@@ -109,7 +110,7 @@ Plain-language concepts:
 - Create `infra/terraform/production/secrets.tf`: empty runtime-secret
   container only.
 - Create `infra/terraform/production/recovery.tf`: protected recovery bucket
-  and its security controls.
+  and its security and retention controls.
 - Create `infra/terraform/production/tests/database.tftest.hcl`: network,
   security-group, PostgreSQL, TLS, backup, and destruction-protection tests.
 - Create `infra/terraform/production/tests/secrets.tftest.hcl`: secret
@@ -204,6 +205,7 @@ aws_s3_bucket_public_access_block.recovery
 aws_s3_bucket_versioning.recovery
 aws_s3_bucket_server_side_encryption_configuration.recovery
 aws_s3_bucket_policy.recovery
+aws_s3_bucket_lifecycle_configuration.recovery
 ```
 
 Every adopted Slice 2 address must be `["no-op"]`. No address may carry import
@@ -211,6 +213,21 @@ metadata. The checker rejects all other addresses, including every
 `aws_route`, `aws_nat_gateway`, `aws_instance`, `aws_eip`,
 `aws_eip_association`, `aws_secretsmanager_secret_version`, Cloudflare, and DNS
 address.
+
+The fixed non-private semantic tag on `aws_security_group.origin` is:
+
+```hcl
+tags = {
+  "jobcron:edge-target" = "origin-security-group"
+}
+```
+
+This plan deliberately narrows the foundation specification's older
+"tagged VPC and origin security group" wording to the origin security group
+only. Window 1 forbids updating the adopted canonical VPC. Slice 5 discovers
+the unique origin security group by the exact tag above and derives the
+canonical VPC from that group's `vpc_id`, so it needs no copied resource ID and
+no VPC tag mutation.
 
 ## Controller Setup
 
@@ -467,7 +484,11 @@ Use `mock_provider "aws" {}` and a documentation-only
 - the only database ingress rule has `from_port = 5432`,
   `to_port = 5432`, `ip_protocol = "tcp"`, and
   `referenced_security_group_id = aws_security_group.origin.id`; and
-- neither security group declares public ingress.
+- neither security group declares public ingress;
+- the origin group's entire tag map equals
+  `jobcron:edge-target = origin-security-group`;
+- the database group's tag map is empty; and
+- the canonical VPC does not receive the discovery tag.
 
 Run:
 
@@ -533,7 +554,19 @@ VPC-local route.
 Create `aws_security_group.origin` with no ingress and its normal outbound
 egress, `aws_security_group.database` with no inline ingress, and exactly one
 `aws_vpc_security_group_ingress_rule.database_postgresql_from_origin`.
-Add `prevent_destroy` to both security groups and the ingress rule.
+Add `prevent_destroy` to both security groups and the ingress rule. Add exactly
+one tag to the origin group:
+
+```hcl
+tags = {
+  "jobcron:edge-target" = "origin-security-group"
+}
+```
+
+Do not tag or update `aws_vpc.canonical`. The Step 1 tests and
+`scripts/check-terraform.sh` in Task 5 require that key/value exactly once,
+reject it on the VPC or any other resource, and reject any additional origin
+tag. This gives Slice 5 one deterministic SG-only discovery selector.
 
 - [ ] **Step 4: Write failing PostgreSQL assertions**
 
@@ -615,7 +648,7 @@ git commit -m "feat: declare the private PostgreSQL tier"
 
 - Consumes private secret and bucket names from
   `var.private_database_config`.
-- Produces the final six production allow-list addresses.
+- Produces the final seven production allow-list addresses.
 - Produces no secret version and no Terraform output.
 
 - [ ] **Step 1: Write failing secret tests**
@@ -661,10 +694,15 @@ Assert:
 - default encryption is `AES256`;
 - the policy denies `s3:*` on the bucket and objects when
   `aws:SecureTransport = false`;
-- bucket, versioning, encryption, and policy resources have
+- the lifecycle configuration has exactly two enabled rules:
+  - `expire-verified-after-off-cloud-copy` filters on
+    `macbook-copy = verified` and expires matching objects after 14 days; and
+  - `expire-all-objects` has an empty all-object filter and expires every object
+    after 90 days;
+- bucket, versioning, encryption, policy, and lifecycle resources have
   `prevent_destroy = true`; and
-- no ACL, website, public policy allow, object, or lifecycle-expiration rule is
-  declared.
+- no ACL, website, public policy allow, object, transition, noncurrent-version
+  rule, or delete-marker rule is declared.
 
 Run:
 
@@ -687,10 +725,54 @@ aws_s3_bucket_versioning.recovery
 aws_s3_bucket_server_side_encryption_configuration.recovery
 data.aws_iam_policy_document.recovery_bucket
 aws_s3_bucket_policy.recovery
+aws_s3_bucket_lifecycle_configuration.recovery
 ```
 
-The bucket starts empty. Slice 4 owns archive upload behavior; do not add
-objects, credentials, replication, or expiration policy now.
+Implement the lifecycle resource exactly:
+
+```hcl
+resource "aws_s3_bucket_lifecycle_configuration" "recovery" {
+  bucket = aws_s3_bucket.recovery.id
+
+  rule {
+    id     = "expire-verified-after-off-cloud-copy"
+    status = "Enabled"
+
+    filter {
+      tag {
+        key   = "macbook-copy"
+        value = "verified"
+      }
+    }
+
+    expiration {
+      days = 14
+    }
+  }
+
+  rule {
+    id     = "expire-all-objects"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = 90
+    }
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [aws_s3_bucket_versioning.recovery]
+}
+```
+
+The two overlapping rules are intentional: a MacBook-verified object becomes
+eligible at day 14, while every object has a hard 90-day ceiling. The bucket
+starts empty. Slice 4 owns archive upload behavior; do not add objects,
+credentials, replication, transitions, or any other expiration rule.
 
 - [ ] **Step 5: Run GREEN verification**
 
@@ -754,6 +836,8 @@ aws_nat_gateway
 aws_instance
 aws_eip or aws_eip_association
 aws_secretsmanager_secret_version
+missing aws_s3_bucket_lifecycle_configuration.recovery
+extra or differently addressed lifecycle configuration
 Cloudflare or DNS resource
 malformed JSON
 unknown mode
@@ -812,6 +896,15 @@ Require the exact resources and safety attributes from Tasks 2 through 4.
 Reject forbidden Terraform resource types repo-wide. Reject every route in the
 database route table except AWS's implicit local route by forbidding both inline
 `route` blocks and `aws_route` additions in `database.tf`.
+
+Require the origin group's entire tag map to equal exactly
+`jobcron:edge-target = origin-security-group`; reject that discovery tag on the
+canonical VPC or any other resource. Require
+`aws_s3_bucket_lifecycle_configuration.recovery`, its dependency on enabled
+versioning, `prevent_destroy`, and exactly the two reviewed rules:
+tag-filtered `macbook-copy = verified` at 14 days and all objects at 90 days.
+Reject transitions, additional expiration rules, noncurrent-version expiration,
+and delete-marker expiration.
 
 Require the workflow mapping once and forbid printing or artifact upload. The
 workflow remains `workflow_dispatch`, OIDC, masked-account, plan-only.
@@ -946,7 +1039,8 @@ upper bound, and cumulative launch total. Use 744 hours/month and include:
 20 GiB-month gp3 RDS storage
 7-day automated backup worst-case above the free allocation
 1 Secrets Manager secret
-recovery-bucket storage and requests at a conservative first-month bound
+recovery-bucket storage and requests at a conservative first-month bound,
+including 14-day verified and 90-day all-object retention
 the already approved unattached public IPv4
 the planned Slice 4 compute/storage/registry bounds already in the launch packet
 Cloudflare and all earlier approved launch costs
@@ -1090,7 +1184,7 @@ The value-blind summary must be exactly:
 
 ```text
 Bootstrap: 2 creates, 0 updates, 0 replacements, 0 destroys
-Production: 17 creates, 0 updates, 0 replacements, 0 destroys
+Production: 18 creates, 0 updates, 0 replacements, 0 destroys
 Imports: none
 NAT/routes beyond local/secret versions/EC2/EIP association/Cloudflare/DNS: none
 Old EC2/current RDS/unattached EIP/adopted public network changes: none
@@ -1099,7 +1193,7 @@ Plan digests and state bindings: recorded privately
 Independent review: APPROVED
 ```
 
-The production count is 17 because the six S3/secret addresses follow the
+The production count is 18 because the seven S3/secret addresses follow the
 eleven database/network addresses listed above.
 
 ### Task 8: Apply And Prove Recovery
@@ -1166,8 +1260,12 @@ Never call `GetSecretValue`.
 - [ ] **Step 5: Verify recovery bucket privately**
 
 Assert all public-access-block flags, `Enabled` versioning, AES256 default
-encryption, and the TLS-deny policy. Confirm the bucket is empty. Do not upload
-a test object in this creation-only slice.
+encryption, and the TLS-deny policy. Assert the enabled
+`expire-verified-after-off-cloud-copy` rule filters on
+`macbook-copy = verified` and expires at day 14; assert the enabled
+`expire-all-objects` rule applies to every object at day 90. Confirm there are
+no other lifecycle rules and the bucket is empty. Do not upload a test object
+in this creation-only slice.
 
 - [ ] **Step 6: Prove Terraform and state recovery**
 
@@ -1238,7 +1336,12 @@ Any failure stops Slice 4.
 
 Document only the resource classes and security boundaries. Do not publish
 names, IDs, CIDRs, AZs, endpoints, state versions, or plan digests. State that
-the runtime secret is empty and Slice 4 owns its first value.
+the runtime secret is empty and Slice 4 owns its first value. Record the
+14-day verified/90-day all-object recovery retention contract and the
+SG-only `jobcron:edge-target = origin-security-group` discovery contract.
+Explicitly note that the canonical VPC remains untagged because Window 1
+forbids updating the adopted VPC; Slice 5 derives the VPC from the tagged
+security group's `vpc_id`.
 
 - [ ] **Step 2: Close Slice 3 gates and activate Slice 4**
 
