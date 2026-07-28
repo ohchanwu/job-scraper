@@ -5,7 +5,7 @@
 > `superpowers:executing-plans` to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** Approved for execution under Window 1 controller policy gates
+**Status:** Complete
 
 **Goal:** Adopt the existing RDS VPC and its four-subnet public network into
 the production Terraform state, then reserve exactly one new unattached
@@ -144,9 +144,12 @@ statement with `resources == ["*"]` and exactly this set:
 ```hcl
 toset([
   "ec2:DescribeAddresses",
+  "ec2:DescribeAddressesAttribute",
   "ec2:DescribeAvailabilityZones",
   "ec2:DescribeInternetGateways",
+  "ec2:DescribeNetworkAcls",
   "ec2:DescribeRouteTables",
+  "ec2:DescribeSecurityGroups",
   "ec2:DescribeSubnetAttribute",
   "ec2:DescribeSubnets",
   "ec2:DescribeTags",
@@ -195,9 +198,12 @@ data "aws_iam_policy_document" "production_network_read" {
   statement {
     actions = [
       "ec2:DescribeAddresses",
+      "ec2:DescribeAddressesAttribute",
       "ec2:DescribeAvailabilityZones",
       "ec2:DescribeInternetGateways",
+      "ec2:DescribeNetworkAcls",
       "ec2:DescribeRouteTables",
+      "ec2:DescribeSecurityGroups",
       "ec2:DescribeSubnetAttribute",
       "ec2:DescribeSubnets",
       "ec2:DescribeTags",
@@ -1099,7 +1105,7 @@ AWS_PROFILE=jobcron-admin PATH=/opt/homebrew/bin:$PATH \
 
 Expected exit: `0`, no changes.
 
-- [ ] **Step 6: Run the protected GitHub plan**
+- [x] **Step 6: Run the protected GitHub plan**
 
 After the commits are published by the human-controlled path, dispatch
 `terraform-production-plan.yml`, approve the `production` environment, and
@@ -1147,7 +1153,7 @@ Do not commit ignored private evidence.
 - Consumes: sanitized Task 6 verification
 - Produces: completed Slice 2 archive and activates Slice 3 planning
 
-- [ ] **Step 1: Update maintained deployment truth**
+- [x] **Step 1: Update maintained deployment truth**
 
 State that Terraform now owns the canonical VPC, internet gateway, four public
 subnets, shared public route table/default route, and EIP allocation. State
@@ -1156,12 +1162,12 @@ asserted by the controller rather than owned as Terraform association
 resources. The EIP remains unattached; the old EC2 and current RDS remain
 unchanged and outside this slice's mutation scope.
 
-- [ ] **Step 2: Mark the two controller policy gates complete**
+- [x] **Step 2: Mark the two controller policy gates complete**
 
 Check only the deterministic candidate and exact-plan policy items. Do not mark
 Slice 3 CIDR selection complete.
 
-- [ ] **Step 3: Write sanitized verification**
+- [x] **Step 3: Write sanitized verification**
 
 Record:
 
@@ -1178,7 +1184,7 @@ Use digests only if they cannot reveal a private identifier. Never publish
 state object versions, plan hashes linked to private artifacts, IDs, CIDRs,
 addresses, endpoints, or raw logs.
 
-- [ ] **Step 4: Archive and activate Slice 3**
+- [x] **Step 4: Archive and activate Slice 3**
 
 Move the completed spec and plan out of active directories, update
 `docs/superpowers/README.md`, and set the roadmap status to Slice 2 complete and
@@ -1187,7 +1193,7 @@ archived documents so the archived plan links to its sibling specification and
 the archived specification links to its sibling plan or the active roadmap;
 run a local-file existence check for every changed reference link.
 
-- [ ] **Step 5: Run publication gates**
+- [x] **Step 5: Run publication gates**
 
 ```bash
 git diff --check
@@ -1201,7 +1207,7 @@ git diff --cached
 
 Manually inspect the complete staged diff for private topology or identifiers.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git commit -m "docs: complete Terraform infrastructure slice 2"
@@ -1225,6 +1231,6 @@ production plans are clean and the eight imported addresses plus the one
 created EIP address are present in the protected production state.
 
 [slice-2-spec]:
-  ../specs/260727-terraform-slice-2-canonical-vpc-eip-adoption.md
+  260727-terraform-slice-2-canonical-vpc-eip-adoption.md
 [two-window-decision]:
-  ../decisions/260727-two-window-first-production-launch-authorization.md
+  ../../decisions/260727-two-window-first-production-launch-authorization.md

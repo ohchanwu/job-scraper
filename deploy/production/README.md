@@ -1,5 +1,13 @@
 # AWS production deploy: jobcron.app
 
+## Terraform launch status
+
+Terraform now owns the adopted canonical public-network foundation and one
+unattached reserved EIP. The existing EC2 and RDS resources are unchanged.
+The remaining host, database, edge, and cutover instructions below are
+pre-launch guidance; do not execute them until their later Terraform slices
+replace the stale manual assumptions.
+
 This directory defines the first production deployment to a blank EC2 host. No
 app or Docker stack is currently deployed. Caddy is the only public entry point,
 the app uses private AWS RDS PostgreSQL, and the EC2 `.env` already holds the

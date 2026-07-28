@@ -1,5 +1,12 @@
 # Human deploy guide for jobcron.app production
 
+## Terraform launch status
+
+Terraform now owns the adopted canonical public-network foundation and one
+unattached reserved EIP. The existing EC2 and RDS resources are unchanged.
+Do not execute the remaining rollout steps yet: later Terraform slices must
+replace their stale manual-host, SSH, certificate, and cutover assumptions.
+
 This is the first deployment of the production jobcron app to a blank AWS EC2
 host. No app or Docker stack is currently deployed. The operator builds the
 approved image on a Mac, keeps AWS RDS PostgreSQL private, and lets Caddy manage

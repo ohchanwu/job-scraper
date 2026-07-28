@@ -1,6 +1,6 @@
 # Terraform Slice 2: Canonical VPC Adoption And EIP Reservation
 
-**Status:** Implementation in progress under Window 1 controller policy gates
+**Status:** Implemented and verified
 
 **Recorded:** 2026-07-27
 
@@ -281,9 +281,12 @@ objects:
 
 ```text
 ec2:DescribeAddresses
+ec2:DescribeAddressesAttribute
 ec2:DescribeAvailabilityZones
 ec2:DescribeInternetGateways
+ec2:DescribeNetworkAcls
 ec2:DescribeRouteTables
+ec2:DescribeSecurityGroups
 ec2:DescribeSubnetAttribute
 ec2:DescribeSubnets
 ec2:DescribeTags
@@ -462,12 +465,12 @@ unless inventory is ambiguous or another stop condition fires.
 - Scheduled or GitHub-driven production applies
 
 [human-spec]:
-  260726-terraform-first-production-launch-human-blocked-steps.md
+  ../../specs/260726-terraform-first-production-launch-human-blocked-steps.md
 [implementation-plan]:
-  ../plans/260727-terraform-slice-2-canonical-vpc-eip-adoption-implementation.md
+  260727-terraform-slice-2-canonical-vpc-eip-adoption-implementation.md
 [roadmap]:
-  ../plans/260726-terraform-first-production-launch-roadmap.md
+  ../../plans/260726-terraform-first-production-launch-roadmap.md
 [terraform-spec]:
-  260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md
+  ../../specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md
 [two-window-decision]:
-  ../decisions/260727-two-window-first-production-launch-authorization.md
+  ../../decisions/260727-two-window-first-production-launch-authorization.md

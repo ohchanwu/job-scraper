@@ -60,11 +60,12 @@ As recorded in the Terraform infrastructure specification:
   production stack;
 - bootstrap, production, and edge Terraform roots now use separate protected
   state keys; the bootstrap state is remote, native locking and version
-  recovery are verified, and the applied production and edge OIDC roles remain
-  state-only;
+  recovery are verified, the production OIDC role has state and narrow network
+  read access, and the edge OIDC role remains state-only;
 - static Terraform CI and the protected production plan-only workflow are
-  verified, but no replacement host, private RDS tier, canonical-network
-  adoption, or automated Cloudflare prefix-list path exists yet;
+  verified; Terraform now owns the adopted canonical public network and one
+  unattached reserved EIP, but no replacement host, private RDS tier, or
+  automated Cloudflare prefix-list path exists yet;
 - the old EC2, old VPC, and old RDS are retained rollback resources, not the
   target architecture;
 - the replacement architecture uses a canonical VPC, private PostgreSQL RDS,
@@ -162,7 +163,7 @@ access-controlled operator log.
 
 - [ ] Mayor-prepared private inventory of the existing VPC, subnets, route
       tables, EIPs, EC2, RDS, security groups, DNS records, and rollback values
-- [ ] Deterministically selected canonical VPC and public-network candidate,
+- [x] Deterministically selected canonical VPC and public-network candidate,
       plus confirmation that no existing EIP fills the reserved cutover role
 - [ ] Slice 3 non-overlapping private subnet CIDRs that pass its controller
       policy gate
@@ -216,13 +217,13 @@ Exit evidence:
 
 Window 1 controller policy gates:
 
-- [ ] Authenticated inventory selects one canonical VPC and public-network
+- [x] Authenticated inventory selects one canonical VPC and public-network
       candidate unambiguously and confirms that no existing EIP fills the
       reserved cutover role.
-- [ ] An independent reviewer approves the exact two-plan adoption packet: one
+- [x] An independent reviewer approves the exact two-plan adoption packet: one
       narrow production-network read policy plus attachment and one
       production plan with eight imports and one unattached EIP creation.
-- [ ] Machine checks prove both plans use only the explicit allow-list, contain
+- [x] Machine checks prove both plans use only the explicit allow-list, contain
       no destroy or replace action, remain within the approved spending ceiling,
       and preserve the old EC2, old RDS, routes, subnets, inherited main-route
       relationship, and rollback materials.

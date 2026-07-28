@@ -7,7 +7,7 @@ Optional AI calls extract global eligibility facts, validate user-specific dealb
 context, and enrich score explanations. The deterministic scoring path remains complete when AI
 is disabled or unavailable.
 
-This document describes the implemented architecture as of 2026-07-25. Approved future work is
+This document describes the implemented architecture as of 2026-07-28. Approved future work is
 listed separately so it is not mistaken for current behavior.
 
 ## System at a glance
@@ -405,9 +405,12 @@ the local database lifecycle; the application remains a normal host process unle
 explicitly chooses another setup.
 
 Terraform has three ownership roots. `bootstrap` owns the protected S3 state bucket, GitHub's OIDC
-provider, and the automation roles. `production` owns future AWS application infrastructure, while
-`edge` owns future Cloudflare ingress automation; neither future root currently declares
-application, network, database, or edge resources.
+provider, and the automation roles. `production` owns the canonical VPC, internet gateway, four
+public subnets, their shared main route table and default route, and one reserved Elastic IP
+allocation. The subnets continue to inherit the VPC main route table; Terraform asserts that
+relationship during controlled operations but does not own redundant route-table association
+resources. The reserved EIP remains unattached. `edge` owns future Cloudflare ingress automation.
+The old EC2 instance and current RDS instance remain unchanged and outside this ownership slice.
 
 The bootstrap root was first applied with local state and then migrated into the protected S3
 backend. All roots use separate state keys and native S3 lock files. Bucket versioning supports

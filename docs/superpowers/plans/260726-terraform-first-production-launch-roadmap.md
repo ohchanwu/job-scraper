@@ -1,7 +1,7 @@
 # Terraform-First Production Launch Implementation Roadmap
 
-**Status:** Active; Slice 1 is complete and Slice 2 is in progress under the
-approved two-window authorization
+**Status:** Active; Slices 1 and 2 are complete and Slice 3 is ready for
+specification and planning under the approved two-window authorization
 
 **Recorded:** 2026-07-26
 
@@ -96,21 +96,21 @@ Delivers:
 
 ### Slice 2: Canonical VPC Adoption And EIP Reservation
 
-**Specification:** [Slice 2 adoption specification][slice-2-spec]
+**Specification:** [Archived Slice 2 adoption specification][slice-2-spec]
 
-**Implementation plan:** [Slice 2 implementation plan][slice-2-plan]
+**Implementation plan:** [Archived Slice 2 implementation plan][slice-2-plan]
 
-**Status:** Implementation in progress under Window 1 controller policy gates
+**Verification:** [Slice 2 verification][slice-2-verification]
 
-Will inventory the existing network privately, select the canonical VPC, import
-its eight policy-compliant public-network objects, and create one unattached EIP
-without replacing or reconfiguring live resources. An unambiguous candidate
-and compliant two-plan packet proceed after independent review; ambiguity
-returns to the human.
+**Status:** Complete at implementation baseline `19865f9db16b`
+
+Terraform owns the eight approved public-network objects and one unattached
+reserved EIP. Local and protected production plans are clean, and existing
+production and rollback resources were not replaced or deleted.
 
 ### Slice 3: Private Database Tier And Secret Containers
 
-**Status:** Plan only after the adoption plan is clean
+**Status:** Ready for specification and planning
 
 Will create private database subnets, security groups, encrypted PostgreSQL RDS,
 the recovery bucket, and an empty runtime-secret container without putting a
@@ -169,8 +169,10 @@ the rollback window.
 [slice-1-verification]:
   ../archive/2026-07-26-terraform-slice-1/260726-terraform-slice-1-verification.md
 [slice-2-spec]:
-  ../specs/260727-terraform-slice-2-canonical-vpc-eip-adoption.md
+  ../archive/2026-07-27-terraform-slice-2/260727-terraform-slice-2-canonical-vpc-eip-adoption.md
 [slice-2-plan]:
-  260727-terraform-slice-2-canonical-vpc-eip-adoption-implementation.md
+  ../archive/2026-07-27-terraform-slice-2/260727-terraform-slice-2-canonical-vpc-eip-adoption-implementation.md
+[slice-2-verification]:
+  ../archive/2026-07-27-terraform-slice-2/260727-terraform-slice-2-verification.md
 [terraform-spec]:
   ../specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md
