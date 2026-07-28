@@ -201,9 +201,12 @@ data "aws_iam_policy_document" "production_network_read" {
   statement {
     actions = [
       "ec2:DescribeAddresses",
+      "ec2:DescribeAddressesAttribute",
       "ec2:DescribeAvailabilityZones",
       "ec2:DescribeInternetGateways",
+      "ec2:DescribeNetworkAcls",
       "ec2:DescribeRouteTables",
+      "ec2:DescribeSecurityGroups",
       "ec2:DescribeSubnetAttribute",
       "ec2:DescribeSubnets",
       "ec2:DescribeTags",

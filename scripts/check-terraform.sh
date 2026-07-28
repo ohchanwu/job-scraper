@@ -141,9 +141,12 @@ done
 
 expected_policy_tokens="$(printf '%s\n' \
   '"ec2:DescribeAddresses"' \
+  '"ec2:DescribeAddressesAttribute"' \
   '"ec2:DescribeAvailabilityZones"' \
   '"ec2:DescribeInternetGateways"' \
+  '"ec2:DescribeNetworkAcls"' \
   '"ec2:DescribeRouteTables"' \
+  '"ec2:DescribeSecurityGroups"' \
   '"ec2:DescribeSubnetAttribute"' \
   '"ec2:DescribeSubnets"' \
   '"ec2:DescribeTags"' \
