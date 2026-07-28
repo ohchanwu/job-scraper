@@ -212,6 +212,7 @@ for policy_token in \
 done
 
 identity_file="$repo_root/infra/terraform/bootstrap/identity.tf"
+edge_file="$repo_root/infra/terraform/edge/cloudflare.tf"
 
 grep -Fq \
   'repo:${var.github_repository}:environment:production' \
@@ -237,10 +238,18 @@ fi
 
 require_resource_prevent_destroy \
   aws_iam_policy production_slice3_read "$identity_file"
+require_resource_prevent_destroy \
+  aws_iam_policy edge_prefix_list "$identity_file"
+require_resource_prevent_destroy \
+  aws_ec2_managed_prefix_list cloudflare_ipv4 "$edge_file"
+require_resource_prevent_destroy \
+  aws_vpc_security_group_ingress_rule \
+  origin_https_from_cloudflare "$edge_file"
 
-identity_without_slice3="$(
+identity_without_slice3_or_edge="$(
   awk '
-    $0 == "data \"aws_iam_policy_document\" \"production_slice3_read\" {" {
+    $0 == "data \"aws_iam_policy_document\" \"production_slice3_read\" {" ||
+    $0 == "data \"aws_iam_policy_document\" \"edge_prefix_list\" {" {
       skip = 1
       depth = 1
       next
@@ -257,7 +266,7 @@ identity_without_slice3="$(
   ' "$identity_file"
 )"
 for forbidden in '"rds:' '"iam:' '"secretsmanager:'; do
-  if grep -Fiq "$forbidden" <<<"$identity_without_slice3"; then
+  if grep -Fiq "$forbidden" <<<"$identity_without_slice3_or_edge"; then
     printf 'Slice 1 identity policy contains forbidden action: %s\n' \
       "$forbidden" >&2
     exit 1
@@ -359,10 +368,134 @@ expected_policy_tokens="$(printf '%s\n' \
   '"sts:AssumeRoleWithWebIdentity"' '"sts:AssumeRoleWithWebIdentity"' |
   sort)"
 actual_policy_tokens="$(
-  grep -Eo '"[a-z0-9]+:[A-Za-z*]+"' <<<"$identity_without_slice3" | sort
+  grep -Eo '"[a-z0-9]+:[A-Za-z*]+"' \
+    <<<"$identity_without_slice3_or_edge" | sort
 )"
 if [[ "$actual_policy_tokens" != "$expected_policy_tokens" ]]; then
   printf 'Slice 2 network read policy actions differ from the approved ceiling.\n' >&2
+  exit 1
+fi
+
+edge_policy_block="$(
+  awk '
+    $0 == "data \"aws_iam_policy_document\" \"edge_prefix_list\" {" {
+      found = 1
+      depth = 1
+      print
+      next
+    }
+    found {
+      print
+      line = $0
+      depth += gsub(/\{/, "{", line) - gsub(/\}/, "}", line)
+      if (depth == 0) {
+        exit
+      }
+    }
+  ' "$identity_file"
+)"
+expected_edge_actions="$(printf '%s\n' \
+  'ec2:AuthorizeSecurityGroupIngress' \
+  'ec2:CreateManagedPrefixList' \
+  'ec2:CreateTags' \
+  'ec2:CreateTags' \
+  'ec2:DescribeManagedPrefixLists' \
+  'ec2:DescribeSecurityGroupRules' \
+  'ec2:DescribeSecurityGroups' \
+  'ec2:DescribeTags' \
+  'ec2:GetManagedPrefixListEntries' \
+  'ec2:ModifyManagedPrefixList' |
+  sort)"
+actual_edge_actions="$(
+  awk '
+    /^[[:space:]]*actions[[:space:]]*=[[:space:]]*\[[[:space:]]*$/ {
+      in_actions = 1
+      next
+    }
+    in_actions && /^[[:space:]]*"ec2:[A-Za-z*]+"[,]?[[:space:]]*$/ {
+      action = $0
+      sub(/^[[:space:]]*"/, "", action)
+      sub(/"[,]?[[:space:]]*$/, "", action)
+      print action
+      next
+    }
+    in_actions && /^[[:space:]]*\][[:space:]]*$/ {
+      in_actions = 0
+      next
+    }
+    /^[[:space:]]*actions[[:space:]]*=[[:space:]]*\["ec2:[A-Za-z*]+"\][[:space:]]*$/ {
+      action = $0
+      sub(/^.*\["/, "", action)
+      sub(/"\].*$/, "", action)
+      print action
+    }
+  ' <<<"$edge_policy_block" |
+    sort
+)"
+edge_contract_tokens="$(printf '%s\n' \
+  '    resources = ["*"]' \
+  '    resources = [local.edge_prefix_list_arn]' \
+  '    resources = [local.edge_prefix_list_arn]' \
+  '    resources = [local.edge_prefix_list_arn]' \
+  '    resources = [local.edge_prefix_list_arn]' \
+  '    resources = [local.edge_security_group_arn]' \
+  '    resources = [local.edge_security_group_rule_arn]' \
+  '      variable = "aws:ResourceTag/jobcron:edge-source"' \
+  '      variable = "aws:ResourceTag/jobcron:edge-source"' \
+  '      variable = "aws:RequestTag/jobcron:edge-source"' \
+  '      variable = "aws:ResourceTag/jobcron:edge-target"' \
+  '      variable = "aws:RequestTag/jobcron:edge-rule"' \
+  '      variable = "aws:TagKeys"' \
+  '      variable = "aws:TagKeys"' \
+  '      variable = "aws:TagKeys"' \
+  '      variable = "aws:TagKeys"' \
+  '      variable = "ec2:CreateAction"' \
+  '      variable = "ec2:CreateAction"' \
+  '      values   = ["cloudflare-ipv4"]' \
+  '      values   = ["cloudflare-ipv4"]' \
+  '      values   = ["cloudflare-ipv4"]' \
+  '      values   = ["origin-security-group"]' \
+  '      values   = ["origin-https-from-cloudflare"]' \
+  '      values   = ["jobcron:edge-source"]' \
+  '      values   = ["jobcron:edge-source"]' \
+  '      values   = ["jobcron:edge-rule"]' \
+  '      values   = ["jobcron:edge-rule"]' \
+  '      values   = ["CreateManagedPrefixList"]' \
+  '      values   = ["AuthorizeSecurityGroupIngress"]' |
+  sort)"
+actual_edge_contract_tokens="$(
+  grep -E \
+    '^[[:space:]]+(resources|variable|values)[[:space:]]*=' \
+    <<<"$edge_policy_block" |
+    sort
+)"
+if [[ "$actual_edge_actions" != "$expected_edge_actions" ]] ||
+   [[ "$actual_edge_contract_tokens" != "$edge_contract_tokens" ]] ||
+   ! grep -Fq \
+     'role       = aws_iam_role.edge.name' \
+     <(
+       awk '
+         $0 == "resource \"aws_iam_role_policy_attachment\" \"edge_prefix_list\" {" {
+           found = 1
+           depth = 1
+           print
+           next
+         }
+         found {
+           print
+           line = $0
+           depth += gsub(/\{/, "{", line) - gsub(/\}/, "}", line)
+           if (depth == 0) exit
+         }
+       ' "$identity_file"
+     ); then
+  printf 'Slice 5 edge policy contract changed\n' >&2
+  exit 1
+fi
+
+if grep -Eq '^[[:space:]]*output[[:space:]]+"' \
+  "$repo_root/infra/terraform/edge/"*.tf; then
+  printf 'Slice 5 edge root must not expose outputs\n' >&2
   exit 1
 fi
 

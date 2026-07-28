@@ -277,3 +277,139 @@ resource "aws_iam_role_policy_attachment" "production_slice3_read" {
   role       = aws_iam_role.production.name
   policy_arn = aws_iam_policy.production_slice3_read.arn
 }
+
+data "aws_caller_identity" "current" {}
+
+locals {
+  edge_prefix_list_arn = (
+    "arn:aws:ec2:ap-northeast-2:${data.aws_caller_identity.current.account_id}:prefix-list/*"
+  )
+  edge_security_group_arn = (
+    "arn:aws:ec2:ap-northeast-2:${data.aws_caller_identity.current.account_id}:security-group/*"
+  )
+  edge_security_group_rule_arn = (
+    "arn:aws:ec2:ap-northeast-2:${data.aws_caller_identity.current.account_id}:security-group-rule/*"
+  )
+}
+
+data "aws_iam_policy_document" "edge_prefix_list" {
+  statement {
+    actions = [
+      "ec2:DescribeManagedPrefixLists",
+      "ec2:DescribeSecurityGroups",
+      "ec2:DescribeSecurityGroupRules",
+      "ec2:DescribeTags",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    actions   = ["ec2:GetManagedPrefixListEntries"]
+    resources = [local.edge_prefix_list_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/jobcron:edge-source"
+      values   = ["cloudflare-ipv4"]
+    }
+  }
+
+  statement {
+    actions   = ["ec2:CreateManagedPrefixList"]
+    resources = [local.edge_prefix_list_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/jobcron:edge-source"
+      values   = ["cloudflare-ipv4"]
+    }
+
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "aws:TagKeys"
+      values   = ["jobcron:edge-source"]
+    }
+  }
+
+  statement {
+    actions   = ["ec2:ModifyManagedPrefixList"]
+    resources = [local.edge_prefix_list_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/jobcron:edge-source"
+      values   = ["cloudflare-ipv4"]
+    }
+  }
+
+  statement {
+    actions   = ["ec2:AuthorizeSecurityGroupIngress"]
+    resources = [local.edge_security_group_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/jobcron:edge-target"
+      values   = ["origin-security-group"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/jobcron:edge-rule"
+      values   = ["origin-https-from-cloudflare"]
+    }
+
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "aws:TagKeys"
+      values   = ["jobcron:edge-rule"]
+    }
+  }
+
+  statement {
+    actions   = ["ec2:CreateTags"]
+    resources = [local.edge_prefix_list_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:CreateAction"
+      values   = ["CreateManagedPrefixList"]
+    }
+
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "aws:TagKeys"
+      values   = ["jobcron:edge-source"]
+    }
+  }
+
+  statement {
+    actions   = ["ec2:CreateTags"]
+    resources = [local.edge_security_group_rule_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:CreateAction"
+      values   = ["AuthorizeSecurityGroupIngress"]
+    }
+
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "aws:TagKeys"
+      values   = ["jobcron:edge-rule"]
+    }
+  }
+}
+
+resource "aws_iam_policy" "edge_prefix_list" {
+  name   = "JobcronTerraformEdgePrefixList"
+  policy = data.aws_iam_policy_document.edge_prefix_list.json
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "edge_prefix_list" {
+  role       = aws_iam_role.edge.name
+  policy_arn = aws_iam_policy.edge_prefix_list.arn
+}
