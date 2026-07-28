@@ -160,6 +160,33 @@ run "private_database_network_contract" {
   }
 
   assert {
+    condition = length(regexall(
+      "resource\\s+\"aws_route\"\\s+\"",
+      file("${path.module}/database.tf")
+    )) == 0
+    error_message = "The private database network must not declare an aws_route resource."
+  }
+
+  assert {
+    condition = alltrue([
+      for declaration in [
+        "aws_subnet\" \"database\" {",
+        "aws_route_table\" \"database\" {",
+        "aws_security_group\" \"origin\" {",
+        "aws_security_group\" \"database\" {",
+        "aws_vpc_security_group_ingress_rule\" \"database_postgresql_from_origin\" {",
+        "aws_db_instance\" \"production\" {",
+        ] : length([
+          for block in split("resource \"", file("${path.module}/database.tf")) : block
+          if startswith(block, declaration) &&
+          strcontains(block, "lifecycle {") &&
+          strcontains(block, "prevent_destroy = true")
+      ]) == 1
+    ])
+    error_message = "All six protected database resources must retain prevent_destroy."
+  }
+
+  assert {
     condition     = toset(keys(aws_subnet.database)) == toset(["database_a", "database_b"])
     error_message = "The database subnet addresses must remain stable."
   }
