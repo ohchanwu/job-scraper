@@ -1,7 +1,6 @@
 # Pre-Batch-1 Window 1 Authorization Contract
 
-**Status:** Active; five human decision groups are approved and one remains
-open
+**Status:** Active; all six human decision groups are approved
 
 **Recorded:** 2026-07-28
 
@@ -16,8 +15,8 @@ authorization][two-window]
 
 Convert the public-safe answers in the pre-Batch-1 checklist into an exact
 execution contract for Mayor/Gas Town. This document defines what the answers
-authorize, what they do not authorize, which remaining human action blocks
-Batch 1, and when execution must stop.
+authorize, what they do not authorize, which conditional human actions may
+remain during Batch 1, and when execution must stop.
 
 Tracked documentation is public. This contract records only decision classes,
 limits, and completion states. Credentials, cloud identifiers, personal data,
@@ -141,7 +140,7 @@ manager. After the human confirms retrieval, Mayor removes the temporary
 handoff file and records only pass/fail evidence. The value must never pass
 through chat or a tracked file.
 
-## Remaining Human Gate
+### 6. Production Profile And Private Password Path
 
 The ignored local production profile exists at:
 
@@ -149,27 +148,20 @@ The ignored local production profile exists at:
 .superpowers/profile/jobcron-profile.md
 ```
 
-Its contents were not inspected for this public contract. The checklist does
-not yet confirm:
+Its contents were not inspected for this public contract. The human confirmed
+that the profile was verified locally, any required correction was confined to
+that ignored file, and the production password will be supplied or generated
+through a private path.
 
-1. whether the profile remains current;
-2. whether any required corrections were made only in that ignored file; or
-3. whether the production password will be supplied or generated through a
-   private path.
+This completes the final human-input gate. No profile value, owner identity,
+password, API key, signup code, or sponsor identifier may be copied into the
+tracked checklist, this contract, Terraform input, logs, issues, or chat.
 
-Batch 1 is not fully authorized until the human records a public-safe
-completion state for those three items in Section 6 of the checklist. The human
-operator is the approver. If the profile is current, the safe response is
-`Reuse ignored local profile unchanged: yes`. If it is not current, the human
-updates only the ignored file and records only that the private correction is
-complete. No profile value, owner identity, password, API key, signup code, or
-sponsor identifier may be copied into the tracked checklist or this contract.
+## Mayor/Gas Town Batch 1 Authority
 
-## Mayor/Gas Town Authority After The Remaining Gate
-
-Once the profile gate is complete and Slice 2 passes its exit checkpoint,
-Mayor/Gas Town may execute Batch 1 without per-plan human approval when every
-saved plan:
+Slice 2 has passed its exit checkpoint and all six human decision groups are
+complete. Mayor/Gas Town may therefore prepare and execute Batch 1 without
+per-plan human approval when every saved plan:
 
 - passes independent review;
 - contains no destroy or replace action;
@@ -233,7 +225,8 @@ cutover packet.
 
 Execution stops and returns to the human if:
 
-1. the production-profile gate remains incomplete when Batch 1 would start;
+1. the production profile is missing, no longer current, or cannot be consumed
+   without exposing a private value;
 2. a plan has an unexpected address, create, update, destroy, or replacement;
 3. the aggregate cost may exceed either approved ceiling;
 4. live discovery is ambiguous or differs from the reviewed assumptions;
@@ -249,11 +242,11 @@ Execution stops and returns to the human if:
 
 ## Acceptance Criteria
 
-This contract is ready to activate only when:
+This contract remains active only while:
 
-1. all five approved decision groups above match the checklist;
-2. the three production-profile items are marked complete without publishing
-   their values;
+1. all six approved decision groups above match the checklist;
+2. the production profile remains current and its password path remains
+   private;
 3. Slice 2's protected production plan and exit evidence pass;
 4. every Batch 1 implementation plan cites this contract and defines an exact
    action allow-list;

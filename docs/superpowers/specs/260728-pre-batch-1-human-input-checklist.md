@@ -1,6 +1,6 @@
 # Pre-Batch-1 Human Input Checklist
 
-**Status:** Partially complete; production-profile confirmation remains open
+**Status:** Complete; all six human decision groups are approved
 
 **Recorded:** 2026-07-28
 
@@ -206,10 +206,10 @@ Human can retrieve during recovery: yes
 
 ### 6. Existing Production Profile Reuse
 
-- [ ] Human confirms whether the ignored local production profile remains
+- [x] Human confirms whether the ignored local production profile remains
       current
-- [ ] Any required corrections are made only in the ignored local profile
-- [ ] Production password will be entered or generated through a private path
+- [x] Any required corrections are made only in the ignored local profile
+- [x] Production password will be entered or generated through a private path
 
 **Why it is needed:** The owner account and production settings must be known
 before data import and browser verification. Their values are private and do
@@ -234,8 +234,8 @@ code, or sponsor identifier.
 **Human response:**
 
 ```text
-Reuse ignored local profile unchanged:
-If no, profile will be corrected privately on the Mac:
+Reuse ignored local profile unchanged: Confirmed privately
+If no, profile will be corrected privately on the Mac: Confirmed privately
 ```
 
 ## Private Human Actions
@@ -244,8 +244,7 @@ These actions may be completed at work, but only the completion state may be
 recorded here. Never copy the underlying value into Git.
 
 - [x] Cloudflare access is ready, or the human knows how they will grant it
-      privately when requested.
-      - **OF** To execute batch 1 autonomously, if you need me to grant you
+      privately when requested. - **OF** To execute batch 1 autonomously, if you need me to grant you
       (the agent) access to my Cloudflare resources, then this item is not
       complete and you should request such access. On the other hand, if you
       do not require access to my Cloudflare resources to execute batch 1
@@ -253,8 +252,7 @@ recorded here. Never copy the underlying value into Git.
       up the requisite Cloudflare resources after batch 1 and before batch 2,
       then this item is complete.
 - [x] Registry access is ready, or the human knows how they will restore it
-      privately when requested.
-      - **OF** As I understand it, a GHCR is ready by default automatically
+      privately when requested. - **OF** As I understand it, a GHCR is ready by default automatically
       under my personal account. If, for some reason, you need it to be an
       organization account, let me know. Also, I believe that, inside a
       GH Actions workflow, a GH Personal Access Token isn't even required.
@@ -317,11 +315,7 @@ Completion of this checklist is standing authority only for the approved
 Window 1 scope. It does not authorize EIP attachment, DNS changes, public
 traffic, deletion of rollback resources, or closure of the rollback window.
 
-[human-steps]:
-  260726-terraform-first-production-launch-human-blocked-steps.md
-[contract]:
-  260728-pre-batch-1-window-1-authorization-contract.md
-[roadmap]:
-  ../plans/260726-terraform-first-production-launch-roadmap.md
-[two-window]:
-  ../decisions/260727-two-window-first-production-launch-authorization.md
+[human-steps]: 260726-terraform-first-production-launch-human-blocked-steps.md
+[contract]: 260728-pre-batch-1-window-1-authorization-contract.md
+[roadmap]: ../plans/260726-terraform-first-production-launch-roadmap.md
+[two-window]: ../decisions/260727-two-window-first-production-launch-authorization.md
