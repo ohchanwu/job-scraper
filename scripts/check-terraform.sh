@@ -403,7 +403,8 @@ if [[ "$private_database_mapping_count" -ne 1 ||
     >&2
   exit 1
 fi
-if grep -Eq '^[[:space:]]*(env|printenv)[[:space:]]*$' \
+if grep -Eq \
+  '^[[:space:]]*(env|printenv)([[:space:]]|[|;&]|$)' \
   "$production_workflow"; then
   printf 'production workflow must map but never print private network config\n' \
     >&2

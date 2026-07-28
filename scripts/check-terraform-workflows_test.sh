@@ -326,6 +326,33 @@ expect_rejected "bare printenv environment dump" \
   "production workflow must map but never print private network config" \
   insert_into_first_run_block "$production_workflow" \
   '          printenv' || failures=$((failures + 1))
+expect_rejected "piped env environment dump" \
+  "production workflow must map but never print private network config" \
+  insert_into_first_run_block "$production_workflow" \
+  '          env | sort' || failures=$((failures + 1))
+expect_rejected "piped printenv environment dump" \
+  "production workflow must map but never print private network config" \
+  insert_into_first_run_block "$production_workflow" \
+  '          printenv | sed -n '\''1,10p'\''' || failures=$((failures + 1))
+expect_rejected "argument printenv environment dump" \
+  "production workflow must map but never print private network config" \
+  insert_into_first_run_block "$production_workflow" \
+  '          printenv PATH' ||
+  failures=$((failures + 1))
+expect_rejected "argument env environment dump" \
+  "production workflow must map but never print private network config" \
+  insert_into_first_run_block "$production_workflow" \
+  '          env -0' || failures=$((failures + 1))
+
+reset_fixtures
+insert_into_first_run_block "$production_workflow" \
+  '          printf '\''env | sort is forbidden\n'\'''
+if ! run_checker; then
+  printf 'FAIL: rejected ordinary text containing env command words\n' >&2
+  failures=$((failures + 1))
+else
+  printf 'PASS: accepted ordinary text containing env command words\n'
+fi
 expect_rejected "uploaded production plan artifact" \
   "production workflow must not publish Terraform plan artifacts" \
   sh -c 'printf "\n      - uses: actions/upload-artifact@0000000000000000000000000000000000000000\n" >>"$1"' \
