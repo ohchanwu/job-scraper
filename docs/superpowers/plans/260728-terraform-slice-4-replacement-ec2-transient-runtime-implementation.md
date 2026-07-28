@@ -257,7 +257,7 @@ non-sensitive output.
   `release_sha`. The workflow emits no digest; Task 10 resolves it privately
   and creates `image.json`.
 
-- [ ] **Step 1: Write RED mutation tests**
+- [x] **Step 1: Write RED mutation tests**
 
 The shell test copies the workflow to a temporary directory and proves the
 checker rejects each mutation:
@@ -284,7 +284,7 @@ sh scripts/check-production-image-workflow_test.sh
 
 Expected: FAIL because the checker does not exist.
 
-- [ ] **Step 2: Implement the smallest workflow**
+- [x] **Step 2: Implement the smallest workflow**
 
 The workflow must:
 
@@ -315,7 +315,7 @@ the controller authenticates privately, resolves the immutable commit tag to a
 digest, verifies one `linux/arm64` manifest, and writes the digest only to the
 ignored mode-`0600` `image.json`.
 
-- [ ] **Step 3: Make the checker GREEN**
+- [x] **Step 3: Make the checker GREEN**
 
 Run:
 
@@ -326,7 +326,7 @@ sh scripts/check-production-image-workflow.sh
 
 Expected: all mutations rejected and the real workflow accepted.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add .github/workflows/ci.yml \
@@ -353,7 +353,7 @@ git commit -m "ci: add private arm64 image publication contract"
 - Produces: private `app:7777`, Caddy TLS on container port `443`, no host
   publication in Slice 4, and local JSON-file log rotation.
 
-- [ ] **Step 1: Add RED Compose tests**
+- [x] **Step 1: Add RED Compose tests**
 
 Add focused tests proving:
 
@@ -378,7 +378,7 @@ go test ./deploy/production -run 'TestProductionCompose' -count=1
 Expected: FAIL on the current tag, persistent input, public-port, and Caddy
 contracts.
 
-- [ ] **Step 2: Apply the minimal Compose/Caddy changes**
+- [x] **Step 2: Apply the minimal Compose/Caddy changes**
 
 Keep the two existing services and volumes needed for Caddy state. Use an
 internal Docker network for the app, bind the app only to
@@ -391,7 +391,7 @@ The `.env.example` remains synthetic test input and states that production
 systemd uses `/run/jobcron/compose.env`; it must contain no command that copies
 the example to persistent `.env`.
 
-- [ ] **Step 3: Run GREEN checks**
+- [x] **Step 3: Run GREEN checks**
 
 ```sh
 go test ./deploy/production -run 'TestProductionCompose' -count=1
@@ -401,7 +401,7 @@ docker compose -f deploy/production/compose.yaml \
 
 Expected: PASS with synthetic values and no private output.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add deploy/production/Caddyfile \
@@ -427,7 +427,7 @@ git commit -m "deploy: require transient digest-only production runtime"
 - Produces: `/run/jobcron/compose.env`, Origin CA files, one digest pull,
   immutable recovery objects, and presence-only verification.
 
-- [ ] **Step 1: Write RED fake-command tests**
+- [x] **Step 1: Write RED fake-command tests**
 
 Use temporary fake `aws`, `docker`, `pg_dump`, `sha256sum`, and `jq` commands.
 Tests must prove:
@@ -457,7 +457,7 @@ go test ./scripts -run 'TestJobcronRuntime' -count=1
 
 Expected: FAIL because the runtime helper does not exist.
 
-- [ ] **Step 2: Implement four subcommands**
+- [x] **Step 2: Implement four subcommands**
 
 `prepare` fetches the one secret with `aws secretsmanager get-secret-value`,
 reading its private identifier from `/etc/jobcron/runtime-secret-id`, extracts
@@ -482,7 +482,7 @@ and logs before their manifests, then uploads manifests last.
 Docker log settings, current/previous digest count, and disk free bytes without
 printing values.
 
-- [ ] **Step 3: Run GREEN and syntax checks**
+- [x] **Step 3: Run GREEN and syntax checks**
 
 ```sh
 sh -n deploy/production/jobcron-runtime.sh
@@ -491,7 +491,7 @@ go test ./scripts -run 'TestJobcronRuntime' -count=1
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add .github/workflows/ci.yml \
@@ -516,7 +516,7 @@ git commit -m "deploy: add value-blind transient runtime helper"
 - Produces: stopped-before-prepare application lifecycle and a nightly archive
   attempt.
 
-- [ ] **Step 1: Add RED unit tests**
+- [x] **Step 1: Add RED unit tests**
 
 Parse the units as text and prove:
 
@@ -537,7 +537,7 @@ go test ./scripts -run 'TestJobcronSystemd' -count=1
 
 Expected: FAIL because the units do not exist.
 
-- [ ] **Step 2: Implement the units**
+- [x] **Step 2: Implement the units**
 
 Use `Type=oneshot` and `RemainAfterExit=yes` for the stack. The order is:
 
@@ -556,7 +556,7 @@ The recovery timer runs nightly, catches a sleeping/rebooted host with
 `Persistent=true`, adds `RandomizedDelaySec=30m`, and uses the service's
 single-instance systemd semantics.
 
-- [ ] **Step 3: Run GREEN checks**
+- [x] **Step 3: Run GREEN checks**
 
 ```sh
 go test ./scripts -run 'TestJobcron(Systemd|Runtime)' -count=1
@@ -564,7 +564,7 @@ go test ./scripts -run 'TestJobcron(Systemd|Runtime)' -count=1
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add deploy/production/systemd scripts/jobcron_runtime_test.go
@@ -588,7 +588,7 @@ git commit -m "deploy: add fail-closed production systemd units"
 - Produces: the eight allow-listed Terraform resources and sensitive Session
   Manager selectors.
 
-- [ ] **Step 1: Write RED Terraform tests**
+- [x] **Step 1: Write RED Terraform tests**
 
 Use `mock_provider "aws"` and synthetic overrides. Assert:
 
@@ -636,7 +636,7 @@ terraform -chdir=infra/terraform/production test \
 
 Expected: FAIL because the compute resources do not exist.
 
-- [ ] **Step 2: Implement the minimum Terraform**
+- [x] **Step 2: Implement the minimum Terraform**
 
 Use `data "aws_ssm_parameter"` for the AL2023 arm64 public parameter, not a
 hard-coded AMI ID or a broad newest-image search.
@@ -685,7 +685,7 @@ vpc_security_group_ids = [aws_security_group.origin.id]
 Do not create a replacement security group or duplicate the existing database
 ingress rule.
 
-- [ ] **Step 3: Run GREEN Terraform gates**
+- [x] **Step 3: Run GREEN Terraform gates**
 
 ```sh
 terraform -chdir=infra/terraform/production fmt -check -recursive
@@ -696,7 +696,7 @@ terraform -chdir=infra/terraform/production test \
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add infra/terraform/production
@@ -719,7 +719,7 @@ git commit -m "infra: define the narrow replacement production host"
 - Produces: one lower-privilege application role, verified local archives, and
   `macbook-copy=verified` object tags.
 
-- [ ] **Step 1: Write RED fake-command tests**
+- [x] **Step 1: Write RED fake-command tests**
 
 Prove:
 
@@ -745,7 +745,7 @@ go test ./scripts -run 'TestProductionPrivateOps' -count=1
 
 Expected: FAIL because the helpers do not exist.
 
-- [ ] **Step 2: Implement value-blind helpers**
+- [x] **Step 2: Implement value-blind helpers**
 
 The operator opens the SSM tunnel separately:
 
@@ -768,7 +768,7 @@ only in `runtime-secret.json`.
 copies missing objects to the private Mac directory, verifies SHA-256 manifests,
 and tags verified objects. It does not delete local or remote data.
 
-- [ ] **Step 3: Run GREEN checks**
+- [x] **Step 3: Run GREEN checks**
 
 ```sh
 sh -n scripts/production-rds-role.sh
@@ -778,7 +778,7 @@ go test ./scripts -run 'TestProductionPrivateOps' -count=1
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add .github/workflows/ci.yml \
@@ -803,7 +803,7 @@ git commit -m "ops: add private RDS and recovery verification helpers"
 - Produces: a value-blind pass/fail result for the exact Slice 4 controller
   gate.
 
-- [ ] **Step 1: Write RED synthetic mutations**
+- [x] **Step 1: Write RED synthetic mutations**
 
 Start from one accepted synthetic plan with five resource creates and the one
 approved sensitive output create. Prove rejection of:
@@ -833,7 +833,7 @@ sh scripts/check-terraform-slice-4-plan_test.sh
 
 Expected: FAIL because the checker does not exist.
 
-- [ ] **Step 2: Implement one `jq`-based checker**
+- [x] **Step 2: Implement one `jq`-based checker**
 
 Usage:
 
@@ -848,7 +848,7 @@ aggregate ceilings, required categories, 24-hour freshness, and a clean Slice
 fragments, output values, addresses containing resolved private selectors, or
 cost-source URLs.
 
-- [ ] **Step 3: Run GREEN checks**
+- [x] **Step 3: Run GREEN checks**
 
 ```sh
 sh scripts/check-terraform-slice-4-plan_test.sh
@@ -856,7 +856,7 @@ sh scripts/check-terraform-slice-4-plan_test.sh
 
 Expected: all unsafe mutations rejected and the accepted fixture passes.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add .github/workflows/ci.yml \
