@@ -75,8 +75,9 @@ After this slice:
 - RDS owns the master password in its own managed secret;
 - Terraform owns one empty application runtime-secret container but no value;
 - Terraform owns one private, encrypted, versioned, TLS-only recovery bucket;
-  verified objects expire after 14 days and every object expires after 90 days;
-  and
+  verified current versions expire after 14 days, every current version expires
+  after 90 days, and the resulting noncurrent data version expires one day
+  later; and
 - the old EC2, old RDS, unattached reserved EIP, DNS, and Cloudflare remain
   unchanged for rollback.
 
@@ -696,13 +697,17 @@ Assert:
   `aws:SecureTransport = false`;
 - the lifecycle configuration has exactly two enabled rules:
   - `expire-verified-after-off-cloud-copy` filters on
-    `macbook-copy = verified` and expires matching objects after 14 days; and
-  - `expire-all-objects` has an empty all-object filter and expires every object
-    after 90 days;
+    `macbook-copy = verified` and expires matching current versions after 14
+    days; and
+  - `expire-all-objects` has an empty all-object filter and expires every
+    current version after 90 days;
 - bucket, versioning, encryption, policy, and lifecycle resources have
   `prevent_destroy = true`; and
-- no ACL, website, public policy allow, object, transition, noncurrent-version
-  rule, or delete-marker rule is declared.
+- each reviewed rule permanently expires a resulting noncurrent data version
+  after one day; and
+- no ACL, website, public policy allow, object, transition, additional
+  lifecycle rule, `newer_noncurrent_versions`, or delete-marker rule is
+  declared.
 
 Run:
 
@@ -748,6 +753,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "recovery" {
     expiration {
       days = 14
     }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
   }
 
   rule {
@@ -759,6 +768,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "recovery" {
     expiration {
       days = 90
     }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
   }
 
   lifecycle {
@@ -769,10 +782,16 @@ resource "aws_s3_bucket_lifecycle_configuration" "recovery" {
 }
 ```
 
-The two overlapping rules are intentional: a MacBook-verified object becomes
-eligible at day 14, while every object has a hard 90-day ceiling. The bucket
-starts empty. Slice 4 owns archive upload behavior; do not add objects,
-credentials, replication, transitions, or any other expiration rule.
+The two overlapping rules are intentional: a MacBook-verified current version
+becomes eligible at day 14, while every current version becomes eligible at day
+90. Under
+[AWS's versioned-bucket expiration behavior](https://docs.aws.amazon.com/AmazonS3/latest/userguide/lifecycle-expire-general-considerations.html),
+current-version expiration creates a delete marker and leaves the data as a
+noncurrent version. Each rule therefore uses the provider's
+[`noncurrent_version_expiration` block](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_lifecycle_configuration)
+to permanently expire that data one day later, the minimum S3-supported delay.
+The bucket starts empty. Slice 4 owns archive upload behavior; do not add
+objects, credentials, replication, transitions, or any other expiration rule.
 
 - [ ] **Step 5: Run GREEN verification**
 
@@ -902,9 +921,11 @@ Require the origin group's entire tag map to equal exactly
 canonical VPC or any other resource. Require
 `aws_s3_bucket_lifecycle_configuration.recovery`, its dependency on enabled
 versioning, `prevent_destroy`, and exactly the two reviewed rules:
-tag-filtered `macbook-copy = verified` at 14 days and all objects at 90 days.
-Reject transitions, additional expiration rules, noncurrent-version expiration,
-and delete-marker expiration.
+tag-filtered `macbook-copy = verified` at 14 days and all current versions at
+90 days. Require `noncurrent_days = 1` in each rule so versioning cannot retain
+the expired data indefinitely. Reject transitions, additional expiration rules,
+`newer_noncurrent_versions`, any other noncurrent delay, and delete-marker
+expiration.
 
 Require the workflow mapping once and forbid printing or artifact upload. The
 workflow remains `workflow_dispatch`, OIDC, masked-account, plan-only.
@@ -1040,7 +1061,8 @@ upper bound, and cumulative launch total. Use 744 hours/month and include:
 7-day automated backup worst-case above the free allocation
 1 Secrets Manager secret
 recovery-bucket storage and requests at a conservative first-month bound,
-including 14-day verified and 90-day all-object retention
+including 14-day verified and 90-day all-current-version retention plus
+one-day noncurrent data-version expiration
 the already approved unattached public IPv4
 the planned Slice 4 compute/storage/registry bounds already in the launch packet
 Cloudflare and all earlier approved launch costs
@@ -1263,9 +1285,10 @@ Assert all public-access-block flags, `Enabled` versioning, AES256 default
 encryption, and the TLS-deny policy. Assert the enabled
 `expire-verified-after-off-cloud-copy` rule filters on
 `macbook-copy = verified` and expires at day 14; assert the enabled
-`expire-all-objects` rule applies to every object at day 90. Confirm there are
-no other lifecycle rules and the bucket is empty. Do not upload a test object
-in this creation-only slice.
+`expire-all-objects` rule applies to every current version at day 90. Assert
+both rules permanently expire the resulting noncurrent data version one day
+later. Confirm there are no other lifecycle rules and the bucket is empty. Do
+not upload a test object in this creation-only slice.
 
 - [ ] **Step 6: Prove Terraform and state recovery**
 
@@ -1337,7 +1360,8 @@ Any failure stops Slice 4.
 Document only the resource classes and security boundaries. Do not publish
 names, IDs, CIDRs, AZs, endpoints, state versions, or plan digests. State that
 the runtime secret is empty and Slice 4 owns its first value. Record the
-14-day verified/90-day all-object recovery retention contract and the
+14-day verified/90-day all-current-version recovery retention contract, with
+permanent noncurrent data-version expiration one day later, and the
 SG-only `jobcron:edge-target = origin-security-group` discovery contract.
 Explicitly note that the canonical VPC remains untagged because Window 1
 forbids updating the adopted VPC; Slice 5 derives the VPC from the tagged
