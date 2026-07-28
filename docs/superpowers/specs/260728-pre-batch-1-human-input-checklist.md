@@ -135,16 +135,16 @@ private repository identifier.
 **Human response:**
 
 ```text
-Registry: I'll set up a GitHub container registry account.
+Registry: `ghcr.io`
 Image visibility: Private Image
 Can restore publish/pull access if needed: Yes
 ```
 
 ### 4. Cloudflare Account And Zone Access
 
-- [ ] Human confirms access to the intended Cloudflare account
-- [ ] Human confirms access to the intended DNS zone
-- [ ] Human can authorize Origin CA and DNS work if existing access is
+- [x] Human confirms access to the intended Cloudflare account
+- [x] Human confirms access to the intended DNS zone
+- [x] Human can authorize Origin CA and DNS work if existing access is
       insufficient
 
 **Why it is needed:** Mayor can prepare and review edge automation, but cannot
