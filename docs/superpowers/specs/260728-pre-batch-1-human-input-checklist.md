@@ -172,9 +172,9 @@ Can authorize Origin CA and DNS work if prompted: yes
 
 ### 5. Recovery-Copy Storage Class
 
-- [ ] Off-repository recovery destination class selected
-- [ ] Destination is independent of the deployment host
-- [ ] Human confirms they can retrieve it during a recovery exercise
+- [x] Off-repository recovery destination class selected
+- [x] Destination is independent of the deployment host
+- [x] Human confirms they can retrieve it during a recovery exercise
 
 **Why it is needed:** The credential-encryption master key requires a separately
 stored recovery copy. A copy on only the deployment host or only the MacBook
@@ -197,9 +197,9 @@ recovery code, or secret value.
 **Human response:**
 
 ```text
-Recovery storage class:
-Independent of deployment host:
-Human can retrieve during recovery:
+Recovery storage class: password manager
+Independent of deployment host: yes
+Human can retrieve during recovery: yes
 ```
 
 ### 6. Existing Production Profile Reuse
