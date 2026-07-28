@@ -38,6 +38,10 @@ jobs:
         run: sh scripts/check-production-image-workflow_test.sh
       - name: Terraform Slice 4 saved-plan contract
         run: sh scripts/check-terraform-slice-4-plan_test.sh
+      - name: production transient runtime contract
+        run: |
+          sh -n deploy/production/jobcron-runtime.sh
+          go test ./scripts -run 'TestJobcronRuntime' -count=1
       - name: production Compose contract
         env:
           JOBCRON_IMAGE: ghcr.io/example-owner/jobcron@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef

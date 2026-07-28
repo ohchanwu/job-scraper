@@ -61,6 +61,7 @@ func TestJobcronRuntimePrepareFailsClosed(t *testing.T) {
 		{name: "null field", secret: replaceRuntimeSecret(t, "SESSION_SECRET", nil)},
 		{name: "empty field", secret: replaceRuntimeSecret(t, "SESSION_SECRET", "")},
 		{name: "wrong type", secret: replaceRuntimeSecret(t, "SESSION_SECRET", 7)},
+		{name: "unexpected field", secret: strings.TrimSuffix(validRuntimeSecret(), "}") + `,"UNEXPECTED":"value"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			writeFile(t, filepath.Join(fixture.runDir, "compose.env"), "STALE=must-not-survive\n", 0o600)
@@ -139,6 +140,47 @@ func TestJobcronRuntimePullUsesTransientCredentials(t *testing.T) {
 	}
 }
 
+func TestJobcronRuntimePullCleansCredentialsAfterFailure(t *testing.T) {
+	fixture := newRuntimeFixture(t)
+	if result := fixture.run(t, validRuntimeSecret(), "prepare"); result.err != nil {
+		t.Fatalf("prepare: %v\n%s", result.err, result.output)
+	}
+	token := "registry-token-secret"
+	writeFile(t, filepath.Join(fixture.runDir, "registry-token"), token+"\n", 0o600)
+	fixture.env = append(fixture.env, "FAKE_DOCKER_PULL_FAIL=1")
+	result := fixture.run(t, validRuntimeSecret(), "pull")
+	if result.err == nil {
+		t.Fatal("pull succeeded despite synthetic Docker failure")
+	}
+	if strings.Contains(result.output, token) || strings.Contains(readFile(t, fixture.logPath), token) {
+		t.Fatal("failed pull disclosed registry token")
+	}
+	for _, path := range []string{
+		filepath.Join(fixture.runDir, "registry-token"),
+		filepath.Join(fixture.runDir, "docker"),
+		filepath.Join(fixture.homeDir, ".docker", "config.json"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("failed pull retained credential path: %s (%v)", path, err)
+		}
+	}
+}
+
+func TestJobcronRuntimePullNeedsNoTokenForPresentDigest(t *testing.T) {
+	fixture := newRuntimeFixture(t)
+	if result := fixture.run(t, validRuntimeSecret(), "prepare"); result.err != nil {
+		t.Fatalf("prepare: %v\n%s", result.err, result.output)
+	}
+	fixture.env = append(fixture.env, "FAKE_IMAGE_PRESENT=1")
+	result := fixture.run(t, validRuntimeSecret(), "pull")
+	if result.err != nil {
+		t.Fatalf("present digest required credentials: %v\n%s", result.err, result.output)
+	}
+	if log := readFile(t, fixture.logPath); strings.Contains(log, "login ") {
+		t.Fatalf("present digest caused registry login:\n%s", log)
+	}
+}
+
 func TestJobcronRuntimeArchiveIsWriteOnlyAndSanitized(t *testing.T) {
 	fixture := newRuntimeFixture(t)
 	if result := fixture.run(t, validRuntimeSecret(), "prepare"); result.err != nil {
@@ -165,14 +207,29 @@ func TestJobcronRuntimeArchiveIsWriteOnlyAndSanitized(t *testing.T) {
 			uploads = append(uploads, line)
 		}
 	}
-	if len(uploads) != 4 || !strings.Contains(uploads[2], ".sha256 ") || !strings.Contains(uploads[3], ".sha256 ") {
-		t.Fatalf("manifests were not uploaded last:\n%s", strings.Join(uploads, "\n"))
+	if len(uploads) != 6 {
+		t.Fatalf("archive uploaded %d objects, want 6:\n%s", len(uploads), strings.Join(uploads, "\n"))
 	}
-	sanitized := readFile(t, filepath.Join(fixture.runDir, "archive", "jobcron.log"))
-	for _, forbidden := range []string{"Bearer", "cookie-secret", "password-secret"} {
-		if strings.Contains(sanitized, forbidden) {
-			t.Fatalf("sanitized log retained %q: %s", forbidden, sanitized)
+	for _, upload := range uploads[3:] {
+		if !strings.Contains(upload, ".sha256 ") {
+			t.Fatalf("manifests were not uploaded last:\n%s", strings.Join(uploads, "\n"))
 		}
+	}
+	for _, upload := range uploads {
+		if !strings.Contains(upload, "/jobcron/20260728T120000Z/") {
+			t.Fatalf("archive key is not immutable UTC path: %s", upload)
+		}
+	}
+	for _, name := range []string{"jobcron.log", "caddy.log"} {
+		sanitized := readFile(t, filepath.Join(fixture.runDir, "archive", name))
+		for _, forbidden := range []string{"Bearer", "cookie-secret", "password-secret"} {
+			if strings.Contains(sanitized, forbidden) {
+				t.Fatalf("%s retained %q: %s", name, forbidden, sanitized)
+			}
+		}
+	}
+	if !strings.Contains(readFile(t, filepath.Join(fixture.runDir, "archive", "jobcron.log")), "INFO ready") {
+		t.Fatalf("manifests were not uploaded last:\n%s", strings.Join(uploads, "\n"))
 	}
 }
 
@@ -263,8 +320,12 @@ exit 0
 `)
 	writeExecutable(t, filepath.Join(f.binDir, "docker"), `#!/bin/sh
 printf 'docker %s\n' "$*" >>"$FAKE_COMMAND_LOG"
-if [ "$1" = image ] && [ "$2" = inspect ]; then exit 1; fi
+if [ "$1" = image ] && [ "$2" = inspect ]; then
+  [ "${FAKE_IMAGE_PRESENT:-0}" = 1 ]
+  exit
+fi
 if [ "$1" = login ]; then cat >/dev/null; mkdir -p "$DOCKER_CONFIG"; printf '{}' >"$DOCKER_CONFIG/config.json"; fi
+if [ "$1" = pull ] && [ "${FAKE_DOCKER_PULL_FAIL:-0}" = 1 ]; then exit 1; fi
 if [ "$1" = compose ] && [ "$2" = logs ]; then
   printf '%s\n' \
     '2026-07-28T12:00:00Z app INFO ready authorization=Bearer-secret' \
