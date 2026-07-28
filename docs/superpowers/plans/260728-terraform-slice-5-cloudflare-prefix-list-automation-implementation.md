@@ -326,7 +326,7 @@ security-group-administration permission.
 - Failure prints exactly `Cloudflare IPv4 set rejected` to stderr and returns
   nonzero. It never prints a rejected line or file content.
 
-- [ ] **Step 1: Write RED parser tests**
+- [x] **Step 1: Write RED parser tests**
 
 Use `unittest`, `tempfile`, `json`, and `subprocess`. Start with ten strict,
 distinct documentation-only IPv4 prefixes in shuffled order and assert the
@@ -365,7 +365,7 @@ python3 scripts/normalize-cloudflare-ipv4_test.py
 
 Expected: FAIL because the command does not exist.
 
-- [ ] **Step 2: Implement the minimal standard-library parser**
+- [x] **Step 2: Implement the minimal standard-library parser**
 
 Use `ipaddress.ip_network(line.strip(), strict=True)`. Ignore blank lines, but
 reject the final empty set. Reject non-IPv4 networks and any network that
@@ -389,7 +389,7 @@ does not make every public network appear forbidden. Track canonical
 Write JSON to a sibling temporary file, `fsync`, and `os.replace` it so a failed
 run cannot leave a partial valid-looking output.
 
-- [ ] **Step 3: Run the parser tests**
+- [x] **Step 3: Run the parser tests**
 
 ```sh
 python3 scripts/normalize-cloudflare-ipv4_test.py
@@ -397,7 +397,7 @@ python3 scripts/normalize-cloudflare-ipv4_test.py
 
 Expected: PASS with no network access.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add scripts/normalize-cloudflare-ipv4.py \

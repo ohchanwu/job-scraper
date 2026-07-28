@@ -878,7 +878,7 @@ git commit -m "test: enforce the Terraform Slice 4 controller gate"
   recovery commands from Tasks 1-7.
 - Produces: one value-blind operator sequence consistent with this plan.
 
-- [ ] **Step 1: Add documentation contract assertions**
+- [x] **Step 1: Add documentation contract assertions**
 
 Extend the existing production documentation tests to reject:
 
@@ -896,7 +896,7 @@ non-loopback host port publication before Window 2
 Require references to Session Manager, `/run/jobcron`, digest pull, systemd,
 private verification, recovery manifests, and stop conditions.
 
-- [ ] **Step 2: Rewrite only the stale sections**
+- [x] **Step 2: Rewrite only the stale sections**
 
 Keep useful Compose and application explanations. Replace manual blank-host,
 SSH, persistent-secret, and public-start steps with:
@@ -914,7 +914,7 @@ SSH, persistent-secret, and public-start steps with:
 11. database/log archive and trusted-Mac restore verification; and
 12. stop before any EIP, Cloudflare, DNS, or public-traffic action.
 
-- [ ] **Step 3: Run documentation and publication checks**
+- [x] **Step 3: Run documentation and publication checks**
 
 ```sh
 go test ./scripts -run 'TestProduction(Compose|PrivateOps|Docs)' -count=1
@@ -923,7 +923,7 @@ git diff --check
 
 Expected: PASS and no stale public-cutover instruction.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add deploy/production/README.md \
@@ -943,7 +943,7 @@ git commit -m "docs: align production operations with transient SSM runtime"
 - Consumes: exact implementation tip.
 - Produces: clean, tested, publication-safe code ready for independent review.
 
-- [ ] **Step 1: Run all repository and Slice 4 checks**
+- [x] **Step 1: Run all repository and Slice 4 checks**
 
 ```sh
 sh scripts/check-production-image-workflow_test.sh
@@ -962,14 +962,14 @@ git diff --check
 
 Expected: every command succeeds.
 
-- [ ] **Step 2: Run publication safety**
+- [x] **Step 2: Run publication safety**
 
 Inspect the complete staged diff, then run configured Gitleaks over the exact
 implementation range. Stop on any real secret, private identifier, personal
 data, raw log, or unnecessary production detail. Do not suppress a finding
 without proving it is a synthetic fixture.
 
-- [ ] **Step 3: Commit gate-only corrections**
+- [x] **Step 3: Commit gate-only corrections**
 
 ```sh
 git add -A
