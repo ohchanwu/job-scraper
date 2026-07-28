@@ -489,6 +489,14 @@ expect_rejected "unsaved edge apply" "$edge_error" \
   '          if terraform -chdir=infra/terraform/edge apply -input=false \' \
   '          if terraform -chdir=infra/terraform/edge apply -input=false' ||
   failures=$((failures + 1))
+expect_rejected "edge AWS CLI mutation" "$edge_error" \
+  sh -c 'printf "\n          aws ec2 create-tags --resources synthetic-resource\n" >>"$1"' \
+  sh "$edge_workflow" ||
+  failures=$((failures + 1))
+expect_rejected "second unsaved edge apply" "$edge_error" \
+  sh -c 'printf "\n          terraform -chdir=infra/terraform/edge apply -auto-approve\n" >>"$1"' \
+  sh "$edge_workflow" ||
+  failures=$((failures + 1))
 expect_rejected "uploaded edge artifact" "$edge_error" \
   sh -c 'printf "\n      - uses: actions/upload-artifact@0000000000000000000000000000000000000000\n" >>"$1"' \
   sh "$edge_workflow" || failures=$((failures + 1))

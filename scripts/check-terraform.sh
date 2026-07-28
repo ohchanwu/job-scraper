@@ -706,6 +706,17 @@ if grep -Eiq \
   "$edge_workflow"; then
   fail_edge_workflow
 fi
+if grep -Eq '(^|[[:space:];|&()])aws[[:space:]]' "$edge_workflow"; then
+  fail_edge_workflow
+fi
+edge_terraform_invocations="$(
+  grep -Eo \
+    '(^|[[:space:];|&()])(if[[:space:]]+)?terraform[[:space:]]' \
+    "$edge_workflow" || true
+)"
+[[ -n "$edge_terraform_invocations" &&
+  "$(wc -l <<<"$edge_terraform_invocations" | tr -d ' ')" -eq 4 ]] ||
+  fail_edge_workflow
 
 edge_line() {
   local literal="$1"
