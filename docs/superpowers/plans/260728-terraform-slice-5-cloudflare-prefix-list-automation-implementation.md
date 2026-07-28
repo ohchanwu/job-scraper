@@ -755,8 +755,8 @@ git commit -m "test: enforce Terraform Slice 5 plan contracts"
 
 - Triggers: cron `17 18 * * *` (03:17 Asia/Seoul) and `workflow_dispatch`.
 - Environment: protected `edge`.
-- Protected values: `AWS_ROLE_ARN`, `TF_STATE_BUCKET`, and
-  `TF_AGGREGATE_COST_JSON`.
+- Protected values: `AWS_ROLE_ARN`, `TF_STATE_BUCKET`,
+  `TF_AGGREGATE_COST_JSON`, and `TF_SLICE4_CHECKPOINT_JSON`.
 - Repository variable: `EDGE_AUTOMATION_ENABLED`, set to `"true"` only after
   the initial reviewed apply and no-change checkpoint.
 - Concurrency group: `terraform-edge-prefix-list`, with
@@ -776,6 +776,8 @@ Require:
 - the exact concurrency group and no cancellation;
 - raw response, tfvars, logs, plan, plan JSON, and cost JSON only below
   `RUNNER_TEMP`;
+- the protected Slice 4 checkpoint is written only below `RUNNER_TEMP`, is
+  never echoed, and is supplied to the saved-plan checker;
 - `plan -detailed-exitcode -out=...`;
 - exit code `0` returns without apply;
 - exit code `2` runs the refresh checker before apply;
@@ -803,7 +805,8 @@ setup Terraform
 configure short-lived edge credentials
 fetch official ips-v4 to RUNNER_TEMP
 normalize to RUNNER_TEMP tfvars JSON
-write protected aggregate-cost JSON to RUNNER_TEMP without echoing
+write protected aggregate-cost and Slice 4 checkpoint JSON to RUNNER_TEMP
+  without echoing
 initialize only infra/terraform/edge
 terraform plan -detailed-exitcode -out=edge.tfplan with -var-file
 exit cleanly on 0
@@ -1163,11 +1166,13 @@ Old EC2/current RDS/rollback materials: preserved
 
 Keep identifiers and raw results private.
 
-- [ ] **Step 5: Enable the protected workflow variable**
+- [ ] **Step 5: Store the checkpoint and enable the protected workflow**
 
-Only after Steps 1-4 pass, set `EDGE_AUTOMATION_ENABLED` to `"true"` in the
-protected `edge` environment. This enables daily and manual post-checkpoint
-refreshes. Do not add a repository default that bypasses the gate.
+Only after Steps 1-4 pass, store the approved private checkpoint as
+`TF_SLICE4_CHECKPOINT_JSON` in the protected `edge` environment, then set
+`EDGE_AUTOMATION_ENABLED` to `"true"` there. This enables daily and manual
+post-checkpoint refreshes. Do not put the checkpoint in a repository variable,
+artifact, tracked file, or default that bypasses the gate.
 
 - [ ] **Step 6: Update durable documentation**
 
