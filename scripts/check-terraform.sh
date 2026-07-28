@@ -117,8 +117,19 @@ fi
 
 if grep -Eq '^resource[[:space:]]+"aws_route"' "$database_file" ||
   grep -ERq \
-    '^resource[[:space:]]+"(aws_nat_gateway|aws_instance|aws_eip_association|aws_secretsmanager_secret_version|cloudflare_[^"]+)"' \
+    '^resource[[:space:]]+"(aws_nat_gateway|aws_eip_association|aws_secretsmanager_secret_version|cloudflare_[^"]+)"' \
     "$repo_root/infra/terraform/production"; then
+  printf 'Slice 3 production contains a forbidden Terraform resource type\n' \
+    >&2
+  exit 1
+fi
+
+instance_declarations="$(
+  grep -ERh '^resource[[:space:]]+"aws_instance"' \
+    "$repo_root/infra/terraform/production" || true
+)"
+if [[ "$instance_declarations" != \
+  'resource "aws_instance" "replacement_host" {' ]]; then
   printf 'Slice 3 production contains a forbidden Terraform resource type\n' \
     >&2
   exit 1
@@ -498,5 +509,6 @@ require_action_pin \
 
 if [[ "${CHECK_TERRAFORM_FIXTURE_MODE:-0}" != 1 ]]; then
   "$repo_root/scripts/check-terraform-plan_test.sh"
+  "$repo_root/scripts/check-terraform-slice-4-plan_test.sh"
   "$repo_root/scripts/check-terraform-workflows_test.sh"
 fi

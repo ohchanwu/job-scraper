@@ -26,6 +26,8 @@ cp "$repo_root/infra/terraform/production/secrets.tf" \
   "$fixture_root/repo/infra/terraform/production/"
 cp "$repo_root/infra/terraform/production/recovery.tf" \
   "$fixture_root/repo/infra/terraform/production/"
+cp "$repo_root/infra/terraform/production/compute.tf" \
+  "$fixture_root/repo/infra/terraform/production/"
 
 cat >"$fixture_root/bin/terraform" <<'EOF'
 #!/usr/bin/env bash
@@ -49,6 +51,8 @@ reset_fixtures() {
   cp "$repo_root/infra/terraform/production/secrets.tf" \
     "$fixture_root/repo/infra/terraform/production/"
   cp "$repo_root/infra/terraform/production/recovery.tf" \
+    "$fixture_root/repo/infra/terraform/production/"
+  cp "$repo_root/infra/terraform/production/compute.tf" \
     "$fixture_root/repo/infra/terraform/production/"
 }
 
