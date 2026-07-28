@@ -22,18 +22,61 @@ jq -e '
     "aws_iam_role_policy.replacement_host_runtime",
     "aws_iam_instance_profile.replacement_host",
     "aws_instance.replacement_host"
-  ] as $allowed |
+  ] as $allowed_creates |
+  [
+    "aws_vpc.canonical",
+    "aws_internet_gateway.canonical",
+    "aws_subnet.public[\"public_a\"]",
+    "aws_subnet.public[\"public_b\"]",
+    "aws_subnet.public[\"public_c\"]",
+    "aws_subnet.public[\"public_d\"]",
+    "aws_route_table.public",
+    "aws_route.public_ipv4_default",
+    "aws_eip.origin",
+    "aws_subnet.database[\"database_a\"]",
+    "aws_subnet.database[\"database_b\"]",
+    "aws_route_table.database",
+    "aws_route_table_association.database[\"database_a\"]",
+    "aws_route_table_association.database[\"database_b\"]",
+    "aws_security_group.origin",
+    "aws_security_group.database",
+    "aws_vpc_security_group_ingress_rule.database_postgresql_from_origin",
+    "aws_db_subnet_group.production",
+    "aws_db_parameter_group.production",
+    "aws_db_instance.production",
+    "aws_secretsmanager_secret.runtime",
+    "aws_s3_bucket.recovery",
+    "aws_s3_bucket_public_access_block.recovery",
+    "aws_s3_bucket_versioning.recovery",
+    "aws_s3_bucket_server_side_encryption_configuration.recovery",
+    "aws_s3_bucket_policy.recovery",
+    "aws_s3_bucket_lifecycle_configuration.recovery"
+  ] as $allowed_noops |
   (.resource_changes | type == "array") and
-  (.resource_changes | length == 5) and
-  ([.resource_changes[].address] | sort == ($allowed | sort)) and
   ([.resource_changes[].address] | length == (unique | length)) and
+  (
+    [
+      .resource_changes[] |
+      select(.change.actions == ["create"]) |
+      .address
+    ] | sort == ($allowed_creates | sort)
+  ) and
   all(
     .resource_changes[];
     (.address | type == "string") and
     (.previous_address // null) == null and
     (.change | type == "object") and
-    .change.actions == ["create"] and
     (.change.importing // null) == null and
+    (
+      (
+        .change.actions == ["create"] and
+        (.address as $address | $allowed_creates | index($address)) != null
+      ) or
+      (
+        .change.actions == ["no-op"] and
+        (.address as $address | $allowed_noops | index($address)) != null
+      )
+    ) and
     all(
       [(.change.after // {}) | .. | objects | .from_port?, .to_port?][];
       . != 22

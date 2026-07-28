@@ -2,6 +2,11 @@
 set -euo pipefail
 umask 077
 
+%{ if !assets_ready ~}
+printf 'required deployment asset missing\n' >&2
+exit 1
+%{ endif ~}
+
 dnf install -y docker docker-compose-plugin awscli2 jq postgresql15
 
 install -d -m 0755 -o root -g root /opt/jobcron

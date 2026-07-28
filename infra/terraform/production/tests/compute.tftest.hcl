@@ -189,16 +189,14 @@ run "replacement_host_contract" {
   assert {
     condition = alltrue([
       for forbidden in [
-        "resource\\s+\"aws_security_group\"\\s+\"replacement",
-        "resource\\s+\"aws_vpc_security_group_(egress|ingress)_rule\"\\s+\"replacement",
+        "resource\\s+\"aws_security_group\"",
+        "resource\\s+\"aws_vpc_security_group_(egress|ingress)_rule\"",
         "resource\\s+\"aws_eip_association\"",
         "resource\\s+\"aws_key_pair\"",
+        "aws_eip\\.origin",
         ] : length(regexall(
           forbidden,
-          join("\n", [
-            for source in fileset(path.module, "*.tf") :
-            file("${path.module}/${source}")
-          ])
+          file("${path.module}/compute.tf")
       )) == 0
     ])
     error_message = "Slice 4 must not duplicate network policy, associate an EIP, or create a key pair."
@@ -260,11 +258,23 @@ run "replacement_host_contract" {
       length(aws_instance.replacement_host.user_data) < 16384 &&
       strcontains(aws_instance.replacement_host.user_data, "dnf install -y") &&
       strcontains(aws_instance.replacement_host.user_data, "docker-compose-plugin") &&
+      strcontains(aws_instance.replacement_host.user_data, "awscli2") &&
+      strcontains(aws_instance.replacement_host.user_data, " jq ") &&
+      strcontains(aws_instance.replacement_host.user_data, "postgresql15") &&
+      !strcontains(aws_instance.replacement_host.user_data, "/opt/jobcron/.env") &&
       strcontains(aws_instance.replacement_host.user_data, "/etc/jobcron/runtime-secret-id") &&
       strcontains(aws_instance.replacement_host.user_data, "systemctl enable") &&
       strcontains(aws_instance.replacement_host.user_data, "systemctl stop jobcron.service")
     )
     error_message = "Bootstrap must stay below EC2 raw user-data limits, install tools, copy assets, enable units, and leave Jobcron stopped."
+  }
+
+  assert {
+    condition = local.replacement_assets_ready || length(regexall(
+      "(?s)required deployment asset missing.*exit 1.*dnf install",
+      aws_instance.replacement_host.user_data
+    )) == 1
+    error_message = "An incomplete parallel-task integration must abort before host bootstrap writes anything."
   }
 
   assert {

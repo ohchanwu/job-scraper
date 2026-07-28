@@ -36,6 +36,11 @@ locals {
       )
     }
   }
+
+  replacement_assets_ready = alltrue([
+    for asset in values(local.replacement_asset_sources) :
+    fileexists(asset.path)
+  ])
 }
 
 data "aws_ssm_parameter" "amazon_linux_2023_arm64" {
@@ -105,6 +110,7 @@ resource "aws_instance" "replacement_host" {
         sha256  = sha256(asset.content)
       }
     }
+    assets_ready       = local.replacement_assets_ready
     runtime_secret_arn = aws_secretsmanager_secret.runtime.arn
   })
 

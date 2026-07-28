@@ -84,6 +84,46 @@ jq -n '{
         after: {synthetic: true}
       }
     })
+  ) + (
+    [
+      "aws_vpc.canonical",
+      "aws_internet_gateway.canonical",
+      "aws_subnet.public[\"public_a\"]",
+      "aws_subnet.public[\"public_b\"]",
+      "aws_subnet.public[\"public_c\"]",
+      "aws_subnet.public[\"public_d\"]",
+      "aws_route_table.public",
+      "aws_route.public_ipv4_default",
+      "aws_eip.origin",
+      "aws_subnet.database[\"database_a\"]",
+      "aws_subnet.database[\"database_b\"]",
+      "aws_route_table.database",
+      "aws_route_table_association.database[\"database_a\"]",
+      "aws_route_table_association.database[\"database_b\"]",
+      "aws_security_group.origin",
+      "aws_security_group.database",
+      "aws_vpc_security_group_ingress_rule.database_postgresql_from_origin",
+      "aws_db_subnet_group.production",
+      "aws_db_parameter_group.production",
+      "aws_db_instance.production",
+      "aws_secretsmanager_secret.runtime",
+      "aws_s3_bucket.recovery",
+      "aws_s3_bucket_public_access_block.recovery",
+      "aws_s3_bucket_versioning.recovery",
+      "aws_s3_bucket_server_side_encryption_configuration.recovery",
+      "aws_s3_bucket_policy.recovery",
+      "aws_s3_bucket_lifecycle_configuration.recovery"
+    ] |
+    map({
+      address: .,
+      previous_address: null,
+      change: {
+        actions: ["no-op"],
+        importing: null,
+        before: {synthetic: true},
+        after: {synthetic: true}
+      }
+    })
   ),
   output_changes: {
     replacement_instance_id: {
@@ -231,6 +271,17 @@ expect_verified \
 
 plan_mutation "unexpected address" \
   '.resource_changes[0].address = "aws_instance.unexpected"'
+plan_mutation "unexpected no-op address" \
+  '.resource_changes += [{
+    address: "aws_instance.old",
+    previous_address: null,
+    change: {
+      actions: ["no-op"],
+      importing: null,
+      before: {synthetic: true},
+      after: {synthetic: true}
+    }
+  }]'
 for action in update delete forget mystery; do
   plan_mutation "$action action" \
     ".resource_changes[0].change.actions = [\"$action\"]"
