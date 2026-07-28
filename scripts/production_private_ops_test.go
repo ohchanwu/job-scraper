@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,9 +89,12 @@ func TestProductionPrivateOpsRDSUsesOneLeastPrivilegeTransaction(t *testing.T) {
 	if err := json.Unmarshal([]byte(readFile(t, fixture.runtimeSecret)), &runtime); err != nil {
 		t.Fatal(err)
 	}
-	if got := runtime["DATABASE_URL"]; !strings.Contains(got, "jobcron_app:application-password-secret@127.0.0.1:15432/jobcron") ||
-		!strings.Contains(got, "sslmode=require") {
+	if got := runtime["DATABASE_URL"]; !strings.Contains(got, "jobcron_app:application-password-secret@jobcron.abc123.ap-northeast-2.rds.amazonaws.com:5432/jobcron") ||
+		!strings.Contains(got, "sslmode=require") || strings.Contains(got, "127.0.0.1") {
 		t.Fatalf("private runtime DATABASE_URL not updated: %q", got)
+	}
+	if !strings.Contains(commandLog, "psql postgres://master@127.0.0.1:15432/jobcron?sslmode=require") {
+		t.Fatalf("master operation did not use localhost-only tunnel:\n%s", commandLog)
 	}
 
 	secondPassword := "rotated-application-password"
@@ -102,6 +106,31 @@ func TestProductionPrivateOpsRDSUsesOneLeastPrivilegeTransaction(t *testing.T) {
 	if !strings.Contains(secondSQL, "IF NOT EXISTS") ||
 		!strings.Contains(secondSQL, "ALTER ROLE jobcron_app PASSWORD '"+secondPassword+"';") {
 		t.Fatalf("rerun was not idempotent password rotation:\n%s", secondSQL)
+	}
+}
+
+func TestProductionPrivateOpsRDSRejectsInvalidPrivateEndpoint(t *testing.T) {
+	requirePrivateOpsHelper(t, rdsRoleHelper)
+	for _, endpoint := range []string{
+		"",
+		"127.0.0.1:5432",
+		"db.example.invalid:5432",
+		"jobcron.abc123.ap-northeast-2.rds.amazonaws.com",
+		"jobcron..ap-northeast-2.rds.amazonaws.com:5432",
+		"jobcron.abc123.ap-northeast-2.rds.amazonaws.com:0",
+		"jobcron.abc123.ap-northeast-2.rds.amazonaws.com:65536",
+	} {
+		t.Run(endpoint, func(t *testing.T) {
+			fixture := newPrivateOpsFixture(t)
+			fixture.env = append(fixture.env, "JOBCRON_PRIVATE_DATABASE_ENDPOINT="+endpoint)
+			result := fixture.run(t, rdsRoleHelper, "master-password\napplication-password\n")
+			if result.err == nil {
+				t.Fatalf("RDS helper accepted private endpoint %q", endpoint)
+			}
+			if log := readOptionalFile(t, fixture.commandLog); strings.Contains(log, "psql ") {
+				t.Fatalf("invalid private endpoint reached psql:\n%s", log)
+			}
+		})
 	}
 }
 
@@ -173,6 +202,42 @@ func TestProductionPrivateOpsRecoveryNeverTagsFailedVerification(t *testing.T) {
 	}
 }
 
+func TestProductionPrivateOpsRecoveryRejectsUnsafeManifestGrammar(t *testing.T) {
+	requirePrivateOpsHelper(t, recoveryHelper)
+	sum := sha256.Sum256([]byte("database-dump\n"))
+	hash := hex.EncodeToString(sum[:])
+	for _, test := range []struct {
+		name     string
+		manifest string
+	}{
+		{name: "path traversal", manifest: hash + "  ../database.dump\n"},
+		{name: "extra line", manifest: hash + "  database.dump\n" + hash + "  database.dump\n"},
+		{name: "mismatched basename", manifest: hash + "  caddy.log\n"},
+		{name: "uppercase hash", manifest: strings.ToUpper(hash) + "  database.dump\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newPrivateOpsFixture(t)
+			fixture.installRecoveryObjects(t, false)
+			manifestPath := filepath.Join(
+				fixture.recoveryRemote,
+				"jobcron/20260728T120000Z/database.dump.sha256",
+			)
+			writeFile(t, manifestPath, test.manifest, 0o600)
+			result := fixture.run(t, recoveryHelper, "")
+			if result.err == nil {
+				t.Fatalf("recovery accepted %s manifest", test.name)
+			}
+			log := readFile(t, fixture.commandLog)
+			if strings.Contains(log, "sha256sum ") {
+				t.Fatalf("unsafe manifest reached sha256sum:\n%s", log)
+			}
+			if strings.Contains(log, "put-object-tagging") {
+				t.Fatalf("unsafe manifest tagged objects:\n%s", log)
+			}
+		})
+	}
+}
+
 type privateOpsFixture struct {
 	root, binDir, commandLog, sqlLog, roleEnv, runtimeSecret string
 	recoveryRemote, recoveryDir                              string
@@ -198,6 +263,14 @@ func newPrivateOpsFixture(t *testing.T) privateOpsFixture {
 		}
 	}
 	writeFile(t, fixture.runtimeSecret, `{"SESSION_SECRET":"synthetic-existing"}`+"\n", 0o600)
+	realSHA, err := exec.LookPath("sha256sum")
+	if err != nil {
+		t.Fatal("sha256sum is required for private operations tests")
+	}
+	writeExecutable(t, filepath.Join(fixture.binDir, "sha256sum"), fmt.Sprintf(
+		"#!/bin/sh\nprintf 'sha256sum %%s\\n' \"$*\" >>\"$PRIVATE_OPS_COMMAND_LOG\"\nexec %q \"$@\"\n",
+		realSHA,
+	))
 	writeExecutable(t, filepath.Join(fixture.binDir, "psql"), `#!/bin/sh
 printf 'psql %s\n' "$*" >>"$PRIVATE_OPS_COMMAND_LOG"
 cat >"$PRIVATE_OPS_SQL_LOG"
@@ -223,6 +296,7 @@ exit 1
 		"PRIVATE_OPS_COMMAND_LOG="+fixture.commandLog,
 		"PRIVATE_OPS_SQL_LOG="+fixture.sqlLog,
 		"JOBCRON_MASTER_DATABASE_URL=postgres://master@127.0.0.1:15432/jobcron?sslmode=require",
+		"JOBCRON_PRIVATE_DATABASE_ENDPOINT=jobcron.abc123.ap-northeast-2.rds.amazonaws.com:5432",
 		"JOBCRON_APP_DATABASE_USER=jobcron_app",
 		"JOBCRON_DATABASE_ROLE_ENV="+fixture.roleEnv,
 		"JOBCRON_RUNTIME_SECRET_JSON="+fixture.runtimeSecret,

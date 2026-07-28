@@ -214,6 +214,14 @@ func TestJobcronRuntimeArchiveIsWriteOnlyAndSanitized(t *testing.T) {
 	if !strings.Contains(log, "pg_dump -Fc") {
 		t.Fatalf("pg_dump was not custom format:\n%s", log)
 	}
+	for _, want := range []string{
+		"docker compose --env-file " + filepath.Join(fixture.runDir, "compose.env") + " logs --no-color app",
+		"docker compose --env-file " + filepath.Join(fixture.runDir, "compose.env") + " logs --no-color caddy",
+	} {
+		if !strings.Contains(log, want) {
+			t.Errorf("archive missing exact Compose environment: %q\n%s", want, log)
+		}
+	}
 	for _, forbidden := range []string{" s3 ls ", " s3api ", " s3 rm ", " s3 mv "} {
 		if strings.Contains(" "+log+" ", forbidden) {
 			t.Fatalf("archive used forbidden S3 operation %q:\n%s", forbidden, log)
@@ -248,6 +256,8 @@ func TestJobcronRuntimeArchiveIsWriteOnlyAndSanitized(t *testing.T) {
 			"secret-json-secret",
 			"token-json-secret",
 			"password-key-value-secret",
+			"postgres-url-secret",
+			"postgresql-url-secret",
 		} {
 			if strings.Contains(sanitized, forbidden) {
 				t.Fatalf("%s retained %q: %s", name, forbidden, sanitized)
@@ -334,7 +344,7 @@ func TestJobcronSystemdMainUnitFailsClosed(t *testing.T) {
 	}
 
 	wantPreStart := []string{
-		"/usr/bin/docker compose --env-file /run/jobcron/compose.env down --remove-orphans",
+		"/bin/sh -c 'if [ -f /run/jobcron/compose.env ]; then exec /usr/bin/docker compose --env-file /run/jobcron/compose.env down --remove-orphans; fi'",
 		"/opt/jobcron/jobcron-runtime.sh prepare",
 		"/opt/jobcron/jobcron-runtime.sh pull",
 	}
@@ -349,6 +359,29 @@ func TestJobcronSystemdMainUnitFailsClosed(t *testing.T) {
 		if strings.HasPrefix(directive, "-") {
 			t.Fatalf("startup action ignores failure: %q", directive)
 		}
+	}
+	firstBootStop := strings.TrimSuffix(strings.TrimPrefix(wantPreStart[0], "/bin/sh -c '"), "'")
+	tempDir := t.TempDir()
+	composeEnv := filepath.Join(tempDir, "compose.env")
+	dockerLog := filepath.Join(tempDir, "docker.log")
+	fakeDocker := filepath.Join(tempDir, "docker")
+	writeExecutable(t, fakeDocker, "#!/bin/sh\nprintf '%s\\n' \"$*\" >>\""+dockerLog+"\"\nexit \"${FAKE_DOCKER_EXIT:-0}\"\n")
+	firstBootStop = strings.ReplaceAll(firstBootStop, "/run/jobcron/compose.env", composeEnv)
+	firstBootStop = strings.ReplaceAll(firstBootStop, "/usr/bin/docker", fakeDocker)
+
+	cmd := exec.Command("sh", "-c", firstBootStop)
+	cmd.Env = append(os.Environ(), "FAKE_DOCKER_EXIT=1")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("missing compose.env was not a clean first boot: %v\n%s", err, output)
+	}
+	if log := readOptionalFile(t, dockerLog); log != "" {
+		t.Fatalf("missing compose.env invoked Docker: %s", log)
+	}
+	writeFile(t, composeEnv, "synthetic\n", 0o600)
+	cmd = exec.Command("sh", "-c", firstBootStop)
+	cmd.Env = append(os.Environ(), "FAKE_DOCKER_EXIT=1")
+	if err := cmd.Run(); err == nil {
+		t.Fatal("existing compose.env ignored Compose down failure")
 	}
 	if got := unitValues(unit, "ExecStop"); len(got) != 1 ||
 		got[0] != "/usr/bin/docker compose --env-file /run/jobcron/compose.env down --remove-orphans" {
@@ -498,13 +531,15 @@ if [ "$1" = compose ] && [ "$2" = config ]; then
   printf '%s\n' '{"services":{"app":{"logging":{"driver":"json-file","options":{"max-size":"10m","max-file":"3"}}},"caddy":{"logging":{"driver":"json-file","options":{"max-size":"10m","max-file":"3"}}}}}'
   exit 0
 fi
-if [ "$1" = compose ] && [ "$2" = logs ]; then
+if [ "$1" = compose ] && printf '%s\n' "$*" | grep -q ' logs --no-color '; then
   [ "${FAKE_DOCKER_LOGS_FAIL:-0}" != 1 ] || exit 1
   printf '%s\n' \
     '2026-07-28T12:00:00Z app INFO ready Authorization: Bearer bearer-header-secret' \
     '2026-07-28T12:00:01Z app WARN Cookie: session=cookie-header-secret Password: password-header-secret' \
     '2026-07-28T12:00:02Z app WARN {"secret":"secret-json-secret","token":"token-json-secret"}' \
-    '2026-07-28T12:00:03Z app WARN password=password-key-value-secret'
+    '2026-07-28T12:00:03Z app WARN password=password-key-value-secret' \
+    '2026-07-28T12:00:04Z app WARN postgres://jobcron:postgres-url-secret@db.example.invalid/jobcron?sslmode=require' \
+    '2026-07-28T12:00:05Z app WARN postgresql://jobcron:postgresql-url-secret@db.example.invalid/jobcron?sslmode=verify-full'
 fi
 exit 0
 `)

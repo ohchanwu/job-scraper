@@ -133,6 +133,7 @@ sanitize_logs() {
 		-e 's/([Cc]ookie:[[:space:]]*).*/\1[redacted]/g' \
 		-e 's/(([Pp]assword|[Ss]ecret|[Tt]oken):[[:space:]]*)[^[:space:]",}]+/\1[redacted]/g' \
 		-e 's/("([Pp]assword|[Ss]ecret|[Tt]oken)"[[:space:]]*:[[:space:]]*)"[^"]*"/\1"[redacted]"/g' \
+		-e 's#(postgres(ql)?://)[^[:space:]@]+@#\1[redacted]@#g' \
 		-e 's/(([Aa]uthorization|[Cc]ookie|[Pp]assword|[Ss]ecret|[Tt]oken)=[[:space:]]*)[^[:space:]",}]+/\1[redacted]/g'
 }
 
@@ -155,8 +156,8 @@ archive() {
 	trap 'cleanup_archive_raw' EXIT HUP INT TERM
 
 	PGDATABASE=$database_url pg_dump -Fc -f "$archive_dir/database.dump" >/dev/null 2>&1 || fail
-	(cd "$deploy_dir" && docker compose logs --no-color app >"$jobcron_raw") || fail
-	(cd "$deploy_dir" && docker compose logs --no-color caddy >"$caddy_raw") || fail
+	(cd "$deploy_dir" && docker compose --env-file "$run_dir/compose.env" logs --no-color app >"$jobcron_raw") || fail
+	(cd "$deploy_dir" && docker compose --env-file "$run_dir/compose.env" logs --no-color caddy >"$caddy_raw") || fail
 	sanitize_logs <"$jobcron_raw" >"$archive_dir/jobcron.log"
 	sanitize_logs <"$caddy_raw" >"$archive_dir/caddy.log"
 	cleanup_archive_raw

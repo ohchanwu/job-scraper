@@ -12,6 +12,7 @@ mode() {
 }
 
 master_url=${JOBCRON_MASTER_DATABASE_URL:-}
+private_endpoint=${JOBCRON_PRIVATE_DATABASE_ENDPOINT:-}
 app_user=${JOBCRON_APP_DATABASE_USER:-}
 role_env=${JOBCRON_DATABASE_ROLE_ENV:-}
 runtime_secret=${JOBCRON_RUNTIME_SECRET_JSON:-}
@@ -19,6 +20,11 @@ runtime_secret=${JOBCRON_RUNTIME_SECRET_JSON:-}
 printf '%s\n' "$master_url" |
 	grep -Eq '^postgres://[A-Za-z_][A-Za-z0-9_]*@127\.0\.0\.1:[0-9]+/[A-Za-z_][A-Za-z0-9_]*\?sslmode=(verify-full|require)$' ||
 	fail
+printf '%s\n' "$private_endpoint" |
+	grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+\.rds\.amazonaws\.com:[0-9]+$' ||
+	fail
+private_port=${private_endpoint##*:}
+[ "$private_port" -ge 1 ] 2>/dev/null && [ "$private_port" -le 65535 ] 2>/dev/null || fail
 printf '%s\n' "$app_user" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$' || fail
 [ -n "$role_env" ] || fail
 [ -f "$runtime_secret" ] || fail
@@ -41,11 +47,13 @@ fi
 
 database_url=${master_url%%\?*}
 database=${database_url##*/}
-connection=${master_url#postgres://}
-connection=${connection#*@}
+tls_query=${master_url#*\?}
 escaped_application_password=$(printf '%s' "$application_password" | sed "s/'/''/g")
 encoded_application_password=$(printf '%s' "$application_password" | jq -sRr @uri)
-application_url="postgres://$app_user:$encoded_application_password@$connection"
+application_url="postgres://$app_user:$encoded_application_password@$private_endpoint/$database?$tls_query"
+case $application_url in
+*127.0.0.1* | *localhost*) fail ;;
+esac
 runtime_tmp=$(mktemp "$runtime_secret.XXXXXX")
 role_tmp=$(mktemp "$role_env.XXXXXX")
 cleanup() {

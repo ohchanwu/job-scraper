@@ -61,6 +61,14 @@ done <"$keys_file"
 [ "$key_count" = 6 ] || fail
 
 for name in database.dump jobcron.log caddy.log; do
+	awk -v name="$name" '
+		NR == 1 && $0 ~ /^[0-9a-f]{64}  [A-Za-z0-9.]+$/ && substr($0, 67) == name {
+			valid = 1
+		}
+		END {
+			exit !(NR == 1 && valid)
+		}
+	' "$archive_dir/$name.sha256" || fail
 	(cd "$archive_dir" && sha256sum -c "$name.sha256" >/dev/null 2>&1) || fail
 done
 
