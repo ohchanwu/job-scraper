@@ -64,7 +64,9 @@ As recorded in the Terraform infrastructure specification:
   read access, and the edge OIDC role remains state-only;
 - static Terraform CI and the protected production plan-only workflow are
   verified; Terraform now owns the adopted canonical public network and one
-  unattached reserved EIP, but no replacement host, private RDS tier, or
+  unattached reserved EIP;
+- the private RDS tier, empty runtime-secret container, and protected recovery
+  bucket are implemented and privately verified, but no replacement host or
   automated Cloudflare prefix-list path exists yet;
 - the old EC2, old VPC, and old RDS are retained rollback resources, not the
   target architecture;
@@ -243,17 +245,21 @@ Exit evidence:
 
 ### Slice 3: Private Database Tier And Secret Containers
 
+**Status:** Complete at implementation baseline `0a25905`
+
+**Verification:** [Sanitized Slice 3 verification][slice-3-verification]
+
 Window 1 controller policy gates:
 
-- [ ] Independently review the plan for two private database subnets, database
+- [x] Independently review the plan for two private database subnets, database
       subnet group, security groups, new encrypted RDS instance, recovery
       bucket, and empty runtime-secret container.
-- [ ] Confirm the plan uses RDS-managed master credentials and does not expose a
+- [x] Confirm the plan uses RDS-managed master credentials and does not expose a
       secret version to Terraform.
-- [ ] Apply only after machine checks prove deletion protection,
+- [x] Apply only after machine checks prove deletion protection,
       `prevent_destroy`, backup retention, TLS requirements, and public-access
       settings, plus every global Window 1 policy requirement.
-- [ ] Record the new RDS restore identifiers and recovery evidence privately.
+- [x] Record the new RDS restore identifiers and recovery evidence privately.
 
 Exit evidence:
 
@@ -470,5 +476,7 @@ This human-blocked specification is complete only when:
 [pre-batch-1-checklist]: 260728-pre-batch-1-human-input-checklist.md
 [pre-batch-1-contract]:
   260728-pre-batch-1-window-1-authorization-contract.md
+[slice-3-verification]:
+  ../archive/2026-07-28-terraform-slice-3/260728-terraform-slice-3-verification.md
 [two-window-decision]:
   ../decisions/260727-two-window-first-production-launch-authorization.md

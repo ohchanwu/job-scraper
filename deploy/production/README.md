@@ -9,6 +9,14 @@ repository workflow, and record its immutable digest in private evidence.
 Terraform may apply only the independently reviewed saved plan accepted by
 `scripts/check-terraform-slice-4-plan.sh`.
 
+The verified Slice 3 checkpoint provides private database subnets, a
+VPC-local-only database route table, security-group-only PostgreSQL access, an
+encrypted private RDS instance, an empty runtime-secret container, and a
+protected recovery bucket. The secret remains empty until this Slice 4
+sequence writes its first version outside Terraform. Verified off-cloud
+recovery objects expire after 14 days, all current versions expire after 90
+days, and the resulting noncurrent data version expires one day later.
+
 The replacement host has no key pair or inbound rule. All host and database
 access uses AWS Systems Manager Session Manager. RDS stays private, and the app
 uses a lower-privilege database role created through a localhost-only tunnel.
@@ -77,6 +85,10 @@ Private verification uses Session Manager port forwarding to the loopback app
 and Caddy ports. The operator checks real user behavior, the Origin CA
 certificate, lower-privilege RDS access, reboot recovery, and the absence of
 public ingress before recording sanitized evidence.
+
+Slice 5 discovers the origin security group through the fixed
+`jobcron:edge-target = origin-security-group` tag and derives the canonical VPC
+from that group's `vpc_id`. The canonical VPC intentionally remains untagged.
 
 `jobcron-recovery.service` creates a custom-format database dump, sanitized
 container logs, and SHA-256 recovery manifests. The trusted Mac runs

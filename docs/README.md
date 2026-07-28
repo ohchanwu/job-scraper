@@ -37,6 +37,8 @@ Use this index instead of recursively loading the entire documentation tree.
 - [Pre-Batch-1 Window 1 authorization contract][pre-batch-1-contract]
 - [Terraform Slice 4 replacement EC2 and transient runtime][terraform-slice-4]
 - [Terraform Slice 5 Cloudflare prefix-list automation][terraform-slice-5]
+- [Terraform Slice 3 implementation archive][terraform-slice-3-plan]
+- [Terraform Slice 3 verification][terraform-slice-3-verification]
 - [Contextual dealbreaker match-provenance contract][dealbreaker-provenance-spec]
 - [Contextual dealbreaker match-provenance implementation][dealbreaker-provenance-plan]
 - [Stage 1 contextual dealbreaker validation and exclusion evidence][contextual-dealbreaker-spec]
@@ -82,6 +84,10 @@ Compose, Caddy, CI, and EC2 commands consume those paths directly.
   superpowers/specs/260728-pre-batch-1-human-input-checklist.md
 [pre-batch-1-contract]:
   superpowers/specs/260728-pre-batch-1-window-1-authorization-contract.md
+[terraform-slice-3-plan]:
+  superpowers/archive/2026-07-28-terraform-slice-3/260728-terraform-slice-3-private-database-secret-containers-implementation.md
+[terraform-slice-3-verification]:
+  superpowers/archive/2026-07-28-terraform-slice-3/260728-terraform-slice-3-verification.md
 [terraform-slice-4]:
   superpowers/plans/260728-terraform-slice-4-replacement-ec2-transient-runtime-implementation.md
 [terraform-slice-5]:

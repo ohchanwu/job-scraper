@@ -19,8 +19,17 @@ Confirm the private checkpoint is current and reports:
 - private RDS and its unchanged origin-group PostgreSQL rule;
 - an empty runtime-secret container with zero versions;
 - an encrypted, versioned, public-blocked recovery bucket;
-- the reviewed recovery lifecycle;
-- a clean post-apply plan; and
+- the reviewed recovery lifecycle: verified off-cloud copies expire after 14
+  days, all current versions after 90 days, and the resulting noncurrent data
+  version one day later;
+- the origin security group is the only resource tagged
+  `jobcron:edge-target = origin-security-group`, while the canonical VPC stays
+  untagged and is derived from that group's `vpc_id`;
+- the reviewed normalization-only state action completed with 0 added,
+  0 changed, and 0 destroyed;
+- the final refresh inspection contained exactly one update-only AWS-managed
+  recovery-observation field, zero resource changes, and zero output changes;
+  this is accepted irreducible observation drift and must not be reapplied; and
 - zero destroy, replace, or old-resource actions.
 
 Stop if any field, address, lifecycle rule, or freshness check differs. Preserve

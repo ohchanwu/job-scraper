@@ -11,13 +11,14 @@ decision records needed for the current task.
 - [Pre-Batch-1 human input checklist][pre-batch-1-checklist]
 - [Pre-Batch-1 Window 1 authorization contract][pre-batch-1-contract]
 - [Terraform-first production launch roadmap][terraform-launch-roadmap]
-- [Terraform Slice 3 private database and secret containers implementation][terraform-slice-3-plan]
 - [Terraform Slice 4 replacement EC2 and transient runtime implementation][terraform-slice-4-plan]
 - [Terraform Slice 5 Cloudflare prefix-list automation implementation][terraform-slice-5-plan]
 - [PostgreSQL local convergence and per-user AI credentials](specs/260714-postgresql-local-convergence-user-ai-credentials.md)
 
 ## Recently Archived
 
+- [Terraform Slice 3 private database and secret containers implementation][terraform-slice-3-plan]
+- [Terraform Slice 3 verification][terraform-slice-3-verification]
 - [Terraform Slice 2: canonical VPC and EIP adoption][terraform-slice-2-spec]
 - [Terraform Slice 2 implementation][terraform-slice-2-plan]
 - [Terraform Slice 2 verification][terraform-slice-2-verification]
@@ -110,7 +111,9 @@ decision records needed for the current task.
 [terraform-launch-roadmap]:
   plans/260726-terraform-first-production-launch-roadmap.md
 [terraform-slice-3-plan]:
-  plans/260728-terraform-slice-3-private-database-secret-containers-implementation.md
+  archive/2026-07-28-terraform-slice-3/260728-terraform-slice-3-private-database-secret-containers-implementation.md
+[terraform-slice-3-verification]:
+  archive/2026-07-28-terraform-slice-3/260728-terraform-slice-3-verification.md
 [terraform-slice-4-plan]:
   plans/260728-terraform-slice-4-replacement-ec2-transient-runtime-implementation.md
 [terraform-slice-5-plan]:

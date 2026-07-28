@@ -1,7 +1,7 @@
 # Terraform-First Production Launch Implementation Roadmap
 
-**Status:** Active; Slices 1 and 2 are complete and Slice 3 has an executable
-plan under the approved two-window authorization
+**Status:** Active; Slices 1 through 3 are complete and Slice 4 is active under
+the approved two-window authorization
 
 **Recorded:** 2026-07-26
 
@@ -110,17 +110,22 @@ production and rollback resources were not replaced or deleted.
 
 ### Slice 3: Private Database Tier And Secret Containers
 
-**Implementation plan:** [Slice 3 implementation plan][slice-3-plan]
+**Implementation plan:** [Archived Slice 3 implementation plan][slice-3-plan]
 
-**Status:** Planned; implementation has not started
+**Verification:** [Slice 3 verification][slice-3-verification]
 
-Will create private database subnets, security groups, encrypted PostgreSQL RDS,
-the recovery bucket, and an empty runtime-secret container without putting a
-secret version in Terraform.
+**Status:** Complete at implementation baseline `0a25905`
+
+Terraform owns the private database subnets and VPC-local route table,
+security-group-only PostgreSQL path, encrypted private RDS instance, empty
+runtime-secret container, and protected recovery bucket. The prior production
+resources remain unchanged rollback resources.
 
 ### Slice 4: Replacement EC2 And Transient Runtime
 
-**Status:** Plan only after private RDS passes its checkpoint
+**Plan:** [Slice 4 implementation plan][slice-4-plan]
+
+**Status:** Active from the verified Slice 3 checkpoint
 
 Will create the encrypted replacement host, Session Manager access, transient
 runtime preparation, Caddy origin TLS, and off-host dump/log recovery.
@@ -177,6 +182,10 @@ the rollback window.
 [slice-2-verification]:
   ../archive/2026-07-27-terraform-slice-2/260727-terraform-slice-2-verification.md
 [slice-3-plan]:
-  260728-terraform-slice-3-private-database-secret-containers-implementation.md
+  ../archive/2026-07-28-terraform-slice-3/260728-terraform-slice-3-private-database-secret-containers-implementation.md
+[slice-3-verification]:
+  ../archive/2026-07-28-terraform-slice-3/260728-terraform-slice-3-verification.md
+[slice-4-plan]:
+  260728-terraform-slice-4-replacement-ec2-transient-runtime-implementation.md
 [terraform-spec]:
   ../specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md

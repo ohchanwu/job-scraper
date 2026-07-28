@@ -409,8 +409,21 @@ provider, and the automation roles. `production` owns the canonical VPC, interne
 public subnets, their shared main route table and default route, and one reserved Elastic IP
 allocation. The subnets continue to inherit the VPC main route table; Terraform asserts that
 relationship during controlled operations but does not own redundant route-table association
-resources. The reserved EIP remains unattached. `edge` owns future Cloudflare ingress automation.
-The old EC2 instance and current RDS instance remain unchanged and outside this ownership slice.
+resources. The reserved EIP remains unattached.
+
+The `production` root also owns two private database subnets and their VPC-local-only route table,
+an origin security group with no ingress, a database security group that accepts PostgreSQL only
+from that origin group, an encrypted private PostgreSQL RDS instance with managed master
+credentials, an empty runtime-secret container, and a protected recovery bucket. The runtime
+secret has no value until Slice 4 creates its first version outside Terraform. Recovery objects
+tagged as verified after an off-cloud copy expire after 14 days; all current versions expire after
+90 days, and both rules permanently expire the resulting noncurrent data version one day later.
+
+The origin security group carries the public semantic discovery tag
+`jobcron:edge-target = origin-security-group`. The adopted canonical VPC remains untagged because
+Window 1 forbids updating it; Slice 5 derives the VPC from the tagged security group's `vpc_id`.
+`edge` owns future Cloudflare ingress automation. The old EC2 instance and prior RDS instance
+remain unchanged rollback resources outside this ownership slice.
 
 The bootstrap root was first applied with local state and then migrated into the protected S3
 backend. All roots use separate state keys and native S3 lock files. Bucket versioning supports

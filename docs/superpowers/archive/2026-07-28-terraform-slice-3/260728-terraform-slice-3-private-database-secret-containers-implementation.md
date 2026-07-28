@@ -1241,14 +1241,14 @@ eleven database/network addresses listed above.
 - Consumes the approved production saved plan.
 - Produces value-blind exit evidence and private recovery identifiers.
 
-- [ ] **Step 1: Revalidate immediately before apply**
+- [x] **Step 1: Revalidate immediately before apply**
 
 Require unchanged code commit, plan digest, state serial, credentials,
 inventory fingerprints, CIDR availability, collisions, and cost verdict.
 Re-run the production plan checker. Any difference invalidates review and
 requires a regenerated plan and new reviewer approval.
 
-- [ ] **Step 2: Apply only the reviewed production plan**
+- [x] **Step 2: Apply only the reviewed production plan**
 
 ```bash
 terraform -chdir=infra/terraform/production apply \
@@ -1258,7 +1258,7 @@ terraform -chdir=infra/terraform/production apply \
 Do not use `-auto-approve`; the saved-plan filename is the authorization
 boundary. Do not target resources.
 
-- [ ] **Step 3: Verify network and security privately**
+- [x] **Step 3: Verify network and security privately**
 
 Capture read-only AWS responses to files and assert without printing values:
 
@@ -1271,7 +1271,7 @@ Capture read-only AWS responses to files and assert without printing values:
   origin group; and
 - there is no public CIDR ingress.
 
-- [ ] **Step 4: Verify RDS and secret behavior privately**
+- [x] **Step 4: Verify RDS and secret behavior privately**
 
 Wait for RDS `available`, then assert:
 
@@ -1288,7 +1288,7 @@ Wait for RDS `available`, then assert:
 
 Never call `GetSecretValue`.
 
-- [ ] **Step 5: Verify recovery bucket privately**
+- [x] **Step 5: Verify recovery bucket privately**
 
 Assert all public-access-block flags, `Enabled` versioning, AES256 default
 encryption, and the TLS-deny policy. Assert the enabled
@@ -1299,7 +1299,7 @@ both rules permanently expire the resulting noncurrent data version one day
 later. Confirm there are no other lifecycle rules and the bucket is empty. Do
 not upload a test object in this creation-only slice.
 
-- [ ] **Step 6: Prove Terraform and state recovery**
+- [x] **Step 6: Prove Terraform and state recovery**
 
 Run a refresh-only saved plan and require exit code 0:
 
@@ -1325,7 +1325,7 @@ Privately record:
 Do not restore over live state and do not create a DB snapshot. Retrieval and
 parse prove the recovery path without adding an unallow-listed mutation.
 
-- [ ] **Step 7: Write the private exit verdict**
+- [x] **Step 7: Write the private exit verdict**
 
 Record only:
 
@@ -1364,7 +1364,7 @@ Any failure stops Slice 4.
 - Consumes the private Task 8 verdict.
 - Produces sanitized durable architecture and activates Slice 4 planning.
 
-- [ ] **Step 1: Update maintained documentation**
+- [x] **Step 1: Update maintained documentation**
 
 Document only the resource classes and security boundaries. Do not publish
 names, IDs, CIDRs, AZs, endpoints, state versions, or plan digests. State that
@@ -1376,19 +1376,19 @@ Explicitly note that the canonical VPC remains untagged because Window 1
 forbids updating the adopted VPC; Slice 5 derives the VPC from the tagged
 security group's `vpc_id`.
 
-- [ ] **Step 2: Close Slice 3 gates and activate Slice 4**
+- [x] **Step 2: Close Slice 3 gates and activate Slice 4**
 
 Mark only the Slice 3 authorization checklist items supported by Task 8.
 Update the roadmap completion baseline, archive links, and Slice 4 status.
 
-- [ ] **Step 3: Write sanitized verification**
+- [x] **Step 3: Write sanitized verification**
 
 Include commit range, test commands/pass counts, value-blind plan counts, exact
 resource-address allow-list, recovery checks, rollback-resource equality, and
 confirmation that no private value was published. Do not include private
 digests.
 
-- [ ] **Step 4: Run publication gates**
+- [x] **Step 4: Run publication gates**
 
 ```bash
 git diff --check
@@ -1418,7 +1418,7 @@ git diff --cached
 Manually inspect the complete staged diff for credentials, personal data,
 private topology, identifiers, endpoints, names, and operational evidence.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "docs: close Terraform infrastructure slice 3"
