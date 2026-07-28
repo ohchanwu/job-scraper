@@ -992,11 +992,15 @@ Write full JSON responses, never stdout, for:
 ```text
 ec2 describe-availability-zones
 ec2 describe-vpcs
+ec2 describe-instances
+ec2 describe-addresses
 ec2 describe-subnets
 ec2 describe-route-tables
 ec2 describe-security-groups
 rds describe-db-instances
 rds describe-db-engine-versions for postgres 18.4
+rds describe-account-attributes
+service-quotas list-service-quotas for VPC and RDS
 s3api list-buckets
 secretsmanager list-secrets
 ```
@@ -1048,8 +1052,11 @@ Merge these values with `private-subnets.json` into
 - [ ] **Step 5: Prove absence and collision checks**
 
 Privately require that the derived DB identifier, secret name, and bucket name
-do not already exist. Stop instead of adopting, importing, renaming, or
-replacing a collision.
+do not already exist. Prove the PostgreSQL 18.4 offering is available, the
+subnet/route-table/security-group/RDS quotas can carry the exact additions, and
+fingerprint the old EC2, old RDS, and unattached-EIP rollback resources. Stop
+instead of adopting, importing, renaming, replacing a collision, or proceeding
+with insufficient capacity.
 
 - [ ] **Step 6: Calculate the aggregate cost gate**
 
