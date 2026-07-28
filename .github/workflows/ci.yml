@@ -44,6 +44,8 @@ jobs:
           JOBCRON_CREDENTIAL_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
           JOBCRON_PROXY_SECRET: synthetic-proxy-secret
           JOBCRON_DAILY_SCRAPE_TIME: "06:15"
+          JOBCRON_SIGNUP_ACCESS_CODE: synthetic-cohort-code
+          JOBCRON_STAGE1_SPONSOR_USER_ID: "42"
         run: |
           sh -n scripts/verify-production-compose.sh
           sh -n scripts/inspect-production-compose-render.sh

@@ -31,6 +31,7 @@ type composeConfig struct {
 
 type composeService struct {
 	Image       string            `yaml:"image"`
+	PullPolicy  string            `yaml:"pull_policy"`
 	Build       any               `yaml:"build"`
 	Command     []string          `yaml:"command"`
 	Environment map[string]string `yaml:"environment"`
@@ -59,7 +60,8 @@ type composeLogging struct {
 }
 
 type composeNetwork struct {
-	Internal bool `yaml:"internal"`
+	Driver   string `yaml:"driver"`
+	Internal bool   `yaml:"internal"`
 }
 
 func TestProductionComposeRequiresCredentialEncryptionKey(t *testing.T) {
@@ -135,6 +137,12 @@ func TestProductionComposeUsesImmutableImageReference(t *testing.T) {
 	}
 }
 
+func TestProductionComposeNeverPullsDuringComposeStart(t *testing.T) {
+	if got := renderCompose(t).Services["app"].PullPolicy; got != "never" {
+		t.Fatalf("app pull_policy = %q, want never after the runtime helper pulls the digest", got)
+	}
+}
+
 func TestProductionComposeBindsOnlyLoopbackPorts(t *testing.T) {
 	config := renderCompose(t)
 	want := map[string]composePort{
@@ -149,16 +157,24 @@ func TestProductionComposeBindsOnlyLoopbackPorts(t *testing.T) {
 	}
 }
 
-func TestProductionComposeUsesInternalRuntimeNetworkAndDisablesMetadata(t *testing.T) {
+func TestProductionComposeUsesSplitRuntimeAndOutboundNetworks(t *testing.T) {
 	config := renderCompose(t)
-	network, ok := config.Networks["runtime"]
-	if !ok || !network.Internal {
-		t.Fatalf("runtime network = %#v (present %v), want internal network", network, ok)
+	runtimeNetwork, ok := config.Networks["runtime"]
+	if !ok || !runtimeNetwork.Internal {
+		t.Fatalf("runtime network = %#v (present %v), want internal network", runtimeNetwork, ok)
+	}
+	outboundNetwork, ok := config.Networks["outbound"]
+	if !ok || outboundNetwork.Internal || outboundNetwork.Driver != "bridge" {
+		t.Fatalf("outbound network = %#v (present %v), want non-internal bridge", outboundNetwork, ok)
+	}
+	if got := config.Services["app"].Networks; len(got) != 2 ||
+		got["runtime"] != nil || got["outbound"] != nil {
+		t.Errorf("app networks = %#v, want exactly runtime and outbound", got)
+	}
+	if got := config.Services["caddy"].Networks; len(got) != 1 || got["runtime"] != nil {
+		t.Errorf("caddy networks = %#v, want only runtime", got)
 	}
 	for _, service := range []string{"app", "caddy"} {
-		if _, ok := config.Services[service].Networks["runtime"]; !ok {
-			t.Errorf("%s is not attached to the internal runtime network", service)
-		}
 		if got := config.Services[service].Environment["AWS_EC2_METADATA_DISABLED"]; got != "true" {
 			t.Errorf("%s AWS_EC2_METADATA_DISABLED = %q, want true", service, got)
 		}
@@ -254,37 +270,25 @@ func TestProductionComposeSharesRequiredProxySecret(t *testing.T) {
 	}
 }
 
-func TestProductionComposeLeavesCohortRuntimeVariablesUnset(t *testing.T) {
-	output, err := composeCommand(true).CombinedOutput()
-	if err != nil {
-		t.Fatalf("docker compose config: %v\n%s", err, output)
-	}
-	var config struct {
-		Services map[string]struct {
-			Environment map[string]*string `yaml:"environment"`
-		} `yaml:"services"`
-	}
-	if err := yaml.Unmarshal(output, &config); err != nil {
-		t.Fatalf("parse rendered compose config: %v\n%s", err, output)
-	}
-	app := config.Services["app"]
+func TestProductionComposeRequiresCohortRuntimeVariables(t *testing.T) {
 	for _, name := range []string{"JOBCRON_SIGNUP_ACCESS_CODE", "JOBCRON_STAGE1_SPONSOR_USER_ID"} {
-		value, ok := app.Environment[name]
-		if !ok || value != nil {
-			t.Errorf("%s = %v (present %v), want explicit null passthrough", name, value, ok)
-		}
+		t.Run(name, func(t *testing.T) {
+			cmd := composeCommand(true)
+			cmd.Env = withoutEnvironment(cmd.Env, name)
+			output, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("docker compose config succeeded without %s", name)
+			}
+			if !strings.Contains(string(output), name) {
+				t.Fatalf("docker compose config failed without naming %s:\n%s", name, output)
+			}
+		})
 	}
 }
 
 func renderCompose(t *testing.T) composeConfig {
 	t.Helper()
-	cmd := composeCommand(true)
-	cmd.Env = append(cmd.Env,
-		"JOBCRON_SIGNUP_ACCESS_CODE="+testSignupAccessCode,
-		"JOBCRON_STAGE1_SPONSOR_USER_ID="+testSponsorUserID,
-		proxySecretEnvName+"="+testProxySecret,
-	)
-	return renderComposeCommand(t, cmd)
+	return renderComposeCommand(t, composeCommand(true))
 }
 
 func renderComposeCommand(t *testing.T, cmd *exec.Cmd) composeConfig {
@@ -318,6 +322,8 @@ func composeCommand(includeCredentialKey bool) *exec.Cmd {
 		"DATABASE_URL="+testDatabaseURL,
 		"SESSION_SECRET="+testSessionSecret,
 		"JOBCRON_DAILY_SCRAPE_TIME="+testDailyTime,
+		"JOBCRON_SIGNUP_ACCESS_CODE="+testSignupAccessCode,
+		"JOBCRON_STAGE1_SPONSOR_USER_ID="+testSponsorUserID,
 		proxySecretEnvName+"="+testProxySecret,
 	)
 	if includeCredentialKey {

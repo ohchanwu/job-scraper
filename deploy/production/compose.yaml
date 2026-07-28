@@ -8,7 +8,7 @@
 services:
   app:
     image: "${JOBCRON_IMAGE:?set JOBCRON_IMAGE in .env}"
-    pull_policy: always
+    pull_policy: never
     command:
       - --no-open
       - --host
@@ -26,8 +26,10 @@ services:
         ${JOBCRON_CREDENTIAL_ENCRYPTION_KEY:?set JOBCRON_CREDENTIAL_ENCRYPTION_KEY in .env}
       JOBCRON_SCHEDULER_ENABLED: "1"
       JOBCRON_DAILY_SCRAPE_TIME: "${JOBCRON_DAILY_SCRAPE_TIME:-05:00}"
-      JOBCRON_SIGNUP_ACCESS_CODE:
-      JOBCRON_STAGE1_SPONSOR_USER_ID:
+      JOBCRON_SIGNUP_ACCESS_CODE: >-
+        ${JOBCRON_SIGNUP_ACCESS_CODE:?set JOBCRON_SIGNUP_ACCESS_CODE in .env}
+      JOBCRON_STAGE1_SPONSOR_USER_ID: >-
+        ${JOBCRON_STAGE1_SPONSOR_USER_ID:?set JOBCRON_STAGE1_SPONSOR_USER_ID in .env}
       JOBCRON_PROXY_SECRET: "${JOBCRON_PROXY_SECRET:?set JOBCRON_PROXY_SECRET in .env}"
       AWS_EC2_METADATA_DISABLED: "true"
     ports:
@@ -39,6 +41,7 @@ services:
       - "7777"
     networks:
       - runtime
+      - outbound
     logging:
       driver: json-file
       options:
@@ -79,3 +82,5 @@ volumes:
 networks:
   runtime:
     internal: true
+  outbound:
+    driver: bridge

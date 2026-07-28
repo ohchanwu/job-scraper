@@ -20,6 +20,8 @@ const (
 	syntheticKey            = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
 	syntheticProxySecret    = "synthetic-proxy-secret"
 	syntheticDailyTime      = "06:15"
+	syntheticSignupCode     = "synthetic-cohort-code"
+	syntheticSponsorUserID  = "42"
 )
 
 var syntheticProductionEnvironment = []string{
@@ -29,6 +31,8 @@ var syntheticProductionEnvironment = []string{
 	"JOBCRON_CREDENTIAL_ENCRYPTION_KEY=" + syntheticKey,
 	"JOBCRON_PROXY_SECRET=" + syntheticProxySecret,
 	"JOBCRON_DAILY_SCRAPE_TIME=" + syntheticDailyTime,
+	"JOBCRON_SIGNUP_ACCESS_CODE=" + syntheticSignupCode,
+	"JOBCRON_STAGE1_SPONSOR_USER_ID=" + syntheticSponsorUserID,
 }
 
 func TestProductionComposeVerifierSyntax(t *testing.T) {
@@ -185,6 +189,8 @@ func TestProductionComposeVerifierRequiresSyntheticInputs(t *testing.T) {
 		"SESSION_SECRET",
 		"JOBCRON_CREDENTIAL_ENCRYPTION_KEY",
 		"JOBCRON_PROXY_SECRET",
+		"JOBCRON_SIGNUP_ACCESS_CODE",
+		"JOBCRON_STAGE1_SPONSOR_USER_ID",
 	} {
 		t.Run(name, func(t *testing.T) {
 			result := runProductionVerifier(t, nil, removeEnvironment(syntheticProductionEnvironment, name))
@@ -281,8 +287,29 @@ func TestProductionComposeVerifierRejectsUnsafeTopology(t *testing.T) {
 		},
 		{
 			name:     "runtime network is externally routable",
-			contract: "networks.runtime",
+			contract: "networks",
 			mutate:   replaceOnce("    internal: true", "    internal: false"),
+		},
+		{
+			name:     "app omits outbound network",
+			contract: "networks",
+			mutate: replaceOnce(
+				"    networks:\n      - runtime\n      - outbound",
+				"    networks:\n      - runtime",
+			),
+		},
+		{
+			name:     "Caddy joins outbound network",
+			contract: "networks",
+			mutate: replaceOnce(
+				"    networks:\n      - runtime\n    logging:",
+				"    networks:\n      - runtime\n      - outbound\n    logging:",
+			),
+		},
+		{
+			name:     "outbound network is not a bridge",
+			contract: "networks",
+			mutate:   replaceOnce("    driver: bridge", "    driver: overlay"),
 		},
 		{
 			name:     "Caddy omits transient certificate mount",
@@ -319,6 +346,8 @@ func TestProductionComposeVerifierRejectsMissingAppEnvironment(t *testing.T) {
 		"AWS_EC2_METADATA_DISABLED",
 		"JOBCRON_SCHEDULER_ENABLED",
 		"JOBCRON_DAILY_SCRAPE_TIME",
+		"JOBCRON_SIGNUP_ACCESS_CODE",
+		"JOBCRON_STAGE1_SPONSOR_USER_ID",
 	} {
 		t.Run(name, func(t *testing.T) {
 			result := runProductionVerifier(t, removeComposeEnvironment(name), syntheticProductionEnvironment)
@@ -334,8 +363,8 @@ func TestProductionComposeVerifierRejectsMissingAppEnvironment(t *testing.T) {
 	})
 	t.Run("JOBCRON_PROXY_SECRET", func(t *testing.T) {
 		result := runProductionVerifier(t, replaceOnce(
-			"      JOBCRON_STAGE1_SPONSOR_USER_ID:\n      JOBCRON_PROXY_SECRET: \"${JOBCRON_PROXY_SECRET:?set JOBCRON_PROXY_SECRET in .env}\"",
-			"      JOBCRON_STAGE1_SPONSOR_USER_ID:",
+			"      JOBCRON_STAGE1_SPONSOR_USER_ID: >-\n        ${JOBCRON_STAGE1_SPONSOR_USER_ID:?set JOBCRON_STAGE1_SPONSOR_USER_ID in .env}\n      JOBCRON_PROXY_SECRET: \"${JOBCRON_PROXY_SECRET:?set JOBCRON_PROXY_SECRET in .env}\"",
+			"      JOBCRON_STAGE1_SPONSOR_USER_ID: >-\n        ${JOBCRON_STAGE1_SPONSOR_USER_ID:?set JOBCRON_STAGE1_SPONSOR_USER_ID in .env}",
 		), syntheticProductionEnvironment)
 		assertRejectedContract(t, result, "services.app.environment.JOBCRON_PROXY_SECRET")
 	})
@@ -375,8 +404,8 @@ func TestProductionComposeVerifierRejectsMismatchedSensitiveEnvironment(t *testi
 			name:          "JOBCRON_PROXY_SECRET",
 			mismatchValue: "mismatched-proxy-secret",
 			mutate: replaceOnce(
-				"      JOBCRON_STAGE1_SPONSOR_USER_ID:\n      JOBCRON_PROXY_SECRET: \"${JOBCRON_PROXY_SECRET:?set JOBCRON_PROXY_SECRET in .env}\"",
-				"      JOBCRON_STAGE1_SPONSOR_USER_ID:\n      JOBCRON_PROXY_SECRET: \"mismatched-proxy-secret\"",
+				"      JOBCRON_STAGE1_SPONSOR_USER_ID: >-\n        ${JOBCRON_STAGE1_SPONSOR_USER_ID:?set JOBCRON_STAGE1_SPONSOR_USER_ID in .env}\n      JOBCRON_PROXY_SECRET: \"${JOBCRON_PROXY_SECRET:?set JOBCRON_PROXY_SECRET in .env}\"",
+				"      JOBCRON_STAGE1_SPONSOR_USER_ID: >-\n        ${JOBCRON_STAGE1_SPONSOR_USER_ID:?set JOBCRON_STAGE1_SPONSOR_USER_ID in .env}\n      JOBCRON_PROXY_SECRET: \"mismatched-proxy-secret\"",
 			),
 		},
 	}
@@ -409,6 +438,11 @@ func TestProductionComposeVerifierRejectsWrongProductionSettings(t *testing.T) {
 		contract string
 		mutate   func(string) string
 	}{
+		{
+			name:     "registry pull during compose start",
+			contract: "services.app.pull_policy",
+			mutate:   replaceOnce("    pull_policy: never", "    pull_policy: always"),
+		},
 		{
 			name:     "non-production mode",
 			contract: "services.app.environment.JOBCRON_ENV",
@@ -575,6 +609,8 @@ func TestProductionComposeCIUsesSyntheticInputs(t *testing.T) {
 		"JOBCRON_CREDENTIAL_ENCRYPTION_KEY": syntheticKey,
 		"JOBCRON_PROXY_SECRET":              syntheticProxySecret,
 		"JOBCRON_DAILY_SCRAPE_TIME":         syntheticDailyTime,
+		"JOBCRON_SIGNUP_ACCESS_CODE":        syntheticSignupCode,
+		"JOBCRON_STAGE1_SPONSOR_USER_ID":    syntheticSponsorUserID,
 	}
 	if len(contractStep.Env) != len(wantEnvironment) {
 		t.Fatalf("production Compose CI environment has %d entries, want %d synthetic inputs", len(contractStep.Env), len(wantEnvironment))
@@ -655,6 +691,8 @@ func assertRejectedContract(t *testing.T, result verifierResult, contract string
 		syntheticKey,
 		syntheticProxySecret,
 		syntheticDailyTime,
+		syntheticSignupCode,
+		syntheticSponsorUserID,
 	} {
 		if strings.Contains(result.output, value) {
 			t.Fatalf("rejection output disclosed a synthetic environment value: %q", result.output)

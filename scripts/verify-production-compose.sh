@@ -13,6 +13,10 @@ fail() {
 [ -n "${JOBCRON_CREDENTIAL_ENCRYPTION_KEY:-}" ] ||
 	fail "required variable JOBCRON_CREDENTIAL_ENCRYPTION_KEY"
 [ -n "${JOBCRON_PROXY_SECRET:-}" ] || fail "required variable JOBCRON_PROXY_SECRET"
+[ -n "${JOBCRON_SIGNUP_ACCESS_CODE:-}" ] ||
+	fail "required variable JOBCRON_SIGNUP_ACCESS_CODE"
+[ -n "${JOBCRON_STAGE1_SPONSOR_USER_ID:-}" ] ||
+	fail "required variable JOBCRON_STAGE1_SPONSOR_USER_ID"
 
 command -v docker >/dev/null 2>&1 || fail "docker compose command"
 command -v jq >/dev/null 2>&1 || fail "jq structured Compose inspector"
@@ -87,10 +91,12 @@ check_contract "services.caddy.ports must bind only loopback 8443 to 443" '
 	$ports[0].target == 443 and
 	$ports[0].protocol == "tcp"
 '
-check_contract "networks.runtime must be internal and shared only by app and Caddy" '
+check_contract "networks must isolate proxy traffic while preserving app egress" '
 	.networks.runtime.internal == true and
-	(.services.app.networks | has("runtime")) and
-	(.services.caddy.networks | has("runtime"))
+	.networks.outbound.driver == "bridge" and
+	((.networks.outbound.internal // false) == false) and
+	((.services.app.networks | keys | sort) == ["outbound", "runtime"]) and
+	((.services.caddy.networks | keys) == ["runtime"])
 '
 check_contract "services.caddy.volumes must mount transient Origin CA read-only" '
 	[.services.caddy.volumes[] |
@@ -145,11 +151,17 @@ check_contract "services.app.environment.JOBCRON_DAILY_SCRAPE_TIME must preserve
 	.services.app.environment.JOBCRON_DAILY_SCRAPE_TIME ==
 	(if $daily_time == "" then "05:00" else $daily_time end)
 '
+check_contract "services.app.environment.JOBCRON_SIGNUP_ACCESS_CODE" \
+	'.services.app.environment.JOBCRON_SIGNUP_ACCESS_CODE == env.JOBCRON_SIGNUP_ACCESS_CODE'
+check_contract "services.app.environment.JOBCRON_STAGE1_SPONSOR_USER_ID" \
+	'.services.app.environment.JOBCRON_STAGE1_SPONSOR_USER_ID == env.JOBCRON_STAGE1_SPONSOR_USER_ID'
 check_contract "services.app.command must enforce no-open host and port" '
 	.services.app.command == ["--no-open", "--host", "0.0.0.0", "--port", "7777"]
 '
 check_contract "services.app.image must equal JOBCRON_IMAGE" \
 	'.services.app.image == env.JOBCRON_IMAGE'
+check_contract "services.app.pull_policy must be never" \
+	'.services.app.pull_policy == "never"'
 check_contract "services.app.image must use private GHCR sha256 digest" \
 	'(.services.app.image | type == "string") and
 	 (.services.app.image |
