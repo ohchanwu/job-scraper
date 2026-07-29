@@ -36,6 +36,15 @@ remove_line() {
   mv "$fixture.tmp" "$fixture"
 }
 
+remove_first_line() {
+  local line="$1"
+  awk -v line="$line" '
+    !removed && $0 == line { removed = 1; next }
+    { print }
+  ' "$fixture" >"$fixture.tmp"
+  mv "$fixture.tmp" "$fixture"
+}
+
 insert_after() {
   local line="$1"
   local addition="$2"
@@ -46,6 +55,62 @@ insert_after() {
       inserted = 1
     }
     END { if (!inserted) exit 1 }
+  ' "$fixture" >"$fixture.tmp"
+  mv "$fixture.tmp" "$fixture"
+}
+
+move_package_gate_after_build() {
+  awk '
+    $0 == "          curl --fail --silent --show-error \\" { capture = 1 }
+    capture {
+      block = block $0 ORS
+      if ($0 ~ /^          jq -e /) capture = 0
+      next
+    }
+    { print }
+    $0 == "          printf '\''Image publication succeeded\\n'\''" {
+      printf "%s", block
+    }
+  ' "$fixture" >"$fixture.tmp"
+  mv "$fixture.tmp" "$fixture"
+}
+
+move_package_output_after_url() {
+  local target="$1"
+  awk -v target="$target" '
+    $0 == "            --output \"$package_response\" \\" {
+      outputs++
+    }
+    outputs == target && !moved &&
+      $0 == "            --output \"$package_response\" \\" {
+      output = $0
+      moved = 1
+      next
+    }
+    { print }
+    moved == 1 &&
+      $0 == "            \"https://api.github.com/users/${GITHUB_REPOSITORY_OWNER}/packages/container/jobcron\"" {
+      print output
+      moved = 2
+    }
+  ' "$fixture" >"$fixture.tmp"
+  mv "$fixture.tmp" "$fixture"
+}
+
+restore_stale_package_response_before_post_gate() {
+  awk '
+    $0 == "          jq -e '\''.visibility == \"private\"'\'' \"$package_response\" >/dev/null" {
+      gates++
+      if (gates == 1) {
+        print
+        print "          cp \"$package_response\" \"$package_response.saved\""
+        next
+      }
+      if (gates == 2) {
+        print "          cp \"$package_response.saved\" \"$package_response\""
+      }
+    }
+    { print }
   ' "$fixture" >"$fixture.tmp"
   mv "$fixture.tmp" "$fixture"
 }
@@ -124,10 +189,41 @@ expect_rejected "exported build metadata" \
 expect_rejected "digest in summary" \
   insert_after '          echo "Visibility: private"' \
   '          echo "Digest: private"' || failures=$((failures + 1))
-expect_rejected "missing private visibility check" \
-  remove_line \
+expect_rejected "missing one package visibility fetch" \
+  remove_first_line \
+  '          curl --fail --silent --show-error \' ||
+  failures=$((failures + 1))
+expect_rejected "extra package visibility fetch" \
+  insert_after \
+  '          curl --fail --silent --show-error \' \
+  '          curl --fail --silent --show-error \' ||
+  failures=$((failures + 1))
+expect_rejected "missing one package response output" \
+  remove_first_line \
+  '            --output "$package_response" \' ||
+  failures=$((failures + 1))
+expect_rejected "extra package response output" \
+  insert_after \
+  '            --output "$package_response" \' \
+  '            --output "$package_response" \' ||
+  failures=$((failures + 1))
+expect_rejected "package response output after endpoint URL" \
+  move_package_output_after_url 1 || failures=$((failures + 1))
+expect_rejected "post-push package response output after endpoint URL" \
+  move_package_output_after_url 2 || failures=$((failures + 1))
+expect_rejected "missing one private visibility gate" \
+  remove_first_line \
   '          jq -e '"'"'.visibility == "private"'"'"' "$package_response" >/dev/null' ||
   failures=$((failures + 1))
+expect_rejected "extra private visibility gate" \
+  insert_after \
+  '          jq -e '"'"'.visibility == "private"'"'"' "$package_response" >/dev/null' \
+  '          jq -e '"'"'.visibility == "private"'"'"' "$package_response" >/dev/null' ||
+  failures=$((failures + 1))
+expect_rejected "late private visibility check" \
+  move_package_gate_after_build || failures=$((failures + 1))
+expect_rejected "stale pre-push package response restored before post gate" \
+  restore_stale_package_response_before_post_gate || failures=$((failures + 1))
 expect_rejected "immutable tag overwrite" \
   remove_line "            exit 1" || failures=$((failures + 1))
 expect_rejected "repository publication secret" \
@@ -171,6 +267,7 @@ cat >"$fake_bin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"$FAKE_DOCKER_LOG"
+printf 'docker %s\n' "$*" >>"$FAKE_EVENT_LOG"
 case "${1:-}" in
   login)
     cat >/dev/null
@@ -204,10 +301,28 @@ EOF
 cat >"$fake_bin/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+call_count="$(($(cat "$FAKE_CURL_COUNT_FILE") + 1))"
+printf '%s\n' "$call_count" >"$FAKE_CURL_COUNT_FILE"
+printf 'curl %s\n' "$call_count" >>"$FAKE_EVENT_LOG"
+package_mode="$FAKE_PACKAGE_MODE_PRE"
+if ((call_count == 2)); then
+  package_mode="$FAKE_PACKAGE_MODE_POST"
+fi
 while (($#)); do
   if [[ "$1" == "--output" ]]; then
-    printf '{"visibility":"private"}\n' >"$2"
-    exit 0
+    case "$package_mode" in
+      private)
+        printf '{"visibility":"private"}\n' >"$2"
+        exit 0
+        ;;
+      public)
+        printf '{"visibility":"public"}\n' >"$2"
+        exit 0
+        ;;
+      missing)
+        exit 22
+        ;;
+    esac
   fi
   shift
 done
@@ -215,19 +330,34 @@ exit 64
 EOF
 cat >"$fake_bin/jq" <<'EOF'
 #!/usr/bin/env bash
-exit 0
+printf 'jq %s\n' "$(cat "$FAKE_CURL_COUNT_FILE")" >>"$FAKE_EVENT_LOG"
+grep -Fqx '{"visibility":"private"}' "${@: -1}"
 EOF
 chmod +x "$fake_bin"/*
 
 run_publish() {
   local mode="$1"
+  local package_mode_pre="${2:-private}"
+  local package_mode_post="${3:-private}"
   local case_root="$fixture_root/run-$mode"
+  if [[ "$package_mode_pre" != "private" ]]; then
+    case_root="$case_root-$package_mode_pre"
+  fi
+  if [[ "$package_mode_post" != "private" ]]; then
+    case_root="$case_root-post-$package_mode_post"
+  fi
   mkdir "$case_root"
   : >"$case_root/docker.log"
+  : >"$case_root/event.log"
+  printf '0\n' >"$case_root/curl-count"
   : >"$case_root/summary"
   PATH="$fake_bin:$PATH" \
     FAKE_DOCKER_LOG="$case_root/docker.log" \
+    FAKE_EVENT_LOG="$case_root/event.log" \
+    FAKE_CURL_COUNT_FILE="$case_root/curl-count" \
     FAKE_INSPECT_MODE="$mode" \
+    FAKE_PACKAGE_MODE_PRE="$package_mode_pre" \
+    FAKE_PACKAGE_MODE_POST="$package_mode_post" \
     GHCR_TOKEN="synthetic-token" \
     GHCR_USER="synthetic-user" \
     GITHUB_REPOSITORY_OWNER="synthetic-owner" \
@@ -237,6 +367,24 @@ run_publish() {
     bash "$publish_script" >"$case_root/output" 2>&1
 }
 
+if run_publish absent missing; then
+  printf 'FAIL: missing package reached publication\n' >&2
+  failures=$((failures + 1))
+elif grep -Eq "imagetools inspect|buildx build" \
+  "$fixture_root/run-absent-missing/docker.log"; then
+  printf 'FAIL: missing package reached manifest lookup or build\n' >&2
+  failures=$((failures + 1))
+fi
+
+if run_publish absent public; then
+  printf 'FAIL: public package reached publication\n' >&2
+  failures=$((failures + 1))
+elif grep -Eq "imagetools inspect|buildx build" \
+  "$fixture_root/run-absent-public/docker.log"; then
+  printf 'FAIL: public package reached manifest lookup or build\n' >&2
+  failures=$((failures + 1))
+fi
+
 if ! run_publish absent; then
   printf 'FAIL: rejected a narrowly recognized absent manifest\n' >&2
   failures=$((failures + 1))
@@ -245,6 +393,36 @@ elif ! grep -Fq "buildx build" "$fixture_root/run-absent/docker.log"; then
   failures=$((failures + 1))
 elif ! grep -Fq "logout ghcr.io" "$fixture_root/run-absent/docker.log"; then
   printf 'FAIL: successful publication did not log out of GHCR\n' >&2
+  failures=$((failures + 1))
+elif [[ "$(cat "$fixture_root/run-absent/curl-count")" != "2" ]]; then
+  printf 'FAIL: successful publication did not fetch package visibility exactly twice\n' >&2
+  failures=$((failures + 1))
+elif ! awk '
+  $0 == "curl 1" && state == 0 { state = 1; next }
+  $0 == "jq 1" && state == 1 { state = 2; next }
+  /^docker buildx imagetools inspect / && state == 2 { state = 3; next }
+  /^docker buildx build / && state == 3 { state = 4; next }
+  $0 == "curl 2" && state == 4 { state = 5; next }
+  $0 == "jq 2" && state == 5 { state = 6; next }
+  END { exit state == 6 ? 0 : 1 }
+' "$fixture_root/run-absent/event.log"; then
+  printf 'FAIL: package visibility gates are not ordered around manifest lookup and build\n' >&2
+  failures=$((failures + 1))
+fi
+
+if run_publish absent private public; then
+  printf 'FAIL: public package after publication was accepted\n' >&2
+  failures=$((failures + 1))
+elif ! grep -Fq "buildx build" "$fixture_root/run-absent-post-public/docker.log"; then
+  printf 'FAIL: post-public package check failed before publication\n' >&2
+  failures=$((failures + 1))
+fi
+
+if run_publish absent private missing; then
+  printf 'FAIL: missing package after publication was accepted\n' >&2
+  failures=$((failures + 1))
+elif ! grep -Fq "buildx build" "$fixture_root/run-absent-post-missing/docker.log"; then
+  printf 'FAIL: post-missing package check failed before publication\n' >&2
   failures=$((failures + 1))
 fi
 

@@ -61,6 +61,14 @@ jobs:
           printf '%s' "$GHCR_TOKEN" |
             docker login ghcr.io --username "$GHCR_USER" --password-stdin >/dev/null 2>&1
 
+          curl --fail --silent --show-error \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GHCR_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$package_response" \
+            "https://api.github.com/users/${GITHUB_REPOSITORY_OWNER}/packages/container/jobcron"
+          jq -e '.visibility == "private"' "$package_response" >/dev/null
+
           if docker buildx imagetools inspect "$image" >"$manifest_lookup" 2>&1; then
             printf 'Immutable image tag already exists\n' >&2
             exit 1

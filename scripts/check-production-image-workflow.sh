@@ -68,9 +68,58 @@ grep -Fq 'rm -f "$build_log" "$metadata_file" "$package_response" "$manifest_loo
   "$workflow" || fail
 
 grep -Fq 'curl --fail --silent --show-error' "$workflow" || fail
-grep -Fq -- '--output "$package_response"' "$workflow" || fail
 grep -Fq 'jq -e '\''.visibility == "private"'\'' "$package_response" >/dev/null' \
   "$workflow" || fail
+test "$(grep -Fc 'curl --fail --silent --show-error' "$workflow")" -eq 2 || fail
+test "$(grep -Fxc '            --output "$package_response" \' "$workflow")" -eq 2 ||
+  fail
+test "$(grep -Fc 'jq -e '\''.visibility == "private"'\'' "$package_response" >/dev/null' \
+  "$workflow")" -eq 2 || fail
+package_privacy_blocks="$(
+  awk '
+    $0 == "          curl --fail --silent --show-error \\" {
+      getline
+      if ($0 != "            --header \"Accept: application/vnd.github+json\" \\") next
+      getline
+      if ($0 != "            --header \"Authorization: Bearer ${GHCR_TOKEN}\" \\") next
+      getline
+      if ($0 != "            --header \"X-GitHub-Api-Version: 2022-11-28\" \\") next
+      getline
+      if ($0 != "            --output \"$package_response\" \\") next
+      getline
+      if ($0 != "            \"https://api.github.com/users/${GITHUB_REPOSITORY_OWNER}/packages/container/jobcron\"") next
+      getline
+      if ($0 == "          jq -e '\''.visibility == \"private\"'\'' \"$package_response\" >/dev/null") blocks++
+    }
+    END { print blocks + 0 }
+  ' "$workflow"
+)"
+test "$package_privacy_blocks" -eq 2 || fail
+package_fetch_lines="$(grep -nF 'curl --fail --silent --show-error' "$workflow" | cut -d: -f1)"
+package_output_lines="$(
+  grep -nFx '            --output "$package_response" \' "$workflow" | cut -d: -f1
+)"
+package_gate_lines="$(
+  grep -nF 'jq -e '\''.visibility == "private"'\'' "$package_response" >/dev/null' \
+    "$workflow" | cut -d: -f1
+)"
+pre_fetch_line="$(printf '%s\n' "$package_fetch_lines" | sed -n '1p')"
+post_fetch_line="$(printf '%s\n' "$package_fetch_lines" | sed -n '2p')"
+pre_output_line="$(printf '%s\n' "$package_output_lines" | sed -n '1p')"
+post_output_line="$(printf '%s\n' "$package_output_lines" | sed -n '2p')"
+pre_gate_line="$(printf '%s\n' "$package_gate_lines" | sed -n '1p')"
+post_gate_line="$(printf '%s\n' "$package_gate_lines" | sed -n '2p')"
+manifest_line="$(
+  grep -nF 'docker buildx imagetools inspect "$image"' "$workflow" | cut -d: -f1
+)"
+build_line="$(grep -nF 'docker buildx build --platform linux/arm64' "$workflow" | cut -d: -f1)"
+test "$pre_fetch_line" -lt "$pre_output_line" || fail
+test "$pre_output_line" -lt "$pre_gate_line" || fail
+test "$pre_gate_line" -lt "$manifest_line" || fail
+test "$manifest_line" -lt "$build_line" || fail
+test "$build_line" -lt "$post_fetch_line" || fail
+test "$post_fetch_line" -lt "$post_output_line" || fail
+test "$post_output_line" -lt "$post_gate_line" || fail
 
 grep -Eq '\b(cat|head|tail|less|more) "\$(build_log|metadata_file|package_response)"' \
   "$workflow" && fail

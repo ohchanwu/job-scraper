@@ -94,15 +94,22 @@ The authentication contract has two separate paths:
    least-privilege private credential path. A workflow-scoped `GITHUB_TOKEN`
    must not be treated as a reusable host credential.
 
-GitHub's current container-registry documentation says a new package defaults
-to private, but the workflow must still verify the actual package visibility
-after first publication. If the replacement-host pull path is absent, Mayor
-must request one private human action. The preferred fallback is a classic
-personal access token with `read:packages` only, stored through the approved
-Slice 4 private bootstrap path. The pull must use a memory-backed, one-shot
-Docker credential directory below `/run/jobcron`, with directory mode `0700`
-and file mode `0600`. The token must enter `docker login` through standard
-input, the image must be pulled by digest, and the temporary credential
+GitHub documents that a package first published by `GITHUB_TOKEN` inherits the
+repository's visibility. Because this repository is public, the image workflow
+must never create the package. Before the first candidate publication, the
+private controller must create an unlinked `jobcron` package with a classic PAT
+using only `write:packages`, verify `private` visibility through the separate
+`read:packages` path, and grant this repository Actions access without
+connecting the package to the repository. The workflow must then fail before
+manifest lookup, build, or push unless that existing package is still private.
+
+If the replacement-host pull path is absent, Mayor must request one private
+human action. The preferred fallback is a classic personal access token with
+`read:packages` only, stored through the approved Slice 4 private bootstrap
+path. The pull must use a memory-backed, one-shot Docker credential directory
+below `/run/jobcron`, with directory mode `0700` and file mode `0600`. The token
+must enter `docker login` through standard input, the image must be pulled by
+digest, and the temporary credential
 directory must be removed immediately afterward. Verification must prove that
 no persistent home-directory Docker credential file was created. The token is
 not part of the application runtime-secret payload. No registry token may

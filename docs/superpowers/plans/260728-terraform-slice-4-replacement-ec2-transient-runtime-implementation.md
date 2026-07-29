@@ -95,7 +95,8 @@ shell, `jq`, Go contract tests, and macOS `zsh`.
 Create:
 
 - `.github/workflows/publish-production-image.yml` — manual private GHCR
-  `linux/arm64` publisher using only `GITHUB_TOKEN`.
+  `linux/arm64` publisher using only `GITHUB_TOKEN` after a controller-created
+  private package bootstrap.
 - `scripts/check-production-image-workflow.sh` — static workflow policy gate.
 - `scripts/check-production-image-workflow_test.sh` — mutation tests for the
   workflow gate.
@@ -251,7 +252,8 @@ non-sensitive output.
 **Interfaces:**
 
 - Consumes: a manually supplied full `release_sha` that exists in this
-  repository.
+  repository, plus an existing unlinked private `jobcron` package with this
+  repository granted Actions access.
 - Produces: private `ghcr.io` package `jobcron` and a non-reusable tag formed
   from `sha-` plus the first 12 lowercase hexadecimal characters of
   `release_sha`. The workflow emits no digest; Task 10 resolves it privately
@@ -271,6 +273,7 @@ linux/arm64 changed
 --push removed
 build output not redirected
 digest printed, logged, exported, or written to Actions summary
+pre-push existing-private-package check removed or moved after a registry write
 private-visibility check removed
 existing immutable tag accepted for overwrite
 personal token or repository secret used for publication
@@ -295,17 +298,20 @@ The workflow must:
 4. check out that exact commit;
 5. authenticate `ghcr.io` with `${{ github.actor }}` and
    `${{ secrets.GITHUB_TOKEN }}`;
-6. authenticate a manifest lookup and refuse to build if
+6. query the owner package API without printing its response and fail unless
+   the package already exists with visibility exactly `private`; this gate must
+   run before manifest lookup, build, or push;
+7. authenticate a manifest lookup and refuse to build if
    `sha-${release_sha:0:12}` already resolves, so an immutable commit tag can
    never be reused or overwritten;
-7. build `deploy/production/Dockerfile` with Buildx for only `linux/arm64`;
-8. push `ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/jobcron:sha-${release_sha:0:12}`;
-9. redirect all Buildx stdout/stderr and metadata output to a runner-temporary
+8. build `deploy/production/Dockerfile` with Buildx for only `linux/arm64`;
+9. push `ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/jobcron:sha-${release_sha:0:12}`;
+10. redirect all Buildx stdout/stderr and metadata output to a runner-temporary
    mode-`0600` file, print only a generic success/failure message, and remove
    the temporary file before job exit;
-10. query the owner package API without printing its response and fail unless
+11. query the owner package API again without printing its response and fail unless
     visibility is exactly `private`; and
-11. write only commit, platform, and visibility to the Actions summary.
+12. write only commit, platform, and visibility to the Actions summary.
 
 Do not grant `id-token`, `actions`, `deployments`, `secrets`, or
 `packages: delete`. Do not accept a caller-supplied image name or platform.
@@ -949,7 +955,7 @@ git commit -m "docs: align production operations with transient SSM runtime"
 sh scripts/check-production-image-workflow_test.sh
 sh scripts/check-production-image-workflow.sh
 sh scripts/check-terraform-slice-4-plan_test.sh
-sh scripts/check-terraform.sh
+./scripts/check-terraform.sh
 go test ./deploy/production -count=1
 go test ./scripts -count=1
 go test ./... -count=1
@@ -989,20 +995,29 @@ Skip this commit when no correction is required.
 - Consumes: exact clean implementation commit.
 - Produces: verified private GHCR digest for `linux/arm64`.
 
-- [ ] **Step 1: Confirm Slice 3 and credentials**
+- [ ] **Step 1: Confirm Slice 3, bootstrap the package, and verify credentials**
 
 Verify the Slice 3 checkpoint is current, the repository workflow environment
 is available, and the human-provided replacement-host `read:packages`
 credential path exists. Stop before publication if the future host cannot pull
 the private image.
 
+Before the first candidate publication, create the unlinked `jobcron` package
+from the private controller with a disposable bootstrap image and a classic PAT
+used only for `write:packages`. Verify through the separate mode-`0600`
+`read:packages` path that the package is private and unlinked. In GitHub package
+settings, grant this repository **Manage Actions access** without using
+**Connect repository**, then verify the package remains private. Do not put the
+classic PAT in the workflow or retain its Docker credential directory.
+
 - [ ] **Step 2: Dispatch the exact image workflow**
 
 Dispatch `publish-production-image.yml` with the full implementation commit.
-Verify the job used only `GITHUB_TOKEN`, the package is private, the platform is
-only `linux/arm64`, all build output was redirected, and no digest appears in
-workflow logs, outputs, artifacts, annotations, or summary. The workflow must
-refuse dispatch if the commit-derived tag already exists.
+Verify the job proved the package was already private before any manifest
+lookup, build, or push; used only `GITHUB_TOKEN`; kept the package private; and
+published only `linux/arm64`. Verify all build output was redirected and no
+digest appears in workflow logs, outputs, artifacts, annotations, or summary.
+The workflow must refuse dispatch if the commit-derived tag already exists.
 
 After success, authenticate from the trusted controller with the separate
 private package-read path, resolve the immutable commit tag without printing
