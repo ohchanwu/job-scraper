@@ -37,7 +37,7 @@ jobs:
           git checkout --detach "$RELEASE_SHA"
 
       - name: Configure Docker Buildx
-        uses: docker/setup-buildx-action@b396b4ae3ea16a9e6faca67ecb36b5b12ce135a2
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
 
       - name: Publish immutable private image
         shell: bash

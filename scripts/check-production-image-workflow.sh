@@ -30,6 +30,15 @@ permissions="$(
 test "$permissions" = $'  contents: read\n  packages: write' || fail
 grep -Eq '^  (id-token|actions|deployments|secrets):|^  packages: delete$' "$workflow" && fail
 
+uses_count="$(grep -Eow 'uses' "$workflow" | wc -l | tr -d '[:space:]')" || fail
+test "$uses_count" -eq 2 || fail
+grep -Fqx \
+  '        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803' \
+  "$workflow" || fail
+grep -Fqx \
+  '        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c' \
+  "$workflow" || fail
+
 grep -Fq 'RELEASE_SHA: ${{ inputs.release_sha }}' "$workflow" || fail
 grep -Fq '[[ ! "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]' "$workflow" || fail
 grep -Fq 'git cat-file -e "${RELEASE_SHA}^{commit}"' "$workflow" || fail

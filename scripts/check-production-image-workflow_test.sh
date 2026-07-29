@@ -23,6 +23,13 @@ replace_all() {
   OLD="$old" NEW="$new" perl -0pi -e 's/\Q$ENV{OLD}\E/$ENV{NEW}/g' "$fixture"
 }
 
+replace_action_pin() {
+  local action="$1"
+  local pin="$2"
+  ACTION="$action" PIN="$pin" perl -0pi -e \
+    's#(\Q$ENV{ACTION}\E@)[0-9a-f]{40}#$1$ENV{PIN}#g' "$fixture"
+}
+
 remove_line() {
   local line="$1"
   awk -v line="$line" '$0 != line' "$fixture" >"$fixture.tmp"
@@ -78,6 +85,27 @@ expect_rejected "push trigger" \
   insert_after "on:" "  push:" || failures=$((failures + 1))
 expect_rejected "pull request trigger" \
   insert_after "on:" "  pull_request:" || failures=$((failures + 1))
+expect_rejected "unapproved checkout action pin" \
+  replace_action_pin "actions/checkout" \
+  "0000000000000000000000000000000000000000" || failures=$((failures + 1))
+expect_rejected "unapproved Buildx action pin" \
+  replace_action_pin "docker/setup-buildx-action" \
+  "1111111111111111111111111111111111111111" || failures=$((failures + 1))
+expect_rejected "alternate YAML uses key spelling" \
+  insert_after \
+  '        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c' \
+  '        uses : example.invalid/unapproved@2222222222222222222222222222222222222222' ||
+  failures=$((failures + 1))
+expect_rejected "quoted YAML uses key" \
+  insert_after \
+  '        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c' \
+  '        "uses": example.invalid/unapproved@3333333333333333333333333333333333333333' ||
+  failures=$((failures + 1))
+expect_rejected "flow-style YAML uses key" \
+  insert_after \
+  '        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c' \
+  '      - {uses: example.invalid/unapproved@4444444444444444444444444444444444444444}' ||
+  failures=$((failures + 1))
 expect_rejected "wrong platform" \
   replace_all "linux/arm64" "linux/amd64" || failures=$((failures + 1))
 expect_rejected "missing push flag" \
