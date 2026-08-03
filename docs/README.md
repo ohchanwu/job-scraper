@@ -32,6 +32,7 @@ Use this index instead of recursively loading the entire documentation tree.
 ## Implementation Work
 
 - [Active Superpowers work and context policy](superpowers/README.md)
+- [How Gas Town communicates with agents and why startup/nudging broke](superpowers/explanations/260803-gastown-communication-and-startup-repair-explained.md)
 - [Two-window first-production-launch authorization][two-window-authorization]
 - [Pre-Batch-1 human input checklist][pre-batch-1-checklist]
 - [Pre-Batch-1 Window 1 authorization contract][pre-batch-1-contract]

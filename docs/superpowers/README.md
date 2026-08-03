@@ -57,6 +57,10 @@ decision records needed for the current task.
 - [Interactive local preview, first-run guidance, and navigation](archive/2026-07-11-interactive-preview-navigation/260711-interactive-preview-navigation.md)
 - [Integrated verification report](archive/2026-07-11-interactive-preview-navigation/260711-interactive-preview-navigation-verification.md)
 
+## Explanations
+
+- [How Gas Town communicates with agents and why startup/nudging broke](explanations/260803-gastown-communication-and-startup-repair-explained.md)
+
 ## Stable Decisions
 
 - [Two-window first-production-launch authorization][two-window-authorization]
