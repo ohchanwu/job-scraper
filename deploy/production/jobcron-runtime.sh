@@ -26,6 +26,12 @@ remove_runtime_outputs() {
 	rmdir "$run_dir/caddy" 2>/dev/null || true
 }
 
+cleanup() {
+	remove_runtime_outputs
+	rm -rf -- "$run_dir/docker" "$run_dir/archive"
+	rmdir "$run_dir" 2>/dev/null || true
+}
+
 prepare() {
 	remove_runtime_outputs
 	[ -f "$secret_id_file" ] || fail
@@ -236,6 +242,7 @@ case ${1:-} in
 prepare) prepare ;;
 pull) pull ;;
 archive) archive ;;
+cleanup) cleanup ;;
 verify-local-state) verify_local_state ;;
 *) fail ;;
 esac

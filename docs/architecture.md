@@ -429,6 +429,9 @@ Bootstrap installs only packages published by the pinned Amazon Linux repositori
 AMI-provided AWS CLI v2, and installs the exact arm64 Docker Compose plugin from Docker's release
 assets only after verifying its pinned SHA-256. Runtime assets are written only after those tool
 gates pass.
+Systemd materializes secret values only below `/run/jobcron`. Post-stop cleanup removes generated
+runtime material but preserves an unconsumed one-shot registry token across preflight failures;
+the pull path consumes and removes that token on both success and failure.
 
 The origin security group carries the public semantic discovery tag
 `jobcron:edge-target = origin-security-group`. The adopted canonical VPC remains untagged because

@@ -185,6 +185,50 @@ func TestJobcronRuntimePullCleansCredentialsAfterFailure(t *testing.T) {
 	}
 }
 
+func TestJobcronRuntimeCleanupPreservesUnconsumedRegistryToken(t *testing.T) {
+	fixture := newRuntimeFixture(t)
+	tokenPath := filepath.Join(fixture.runDir, "registry-token")
+	writeFile(t, tokenPath, "registry-token-secret\n", 0o600)
+	writeFile(t, filepath.Join(fixture.runDir, "compose.env"), "synthetic\n", 0o600)
+	for _, dir := range []string{"caddy", "docker", "archive"} {
+		if err := os.MkdirAll(filepath.Join(fixture.runDir, dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, filepath.Join(fixture.runDir, "caddy", "origin.key"), "synthetic\n", 0o600)
+	writeFile(t, filepath.Join(fixture.runDir, "docker", "config.json"), "{}\n", 0o600)
+	writeFile(t, filepath.Join(fixture.runDir, "archive", "database.dump"), "synthetic\n", 0o600)
+
+	result := fixture.run(t, validRuntimeSecret(), "cleanup")
+	if result.err != nil {
+		t.Fatalf("cleanup failed: %v\n%s", result.err, result.output)
+	}
+	if got := readFile(t, tokenPath); got != "registry-token-secret\n" {
+		t.Fatalf("cleanup changed the unconsumed registry token")
+	}
+	assertMode(t, tokenPath, 0o600)
+	for _, path := range []string{
+		filepath.Join(fixture.runDir, "compose.env"),
+		filepath.Join(fixture.runDir, "caddy"),
+		filepath.Join(fixture.runDir, "docker"),
+		filepath.Join(fixture.runDir, "archive"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("cleanup retained generated runtime path: %s (%v)", path, err)
+		}
+	}
+
+	if err := os.Remove(tokenPath); err != nil {
+		t.Fatal(err)
+	}
+	if result := fixture.run(t, validRuntimeSecret(), "cleanup"); result.err != nil {
+		t.Fatalf("final cleanup failed: %v\n%s", result.err, result.output)
+	}
+	if _, err := os.Stat(fixture.runDir); !os.IsNotExist(err) {
+		t.Fatalf("empty runtime directory remained: %v", err)
+	}
+}
+
 func TestJobcronRuntimePullNeedsNoTokenForPresentDigest(t *testing.T) {
 	fixture := newRuntimeFixture(t)
 	if result := fixture.run(t, validRuntimeSecret(), "prepare"); result.err != nil {
@@ -388,7 +432,7 @@ func TestJobcronSystemdMainUnitFailsClosed(t *testing.T) {
 		t.Fatalf("ExecStop = %q", got)
 	}
 	if got := unitValues(unit, "ExecStopPost"); len(got) != 1 ||
-		got[0] != "/usr/bin/rm -rf -- /run/jobcron" {
+		got[0] != "/opt/jobcron/jobcron-runtime.sh cleanup" {
 		t.Fatalf("ExecStopPost = %q", got)
 	}
 	for _, want := range []string{
