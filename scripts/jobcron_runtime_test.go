@@ -388,7 +388,7 @@ func TestJobcronSystemdMainUnitFailsClosed(t *testing.T) {
 	}
 
 	wantPreStart := []string{
-		"/bin/sh -c 'if [ -f /run/jobcron/compose.env ]; then exec /usr/bin/docker compose --env-file /run/jobcron/compose.env down --remove-orphans; fi'",
+		"/bin/sh -c 'if [ -f /run/jobcron/compose.env ]; then exec /usr/bin/docker --config /run/jobcron/docker compose --env-file /run/jobcron/compose.env down --remove-orphans; fi'",
 		"/opt/jobcron/jobcron-runtime.sh prepare",
 		"/opt/jobcron/jobcron-runtime.sh pull",
 	}
@@ -396,7 +396,7 @@ func TestJobcronSystemdMainUnitFailsClosed(t *testing.T) {
 		t.Fatalf("ExecStartPre order = %q, want %q", got, wantPreStart)
 	}
 	if got := unitValues(unit, "ExecStart"); len(got) != 1 ||
-		got[0] != "/usr/bin/docker compose --env-file /run/jobcron/compose.env up -d --remove-orphans" {
+		got[0] != "/usr/bin/docker --config /run/jobcron/docker compose --env-file /run/jobcron/compose.env up -d --remove-orphans" {
 		t.Fatalf("ExecStart = %q", got)
 	}
 	for _, directive := range append(unitValues(unit, "ExecStartPre"), unitValues(unit, "ExecStart")...) {
@@ -428,7 +428,7 @@ func TestJobcronSystemdMainUnitFailsClosed(t *testing.T) {
 		t.Fatal("existing compose.env ignored Compose down failure")
 	}
 	if got := unitValues(unit, "ExecStop"); len(got) != 1 ||
-		got[0] != "/usr/bin/docker compose --env-file /run/jobcron/compose.env down --remove-orphans" {
+		got[0] != "/usr/bin/docker --config /run/jobcron/docker compose --env-file /run/jobcron/compose.env down --remove-orphans" {
 		t.Fatalf("ExecStop = %q", got)
 	}
 	if got := unitValues(unit, "ExecStopPost"); len(got) != 1 ||
@@ -522,6 +522,7 @@ func newRuntimeFixture(t *testing.T) runtimeFixture {
 		"JOBCRON_RECOVERY_BUCKET=synthetic-recovery",
 		"JOBCRON_NOW=20260728T120000Z",
 		"FAKE_COMMAND_LOG="+fixture.logPath,
+		"FAKE_EXPECTED_DOCKER_CONFIG="+filepath.Join(fixture.runDir, "docker"),
 	)
 	return fixture
 }
@@ -559,6 +560,7 @@ exit 0
 `)
 	writeExecutable(t, filepath.Join(f.binDir, "docker"), `#!/bin/sh
 printf 'docker %s\n' "$*" >>"$FAKE_COMMAND_LOG"
+if [ "$1" = compose ] && [ "${DOCKER_CONFIG:-}" != "$FAKE_EXPECTED_DOCKER_CONFIG" ]; then exit 97; fi
 if [ "$1" = image ] && [ "$2" = inspect ]; then
   [ "${FAKE_IMAGE_PRESENT:-0}" = 1 ]
   exit

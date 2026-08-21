@@ -15,7 +15,7 @@ func TestReplacementHostRejectsUnverifiedSameVersionCompose(t *testing.T) {
 	}
 
 	start := strings.Index(string(template), "compose_version=")
-	endMarker := "test \"$(docker compose version --short)\" = \"$compose_expected_version\""
+	endMarker := "test \"$(docker --config \"$compose_config\" compose version --short)\" = \"$compose_expected_version\""
 	end := strings.Index(string(template), endMarker)
 	if start < 0 || end < start {
 		t.Fatal("compose bootstrap block not found")

@@ -5,6 +5,8 @@ umask 077
 run_dir=${JOBCRON_RUN_DIR:-/run/jobcron}
 etc_dir=${JOBCRON_ETC_DIR:-/etc/jobcron}
 deploy_dir=${JOBCRON_DEPLOY_DIR:-/opt/jobcron}
+docker_config=$run_dir/docker
+export DOCKER_CONFIG=$docker_config
 secret_id_file=$etc_dir/runtime-secret-id
 
 fail() {
@@ -115,7 +117,6 @@ pull() {
 	[ -f "$token_file" ] || fail
 	[ "$(mode "$token_file")" = 600 ] || fail
 	[ -s "$token_file" ] || fail
-	docker_config=$run_dir/docker
 	rm -f "$docker_config/config.json"
 	rmdir "$docker_config" 2>/dev/null || true
 	mkdir "$docker_config"

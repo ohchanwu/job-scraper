@@ -428,7 +428,8 @@ protected `production` environment secret `TF_VAR_REPLACEMENT_HOST_AMI_ID` witho
 Bootstrap installs only Docker, `jq`, and the PostgreSQL client from the pinned Amazon Linux
 repositories, requires the AMI-provided `curl` and AWS CLI v2, and installs the exact arm64 Docker
 Compose plugin from Docker's release assets only after verifying its pinned SHA-256. Bootstrap
-always replaces any pre-existing plugin with that verified artifact before executing Compose. Runtime assets
+always replaces any pre-existing plugin with that verified artifact before executing Compose. A
+private `DOCKER_CONFIG` keeps user-level plugins out of both bootstrap and runtime resolution. Runtime assets
 are written only after those tool gates pass.
 Systemd materializes secret values only below `/run/jobcron`. Post-stop cleanup removes generated
 runtime material but preserves an unconsumed one-shot registry token across preflight failures;
