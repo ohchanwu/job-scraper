@@ -17,6 +17,8 @@ override_resource {
 }
 
 variables {
+  replacement_host_ami_id = "ami-0123456789abcdef0"
+
   canonical_network_config = {
     vpc = {
       cidr_block                           = "10.255.0.0/24"

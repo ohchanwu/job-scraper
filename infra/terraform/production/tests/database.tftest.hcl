@@ -76,6 +76,8 @@ override_resource {
 }
 
 variables {
+  replacement_host_ami_id = "ami-0123456789abcdef0"
+
   canonical_network_config = {
     vpc = {
       cidr_block                           = "10.255.0.0/24"
@@ -321,9 +323,9 @@ run "postgres_contract" {
       length(aws_db_parameter_group.production.parameter) == 1 &&
       one(aws_db_parameter_group.production.parameter).name == "rds.force_ssl" &&
       one(aws_db_parameter_group.production.parameter).value == "1" &&
-      one(aws_db_parameter_group.production.parameter).apply_method == "immediate"
+      one(aws_db_parameter_group.production.parameter).apply_method == "pending-reboot"
     )
-    error_message = "The PostgreSQL 18 parameter group must enforce SSL."
+    error_message = "The PostgreSQL 18 parameter group must enforce SSL with AWS-stable apply metadata."
   }
 
   assert {

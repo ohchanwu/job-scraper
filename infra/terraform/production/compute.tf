@@ -43,10 +43,6 @@ locals {
   ])
 }
 
-data "aws_ssm_parameter" "amazon_linux_2023_arm64" {
-  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
-}
-
 resource "aws_iam_role" "replacement_host" {
   name = "jobcron-replacement-host"
   assume_role_policy = jsonencode({
@@ -93,7 +89,7 @@ resource "aws_iam_instance_profile" "replacement_host" {
 }
 
 resource "aws_instance" "replacement_host" {
-  ami                         = data.aws_ssm_parameter.amazon_linux_2023_arm64.value
+  ami                         = var.replacement_host_ami_id
   instance_type               = "t4g.micro"
   key_name                    = null
   subnet_id                   = aws_subnet.public[var.replacement_public_subnet_key].id

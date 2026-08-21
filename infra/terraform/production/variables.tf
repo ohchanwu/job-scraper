@@ -103,6 +103,17 @@ variable "private_database_config" {
   }
 }
 
+variable "replacement_host_ami_id" {
+  description = "Approved Amazon Linux 2023 arm64 AMI for the replacement host."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = can(regex("^ami-[0-9a-f]{17}$", var.replacement_host_ami_id))
+    error_message = "The replacement host AMI must be an explicit 17-character hexadecimal AMI ID."
+  }
+}
+
 variable "replacement_public_subnet_key" {
   description = "Canonical public subnet selected for the replacement host."
   type        = string

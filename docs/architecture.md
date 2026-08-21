@@ -419,6 +419,11 @@ secret has no value until Slice 4 creates its first version outside Terraform. R
 tagged as verified after an off-cloud copy expire after 14 days; all current versions expire after
 90 days, and both rules permanently expire the resulting noncurrent data version one day later.
 
+The `production` root also owns one Amazon Linux 2023 arm64 replacement host managed only through
+Session Manager. Its AMI is a validated private controller input pinned to the reviewed image, so
+an upstream `latest` pointer cannot silently schedule host replacement. Changing the pin is an
+explicit replacement operation that requires its own reviewed plan.
+
 The origin security group carries the public semantic discovery tag
 `jobcron:edge-target = origin-security-group`. The adopted canonical VPC remains untagged because
 Window 1 forbids updating it; Slice 5 derives the VPC from the tagged security group's `vpc_id`.

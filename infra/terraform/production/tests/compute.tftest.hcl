@@ -1,13 +1,5 @@
 mock_provider "aws" {}
 
-override_data {
-  target          = data.aws_ssm_parameter.amazon_linux_2023_arm64
-  override_during = plan
-  values = {
-    value = "ami-test-only"
-  }
-}
-
 override_resource {
   target          = aws_secretsmanager_secret.runtime
   override_during = plan
@@ -128,6 +120,7 @@ variables {
     recovery_bucket_name      = "jobcron-recovery-test-only"
   }
 
+  replacement_host_ami_id       = "ami-0123456789abcdef0"
   replacement_public_subnet_key = "public_a"
 }
 
@@ -135,11 +128,8 @@ run "replacement_host_contract" {
   command = plan
 
   assert {
-    condition = (
-      data.aws_ssm_parameter.amazon_linux_2023_arm64.name ==
-      "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
-    )
-    error_message = "The replacement host must discover the public AL2023 arm64 AMI parameter."
+    condition     = aws_instance.replacement_host.ami == var.replacement_host_ami_id
+    error_message = "The replacement host must use the explicitly pinned AMI."
   }
 
   assert {
@@ -305,4 +295,14 @@ run "replacement_host_contract" {
     )
     error_message = "The only Terraform output must be the sensitive replacement instance selector."
   }
+}
+
+run "rejects_unpinned_replacement_host_ami" {
+  command = plan
+
+  variables {
+    replacement_host_ami_id = "ami-latest"
+  }
+
+  expect_failures = [var.replacement_host_ami_id]
 }
