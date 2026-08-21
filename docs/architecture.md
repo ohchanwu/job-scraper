@@ -422,7 +422,9 @@ tagged as verified after an off-cloud copy expire after 14 days; all current ver
 The `production` root also owns one Amazon Linux 2023 arm64 replacement host managed only through
 Session Manager. Its AMI is a validated private controller input pinned to the reviewed image, so
 an upstream `latest` pointer cannot silently schedule host replacement. Changing the pin is an
-explicit replacement operation that requires its own reviewed plan.
+explicit replacement operation that requires its own reviewed plan. Local controllers supply the
+pin from a mode-`0600` packet; the manual GitHub plan workflow receives the same input from its
+protected `production` environment secret `TF_VAR_REPLACEMENT_HOST_AMI_ID` without printing it.
 
 The origin security group carries the public semantic discovery tag
 `jobcron:edge-target = origin-security-group`. The adopted canonical VPC remains untagged because

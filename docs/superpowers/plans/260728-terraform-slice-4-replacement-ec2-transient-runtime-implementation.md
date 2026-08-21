@@ -107,8 +107,8 @@ Create:
 - `deploy/production/systemd/jobcron-recovery.timer` — nightly archive trigger.
 - `scripts/jobcron_runtime_test.go` — fake-AWS/Docker/PostgreSQL shell contract
   tests.
-- `infra/terraform/production/compute.tf` — AL2023 discovery, origin-group EC2
-  attachment, instance profile, and least-privilege IAM.
+- `infra/terraform/production/compute.tf` — reviewed AL2023 AMI pin,
+  origin-group EC2 attachment, instance profile, and least-privilege IAM.
 - `infra/terraform/production/templates/replacement-host.sh.tftpl` —
   value-blind cloud-init bootstrap.
 - `infra/terraform/production/tests/compute.tftest.hcl` — host, IAM, bootstrap,
@@ -598,8 +598,8 @@ git commit -m "deploy: add fail-closed production systemd units"
 
 Use `mock_provider "aws"` and synthetic overrides. Assert:
 
-- the host uses the validated `replacement_host_ami_id` supplied by the
-  private controller packet, never a mutable `latest` lookup;
+- the host uses the validated `replacement_host_ami_id` supplied by an approved
+  private controller path, never a mutable `latest` lookup;
 - instance type is `t4g.micro`;
 - root block device is encrypted `gp3`, exactly `8` GiB, and
   `delete_on_termination = true`;
@@ -644,10 +644,12 @@ Expected: FAIL because the compute resources do not exist.
 
 - [x] **Step 2: Implement the minimum Terraform**
 
-Use a required, validated `replacement_host_ami_id` input supplied only by the
-private controller packet. A public AL2023 arm64 parameter may inform a future
-operator-approved upgrade, but it must not participate in the Terraform
-resource graph. Do not hide AMI changes with `lifecycle.ignore_changes`.
+Use a required, validated `replacement_host_ami_id` input supplied by either
+the mode-`0600` local controller packet or the protected `production` workflow
+secret `TF_VAR_REPLACEMENT_HOST_AMI_ID`. A public AL2023 arm64 parameter may
+inform a future operator-approved upgrade, but it must not participate in the
+Terraform resource graph. Do not hide AMI changes with
+`lifecycle.ignore_changes`.
 
 Set:
 

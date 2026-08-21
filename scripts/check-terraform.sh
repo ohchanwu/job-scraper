@@ -548,6 +548,29 @@ if [[ "$private_database_mapping_count" -ne 1 ||
     >&2
   exit 1
 fi
+
+replacement_ami_mapping_count="$(
+  grep -Fxc \
+    '      TF_VAR_replacement_host_ami_id: ${{ secrets.TF_VAR_REPLACEMENT_HOST_AMI_ID }}' \
+    "$production_workflow" || true
+)"
+replacement_ami_variable_count="$(
+  grep -Fo 'TF_VAR_replacement_host_ami_id' "$production_workflow" |
+    wc -l |
+    tr -d ' ' || true
+)"
+replacement_ami_secret_count="$(
+  grep -Fo 'TF_VAR_REPLACEMENT_HOST_AMI_ID' "$production_workflow" |
+    wc -l |
+    tr -d ' ' || true
+)"
+if [[ "$replacement_ami_mapping_count" -ne 1 ||
+  "$replacement_ami_variable_count" -ne 1 ||
+  "$replacement_ami_secret_count" -ne 1 ]]; then
+  printf 'production workflow must map but never print replacement host AMI ID\n' \
+    >&2
+  exit 1
+fi
 if grep -Eq \
   '^[[:space:]]*(env|printenv)([[:space:]]|[|;&]|$)' \
   "$production_workflow"; then

@@ -379,6 +379,12 @@ if ! grep -Fqx \
   printf 'FAIL: production workflow does not map the private database config\n' >&2
   exit 1
 fi
+if ! grep -Fqx \
+  '      TF_VAR_replacement_host_ami_id: ${{ secrets.TF_VAR_REPLACEMENT_HOST_AMI_ID }}' \
+  "$production_workflow"; then
+  printf 'FAIL: production workflow does not map the replacement host AMI ID\n' >&2
+  exit 1
+fi
 if ! run_checker; then
   printf 'FAIL: rejected the unmodified workflows\n' >&2
   cat "$fixture_root/checker.out" >&2
@@ -581,6 +587,21 @@ expect_rejected "printed private database config" \
   "production workflow must map but never print private database config" \
   insert_into_first_run_block "$production_workflow" \
   '          printf '\''%s\n'\'' "$TF_VAR_private_database_config"' ||
+  failures=$((failures + 1))
+expect_rejected "missing replacement host AMI mapping" \
+  "production workflow must map but never print replacement host AMI ID" \
+  remove_exact_line "$production_workflow" \
+  '      TF_VAR_replacement_host_ami_id: ${{ secrets.TF_VAR_REPLACEMENT_HOST_AMI_ID }}' ||
+  failures=$((failures + 1))
+expect_rejected "duplicate replacement host AMI mapping" \
+  "production workflow must map but never print replacement host AMI ID" \
+  duplicate_exact_line "$production_workflow" \
+  '      TF_VAR_replacement_host_ami_id: ${{ secrets.TF_VAR_REPLACEMENT_HOST_AMI_ID }}' ||
+  failures=$((failures + 1))
+expect_rejected "printed replacement host AMI ID" \
+  "production workflow must map but never print replacement host AMI ID" \
+  insert_into_first_run_block "$production_workflow" \
+  '          printf '\''%s\n'\'' "$TF_VAR_replacement_host_ami_id"' ||
   failures=$((failures + 1))
 expect_rejected "bare env environment dump" \
   "production workflow must map but never print private network config" \
