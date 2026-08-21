@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // pure-Go PostgreSQL driver, registered as "pgx"
 	_ "modernc.org/sqlite"             // pure-Go SQLite driver, registered as "sqlite"
@@ -40,6 +41,53 @@ func postgresMigrationError(migration, stage string, err error) error {
 	return &PostgresMigrationError{Migration: migration, Stage: stage, err: err}
 }
 
+type postgresMigration struct {
+	name       string
+	version    int
+	statements []byte
+}
+
+func postgresMigrationManifest(source fs.FS) ([]postgresMigration, error) {
+	entries, err := fs.ReadDir(source, ".")
+	if err != nil {
+		return nil, fmt.Errorf("storage: read postgres migration manifest: %w", err)
+	}
+	migrations := make([]postgresMigration, 0, len(entries))
+	versions := make(map[int]string, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		info, err := entry.Info()
+		if err != nil {
+			return nil, fmt.Errorf("storage: inspect postgres migration %q: %w", name, err)
+		}
+		if !info.Mode().IsRegular() || len(name) <= len("0000_.sql") || name[4] != '_' || !strings.HasSuffix(name, ".sql") {
+			return nil, fmt.Errorf("storage: postgres migration manifest entry %q must be a regular NNNN_name.sql file", name)
+		}
+		version, err := strconv.Atoi(name[:4])
+		if err != nil || version <= 0 {
+			return nil, fmt.Errorf("storage: postgres migration %q must start with a positive 4-digit version", name)
+		}
+		if previous, exists := versions[version]; exists {
+			return nil, fmt.Errorf("storage: postgres migrations %q and %q share version %04d", previous, name, version)
+		}
+		statements, err := fs.ReadFile(source, name)
+		if err != nil {
+			return nil, fmt.Errorf("storage: read postgres migration %q: %w", name, err)
+		}
+		versions[version] = name
+		migrations = append(migrations, postgresMigration{name: name, version: version, statements: statements})
+	}
+	return migrations, nil
+}
+
+func embeddedPostgresMigrationManifest() ([]postgresMigration, error) {
+	source, err := fs.Sub(postgresMigrationsFS, "postgres_migrations")
+	if err != nil {
+		return nil, fmt.Errorf("storage: open postgres migration manifest: %w", err)
+	}
+	return postgresMigrationManifest(source)
+}
+
 // Store is the jobcron persistence layer: a single concrete handle over
 // the configured SQL database, with every repository method hanging off it.
 type Store struct {
@@ -67,8 +115,8 @@ func OpenSQLiteAt(path string) (*Store, error) {
 	return &Store{db: db, dialect: DialectSQLite}, nil
 }
 
-// OpenPostgres opens a PostgreSQL database URL and verifies that every embedded
-// migration is already applied without issuing DDL.
+// OpenPostgres opens a PostgreSQL database URL and verifies that its applied
+// migrations exactly match the embedded manifest without issuing DDL.
 func OpenPostgres(databaseURL string) (*Store, error) {
 	return openPostgres(context.Background(), databaseURL, verifyPostgresMigrations)
 }
@@ -96,20 +144,48 @@ func openPostgres(ctx context.Context, databaseURL string, prepare func(context.
 }
 
 func verifyPostgresMigrations(ctx context.Context, db *sql.DB) error {
-	entries, err := fs.ReadDir(postgresMigrationsFS, "postgres_migrations")
+	migrations, err := embeddedPostgresMigrationManifest()
 	if err != nil {
-		return fmt.Errorf("storage: read postgres migrations: %w", err)
+		return err
 	}
-	for _, entry := range entries {
-		version, err := strconv.Atoi(entry.Name()[:4])
-		if err != nil {
-			return fmt.Errorf("storage: postgres migration %q: name must start with a 4-digit version", entry.Name())
+	return verifyPostgresMigrationSet(ctx, db, migrations)
+}
+
+func appliedPostgresMigrationVersions(ctx context.Context, db *sql.DB, migrations []postgresMigration) (map[int]struct{}, error) {
+	known := make(map[int]struct{}, len(migrations))
+	for _, migration := range migrations {
+		known[migration.version] = struct{}{}
+	}
+	rows, err := db.QueryContext(ctx, `SELECT version FROM schema_migrations`)
+	if err != nil {
+		return nil, postgresMigrationError("schema_migrations", "verify", err)
+	}
+	defer rows.Close()
+	applied := make(map[int]struct{}, len(migrations))
+	for rows.Next() {
+		var version int
+		if err := rows.Scan(&version); err != nil {
+			return nil, postgresMigrationError("schema_migrations", "verify", err)
 		}
-		var applied int
-		if err := db.QueryRowContext(ctx, `SELECT 1 FROM schema_migrations WHERE version = $1`, version).Scan(&applied); err == sql.ErrNoRows {
-			return fmt.Errorf("storage: pending postgres migration %q", entry.Name())
-		} else if err != nil {
-			return fmt.Errorf("storage: verify postgres migration %q: %w", entry.Name(), err)
+		if _, exists := known[version]; !exists {
+			return nil, postgresMigrationError("schema_migrations", "unknown-version", fmt.Errorf("unknown version %d", version))
+		}
+		applied[version] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, postgresMigrationError("schema_migrations", "verify", err)
+	}
+	return applied, nil
+}
+
+func verifyPostgresMigrationSet(ctx context.Context, db *sql.DB, migrations []postgresMigration) error {
+	applied, err := appliedPostgresMigrationVersions(ctx, db, migrations)
+	if err != nil {
+		return err
+	}
+	for _, migration := range migrations {
+		if _, exists := applied[migration.version]; !exists {
+			return fmt.Errorf("storage: pending postgres migration %q", migration.name)
 		}
 	}
 	return nil
@@ -170,6 +246,10 @@ func migrate(db *sql.DB) error {
 }
 
 func migratePostgres(ctx context.Context, db *sql.DB) error {
+	migrations, err := embeddedPostgresMigrationManifest()
+	if err != nil {
+		return err
+	}
 	tx, err := beginPostgresMigration(ctx, db, "schema_migrations")
 	if err != nil {
 		return err
@@ -185,44 +265,35 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 	if err := tx.Commit(); err != nil {
 		return postgresMigrationError("schema_migrations", "commit", err)
 	}
-	entries, err := fs.ReadDir(postgresMigrationsFS, "postgres_migrations")
-	if err != nil {
-		return fmt.Errorf("storage: read postgres migrations: %w", err)
+	if _, err := appliedPostgresMigrationVersions(ctx, db, migrations); err != nil {
+		return err
 	}
-	for _, e := range entries {
-		version, err := strconv.Atoi(e.Name()[:4])
-		if err != nil {
-			return postgresMigrationError(e.Name(), "validate", err)
-		}
-		stmts, err := postgresMigrationsFS.ReadFile("postgres_migrations/" + e.Name())
-		if err != nil {
-			return postgresMigrationError(e.Name(), "read", err)
-		}
-		tx, err := beginPostgresMigration(ctx, db, e.Name())
+	for _, migration := range migrations {
+		tx, err := beginPostgresMigration(ctx, db, migration.name)
 		if err != nil {
 			return err
 		}
 		var applied int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM schema_migrations WHERE version = $1`, version).Scan(&applied); err == nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM schema_migrations WHERE version = $1`, migration.version).Scan(&applied); err == nil {
 			tx.Rollback()
 			continue
 		} else if err != sql.ErrNoRows {
 			tx.Rollback()
-			return postgresMigrationError(e.Name(), "check", err)
+			return postgresMigrationError(migration.name, "check", err)
 		}
-		if _, err := tx.ExecContext(ctx, string(stmts)); err != nil {
+		if _, err := tx.ExecContext(ctx, string(migration.statements)); err != nil {
 			tx.Rollback()
-			return postgresMigrationError(e.Name(), "apply", err)
+			return postgresMigrationError(migration.name, "apply", err)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES ($1, now())`, version); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES ($1, now())`, migration.version); err != nil {
 			tx.Rollback()
-			return postgresMigrationError(e.Name(), "record", err)
+			return postgresMigrationError(migration.name, "record", err)
 		}
 		if err := tx.Commit(); err != nil {
-			return postgresMigrationError(e.Name(), "commit", err)
+			return postgresMigrationError(migration.name, "commit", err)
 		}
 	}
-	return nil
+	return verifyPostgresMigrationSet(ctx, db, migrations)
 }
 
 func beginPostgresMigration(ctx context.Context, db *sql.DB, name string) (*sql.Tx, error) {

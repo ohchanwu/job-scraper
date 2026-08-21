@@ -188,13 +188,17 @@ func TestProductionMigrationDocsBindReviewedSource(t *testing.T) {
 	if strings.Contains(text, "go run ./cmd/jobcron-user migrate") {
 		t.Fatal("production guide runs privileged migration from the ambient worktree")
 	}
+	if strings.Contains(text, "go build -trimpath -o \"$migration_bin\" ./cmd/jobcron-user") {
+		t.Fatal("production guide builds privileged migration from the ambient worktree")
+	}
 	for _, required := range []string{
 		"(\nset -eu",
 		"JOBCRON_REVIEWED_SHA",
 		"git rev-parse HEAD",
 		"git status --porcelain=v1 --untracked-files=all",
 		"git stash list",
-		"go build -trimpath",
+		"git show \"$JOBCRON_REVIEWED_SHA:scripts/build-reviewed-jobcron-user.sh\"",
+		"build-reviewed-jobcron-user",
 		"jobcron-user-$JOBCRON_REVIEWED_SHA",
 	} {
 		if !strings.Contains(text, required) {

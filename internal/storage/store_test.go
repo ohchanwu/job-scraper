@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/ohchanwu/jobcron/internal/ai"
@@ -228,6 +229,7 @@ func TestOpenPostgresVerifiesMigratedSchemaWithoutCreatePrivilege(t *testing.T) 
 	}
 	if _, err := admin.Exec(`GRANT USAGE ON SCHEMA ` + schema + ` TO ` + role + `;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ` + schema + ` TO ` + role + `;
+REVOKE INSERT, UPDATE, DELETE ON TABLE ` + schema + `.schema_migrations FROM ` + role + `;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ` + schema + ` TO ` + role); err != nil {
 		t.Fatalf("grant runtime privileges: %v", err)
 	}
@@ -240,6 +242,9 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ` + schema + ` TO ` + role); err 
 	if err != nil {
 		t.Fatalf("OpenPostgres with DML-only role: %v", err)
 	}
+	if _, err := runtime.SQLDB().Exec(`INSERT INTO schema_migrations (version) VALUES (9999)`); err == nil {
+		t.Fatal("runtime role inserted a forged migration version")
+	}
 	if err := runtime.Close(); err != nil {
 		t.Fatalf("close runtime store: %v", err)
 	}
@@ -249,6 +254,73 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ` + schema + ` TO ` + role); err 
 	}
 	if canCreate {
 		t.Fatal("runtime role unexpectedly has schema CREATE")
+	}
+}
+
+func TestOpenPostgresRejectsUnknownAppliedMigration(t *testing.T) {
+	databaseURL := os.Getenv("JOBCRON_TEST_POSTGRES_URL")
+	if databaseURL == "" {
+		t.Skip("JOBCRON_TEST_POSTGRES_URL not set")
+	}
+	schema := fmt.Sprintf("test_ahead_%d", rand.Uint64())
+	admin, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		t.Fatalf("open postgres admin: %v", err)
+	}
+	if _, err := admin.Exec(`CREATE SCHEMA ` + schema); err != nil {
+		admin.Close()
+		t.Fatalf("create postgres test schema: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
+		_ = admin.Close()
+	})
+	schemaURL := databaseURLWithSearchPath(databaseURL, schema)
+	migrating, err := OpenPostgresMigrating(context.Background(), schemaURL)
+	if err != nil {
+		t.Fatalf("OpenPostgresMigrating: %v", err)
+	}
+	if err := migrating.Close(); err != nil {
+		t.Fatalf("close migrating store: %v", err)
+	}
+	if _, err := admin.Exec(`INSERT INTO ` + schema + `.schema_migrations (version) VALUES (9999)`); err != nil {
+		t.Fatalf("insert future migration marker: %v", err)
+	}
+	for name, open := range map[string]func() (*Store, error){
+		"runtime":  func() (*Store, error) { return OpenPostgres(schemaURL) },
+		"operator": func() (*Store, error) { return OpenPostgresMigrating(context.Background(), schemaURL) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			st, err := open()
+			if st != nil {
+				_ = st.Close()
+			}
+			var migrationErr *PostgresMigrationError
+			if !errors.As(err, &migrationErr) || migrationErr.Stage != "unknown-version" {
+				t.Fatalf("open error = %v, want unknown-version migration error", err)
+			}
+		})
+	}
+}
+
+func TestPostgresMigrationManifestRejectsInvalidEntries(t *testing.T) {
+	for name, source := range map[string]fstest.MapFS{
+		"short name": {
+			"x": &fstest.MapFile{Data: []byte("SELECT 1")},
+		},
+		"non-file": {
+			"0001_directory/child.sql": &fstest.MapFile{Data: []byte("SELECT 1")},
+		},
+		"duplicate version": {
+			"0001_first.sql":  &fstest.MapFile{Data: []byte("SELECT 1")},
+			"0001_second.sql": &fstest.MapFile{Data: []byte("SELECT 2")},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := postgresMigrationManifest(source); err == nil {
+				t.Fatal("postgresMigrationManifest accepted invalid entries")
+			}
+		})
 	}
 }
 

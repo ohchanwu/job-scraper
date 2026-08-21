@@ -111,6 +111,9 @@ See the [demo deployment reference](../deploy/demo/README.md).
   profile form.
 - `internal/storage` exposes one concrete repository, a read-only PostgreSQL schema-version gate,
   and an explicit operator migration path.
+  Both paths validate one canonical embedded migration manifest and reject malformed files,
+  duplicate versions, pending versions, and database-ahead versions as applicable. The production
+  role can read `schema_migrations` but cannot insert, update, or delete its rows.
   PostgreSQL backs production and ordinary local modes. SQLite entry points exist only for the
   legacy importer, the tracked read-only demo, and compatibility tests.
 - `internal/credential` encrypts per-user provider credentials and manages the protected local
@@ -339,6 +342,8 @@ The operator command bounds connection and lock waits with one two-minute contex
 transaction takes the same PostgreSQL advisory lock and rechecks its recorded version after the
 lock, preventing concurrent operators from applying one version twice while preserving
 per-version commits and idempotent recovery.
+The production guide extracts the reviewed builder from the exact commit and builds the migration
+binary from that commit's private Git archive with ambient Go configuration disabled.
 
 The main ownership split is:
 

@@ -739,8 +739,8 @@ Prove:
   cannot verify the RDS certificate against the tunnel's loopback hostname;
 - master and application passwords enter `psql` without argv, stdout, or
   history exposure;
-- SQL grants only connect, schema usage, current/future table DML, and current
-  sequence usage needed by Jobcron;
+- SQL grants only connect, schema usage, current/future application-table DML,
+  read-only migration-ledger access, and current sequence usage needed by Jobcron;
 - the helper cannot create a superuser, database, extension, replication role,
   or broad public grant;
 - rerun is idempotent and rotates only the application password;

@@ -133,20 +133,29 @@ test -z "$(git status --porcelain=v1 --untracked-files=all)"
 test -z "$(git stash list)"
 migration_dir=$(mktemp -d)
 migration_bin="$migration_dir/jobcron-user-$JOBCRON_REVIEWED_SHA"
+migration_builder="$migration_dir/build-reviewed-jobcron-user"
 cleanup_migration_binary() {
-  rm -f -- "$migration_bin" "$migration_bin.sha256"
+  rm -f -- "$migration_bin" "$migration_builder"
   rmdir "$migration_dir"
 }
 trap cleanup_migration_binary EXIT
 trap 'exit 1' HUP INT TERM
-go build -trimpath -o "$migration_bin" ./cmd/jobcron-user
-chmod 500 "$migration_bin"
-shasum -a 256 "$migration_bin" >"$migration_bin.sha256"
-chmod 400 "$migration_bin.sha256"
+repo_root=$(git rev-parse --show-toplevel)
+git show "$JOBCRON_REVIEWED_SHA:scripts/build-reviewed-jobcron-user.sh" >"$migration_builder"
+chmod 500 "$migration_builder"
+"$migration_builder" "$repo_root" "$JOBCRON_REVIEWED_SHA" "$migration_bin"
+test "$(git rev-parse HEAD)" = "$JOBCRON_REVIEWED_SHA"
+test -z "$(git status --porcelain=v1 --untracked-files=all)"
+test -z "$(git stash list)"
 unset JOBCRON_DATABASE_PASSWORD
 "$migration_bin" migrate --database-url "$JOBCRON_MASTER_DATABASE_URL"
 )
 ```
+
+The builder itself and its source tree come from the reviewed commit. It builds
+from a private `git archive` with `GOENV=off`, empty `GOFLAGS`, `GOWORK=off`, and
+`-mod=readonly`, so ignored files, overlays, ambient workspaces, and concurrent
+worktree edits cannot enter the privileged binary.
 
 The URL must contain the master username but no password, use exactly the
 `127.0.0.1` Session Manager tunnel, and set only `sslmode=require`.
@@ -170,12 +179,14 @@ scripts/production-rds-role.sh
 ```
 
 Enter the master and application passwords only through the helper's silent
-stdin prompts. It grants connect, schema usage, table DML, and sequence usage;
-it cannot create a database, superuser, extension, or replication role. Verify
-the catalog grants without printing names or passwords. The helper stores the
-lower-privilege TLS `DATABASE_URL` only in the private runtime JSON and emits
-only `database_role_ready=true`. Run this helper after every operator migration
-so newly created tables and sequences receive the runtime grants.
+stdin prompts. It grants connect, schema usage, application-table DML, sequence
+usage, and read-only access to `schema_migrations`; the runtime role cannot
+forge the migration ledger or create a database, superuser, extension, or
+replication role. Verify the catalog grants without printing names or passwords.
+The helper stores the lower-privilege TLS `DATABASE_URL` only in the private
+runtime JSON and emits only `database_role_ready=true`. Run this helper after
+every operator migration so newly created tables and sequences receive the
+runtime grants and ledger writes are revoked again.
 
 If the approved legacy SQLite import is still required, keep the source and
 optional key file on the trusted Mac. Through the same tunnel, create exactly

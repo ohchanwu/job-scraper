@@ -62,6 +62,8 @@ func TestProductionPrivateOpsRDSUsesOneLeastPrivilegeTransaction(t *testing.T) {
 		"GRANT CONNECT ON DATABASE jobcron TO jobcron_app;",
 		"GRANT USAGE ON SCHEMA public TO jobcron_app;",
 		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO jobcron_app;",
+		"REVOKE INSERT, UPDATE, DELETE ON TABLE schema_migrations FROM jobcron_app;",
+		"GRANT SELECT ON TABLE schema_migrations TO jobcron_app;",
 		"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO jobcron_app;",
 		"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO jobcron_app;",
 		"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO jobcron_app;",
