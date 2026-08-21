@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha1"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -163,6 +165,32 @@ func TestOpenPostgresInvalidURLReturnsOpenError(t *testing.T) {
 	}
 }
 
+func TestPostgresMigrationLedgerNameIsQualifiedAndBounded(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+		want string
+	}{
+		{name: "public default", url: "postgres://user@127.0.0.1/db?sslmode=require", want: "public.schema_migrations"},
+		{name: "simple test schema", url: "postgres://user@127.0.0.1/db?sslmode=require&search_path=test_schema", want: `"test_schema".schema_migrations`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := postgresMigrationLedgerName(tc.url)
+			if err != nil || got != tc.want {
+				t.Fatalf("ledger name = %q, err=%v, want %q", got, err, tc.want)
+			}
+		})
+	}
+	for _, raw := range []string{
+		"postgres://user@127.0.0.1/db?sslmode=require&search_path=public,evil",
+		"postgres://user@127.0.0.1/db?sslmode=require&search_path=public%22.shadow",
+	} {
+		if _, err := postgresMigrationLedgerName(raw); err == nil {
+			t.Fatalf("ledger name accepted unsafe search_path URL %q", raw)
+		}
+	}
+}
+
 func TestOpenPostgresMigratingAppliesSchema(t *testing.T) {
 	st, schema := newPostgresTestStoreWithSchema(t)
 	if st.Dialect() != DialectPostgres {
@@ -182,6 +210,144 @@ func TestOpenPostgresMigratingAppliesSchema(t *testing.T) {
 	}
 	if version != 19 {
 		t.Fatalf("schema version = %d, want 19", version)
+	}
+	var invalidIdentity int
+	if err := st.db.QueryRow(`
+SELECT count(*)
+  FROM schema_migrations
+ WHERE name IS NULL
+    OR sha256 !~ '^[0-9a-f]{64}$'`).Scan(&invalidIdentity); err != nil {
+		t.Fatalf("query schema migration identity: %v", err)
+	}
+	if invalidIdentity != 0 {
+		t.Fatalf("schema migrations with invalid identity = %d, want 0", invalidIdentity)
+	}
+}
+
+func TestOpenPostgresRejectsTamperedMigrationIdentity(t *testing.T) {
+	databaseURL := os.Getenv("JOBCRON_TEST_POSTGRES_URL")
+	if databaseURL == "" {
+		t.Skip("JOBCRON_TEST_POSTGRES_URL not set")
+	}
+	for name, update := range map[string]string{
+		"filename": `UPDATE schema_migrations SET name = '0007_changed.sql' WHERE version = 7`,
+		"digest":   `UPDATE schema_migrations SET sha256 = repeat('0', 64) WHERE version = 7`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			st, schema := newPostgresTestStoreWithSchema(t)
+			if _, err := st.db.Exec(update); err != nil {
+				t.Fatalf("tamper migration identity: %v", err)
+			}
+			for mode, open := range map[string]func() (*Store, error){
+				"runtime": func() (*Store, error) { return OpenPostgres(databaseURLWithSearchPath(databaseURL, schema)) },
+				"operator": func() (*Store, error) {
+					return OpenPostgresMigrating(context.Background(), databaseURLWithSearchPath(databaseURL, schema))
+				},
+				"backfill": func() (*Store, error) {
+					return OpenPostgresMigratingWithLegacyBackfill(context.Background(), databaseURLWithSearchPath(databaseURL, schema), pinnedPostgresMigrationTree)
+				},
+			} {
+				t.Run(mode, func(t *testing.T) {
+					opened, err := open()
+					if opened != nil {
+						_ = opened.Close()
+					}
+					var migrationErr *PostgresMigrationError
+					if !errors.As(err, &migrationErr) || migrationErr.Stage != "identity-mismatch" {
+						t.Fatalf("open error = %v, want identity-mismatch migration error", err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestOpenPostgresMigratingRequiresExplicitLegacyLedgerBackfill(t *testing.T) {
+	databaseURL := os.Getenv("JOBCRON_TEST_POSTGRES_URL")
+	if databaseURL == "" {
+		t.Skip("JOBCRON_TEST_POSTGRES_URL not set")
+	}
+	schema := fmt.Sprintf("test_legacy_ledger_%d", rand.Uint64())
+	admin, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		t.Fatalf("open postgres admin: %v", err)
+	}
+	if _, err := admin.Exec(`CREATE SCHEMA ` + schema); err != nil {
+		admin.Close()
+		t.Fatalf("create postgres test schema: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
+		_ = admin.Close()
+	})
+	schemaURL := databaseURLWithSearchPath(databaseURL, schema)
+	db, err := sql.Open("pgx", schemaURL)
+	if err != nil {
+		t.Fatalf("open legacy postgres schema: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`
+CREATE TABLE schema_migrations (
+    version    integer PRIMARY KEY,
+    applied_at timestamptz NOT NULL DEFAULT now()
+)`); err != nil {
+		t.Fatalf("create legacy schema_migrations: %v", err)
+	}
+	migrations, err := embeddedPostgresMigrationManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, migration := range migrations {
+		if _, err := db.Exec(string(migration.statements)); err != nil {
+			t.Fatalf("apply legacy migration %s: %v", migration.name, err)
+		}
+		if _, err := db.Exec(`INSERT INTO schema_migrations (version) VALUES ($1)`, migration.version); err != nil {
+			t.Fatalf("record legacy migration %s: %v", migration.name, err)
+		}
+	}
+
+	opened, err := OpenPostgresMigrating(context.Background(), schemaURL)
+	if opened != nil {
+		_ = opened.Close()
+	}
+	var migrationErr *PostgresMigrationError
+	if !errors.As(err, &migrationErr) || migrationErr.Stage != "legacy-backfill-required" {
+		t.Fatalf("ordinary migration error = %v, want legacy-backfill-required", err)
+	}
+	var identityColumns int
+	if err := db.QueryRow(`
+SELECT count(*)
+  FROM information_schema.columns
+ WHERE table_schema = current_schema()
+   AND table_name = 'schema_migrations'
+   AND column_name IN ('name', 'sha256')`).Scan(&identityColumns); err != nil {
+		t.Fatalf("query rejected backfill rollback: %v", err)
+	}
+	if identityColumns != 0 {
+		t.Fatalf("rejected backfill left %d identity columns, want 0", identityColumns)
+	}
+
+	opened, err = OpenPostgresMigratingWithLegacyBackfill(context.Background(), schemaURL, strings.Repeat("0", 40))
+	if opened != nil {
+		_ = opened.Close()
+	}
+	if !errors.As(err, &migrationErr) || migrationErr.Stage != "legacy-audit" {
+		t.Fatalf("unaudited backfill error = %v, want legacy-audit", err)
+	}
+
+	opened, err = OpenPostgresMigratingWithLegacyBackfill(context.Background(), schemaURL, pinnedPostgresMigrationTree)
+	if err != nil {
+		t.Fatalf("explicit legacy backfill: %v", err)
+	}
+	if err := opened.Close(); err != nil {
+		t.Fatalf("close backfilled store: %v", err)
+	}
+	var exactRows int
+	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations WHERE name IS NOT NULL AND sha256 ~ '^[0-9a-f]{64}$'`).Scan(&exactRows); err != nil {
+		t.Fatalf("query backfilled migration identity: %v", err)
+	}
+	if exactRows != len(migrations) {
+		t.Fatalf("backfilled migration identities = %d, want %d", exactRows, len(migrations))
 	}
 }
 
@@ -242,7 +408,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ` + schema + ` TO ` + role); err 
 	if err != nil {
 		t.Fatalf("OpenPostgres with DML-only role: %v", err)
 	}
-	if _, err := runtime.SQLDB().Exec(`INSERT INTO schema_migrations (version) VALUES (9999)`); err == nil {
+	if _, err := runtime.SQLDB().Exec(`INSERT INTO schema_migrations (version, name, sha256) VALUES (9999, '9999_forged.sql', repeat('f', 64))`); err == nil {
 		t.Fatal("runtime role inserted a forged migration version")
 	}
 	if _, err := runtime.SQLDB().Exec(`UPDATE schema_migrations SET version = 9999 WHERE version = 19`); err == nil {
@@ -289,7 +455,7 @@ func TestOpenPostgresRejectsUnknownAppliedMigration(t *testing.T) {
 	if err := migrating.Close(); err != nil {
 		t.Fatalf("close migrating store: %v", err)
 	}
-	if _, err := admin.Exec(`INSERT INTO ` + schema + `.schema_migrations (version) VALUES (9999)`); err != nil {
+	if _, err := admin.Exec(`INSERT INTO ` + schema + `.schema_migrations (version, name, sha256) VALUES (9999, '9999_future.sql', repeat('f', 64))`); err != nil {
 		t.Fatalf("insert future migration marker: %v", err)
 	}
 	for name, open := range map[string]func() (*Store, error){
@@ -336,6 +502,38 @@ func TestPostgresMigrationManifestRejectsInvalidEntries(t *testing.T) {
 				t.Fatal("postgresMigrationManifest accepted invalid entries")
 			}
 		})
+	}
+}
+
+func TestPinnedPostgresMigrationDigestsRejectChangedSQL(t *testing.T) {
+	migrations, err := embeddedPostgresMigrationManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrations[0].digest = strings.Repeat("0", 64)
+	if err := validatePinnedPostgresMigrations(migrations); err == nil {
+		t.Fatal("pinned migration manifest accepted changed SQL")
+	}
+}
+
+func TestPinnedPostgresMigrationTreeMatchesEmbeddedFiles(t *testing.T) {
+	migrations, err := embeddedPostgresMigrationManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tree bytes.Buffer
+	for _, migration := range migrations {
+		blob := sha1.New() // Git SHA-1 object identity; migration content integrity uses SHA-256.
+		fmt.Fprintf(blob, "blob %d%c", len(migration.statements), 0)
+		_, _ = blob.Write(migration.statements)
+		fmt.Fprintf(&tree, "100644 %s%c", migration.name, 0)
+		_, _ = tree.Write(blob.Sum(nil))
+	}
+	object := sha1.New() // Git SHA-1 object identity; not a security digest.
+	fmt.Fprintf(object, "tree %d%c", tree.Len(), 0)
+	_, _ = object.Write(tree.Bytes())
+	if got := hex.EncodeToString(object.Sum(nil)); got != pinnedPostgresMigrationTree {
+		t.Fatalf("embedded migration tree = %s, want pin %s", got, pinnedPostgresMigrationTree)
 	}
 }
 

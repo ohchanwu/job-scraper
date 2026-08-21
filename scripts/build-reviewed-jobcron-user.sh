@@ -9,11 +9,12 @@ fail() {
 	exit 1
 }
 
-[ "$#" -eq 4 ] || fail
+[ "$#" -eq 5 ] || fail
 repo_root=$1
 reviewed_sha=$2
 output=$3
 go_binary=$4
+toolchain_digest=$5
 
 printf '%s\n' "$reviewed_sha" | grep -Eq '^[0-9a-f]{40}$' || fail
 [ "$(git -C "$repo_root" rev-parse --is-inside-work-tree 2>/dev/null)" = true ] || fail
@@ -28,6 +29,22 @@ case $go_binary in
 *) fail ;;
 esac
 [ -f "$go_binary" ] && [ -x "$go_binary" ] || fail
+printf '%s\n' "$toolchain_digest" | grep -Eq '^[0-9a-f]{64}$' || fail
+go_binary_name=${go_binary##*/}
+[ "$go_binary_name" = go ] || fail
+go_dir=$(CDPATH= cd -P "${go_binary%/*}" 2>/dev/null && pwd) || fail
+go_root=$(CDPATH= cd -P "$go_dir/.." 2>/dev/null && pwd) || fail
+[ "$go_binary" = "$go_dir/go" ] || fail
+[ -d "$go_root/bin" ] && [ -d "$go_root/pkg/tool" ] || fail
+actual_toolchain_digest=$(
+	find "$go_root/bin" "$go_root/pkg/tool" -type f -perm -111 -print |
+	LC_ALL=C sort |
+	while IFS= read -r path; do
+		printf '%s  %s\n' "$(/usr/bin/shasum -a 256 "$path" | /usr/bin/awk '{print $1}')" "${path#"$go_root"/}"
+	done |
+	/usr/bin/shasum -a 256 | /usr/bin/awk '{print $1}'
+) || fail
+[ "$actual_toolchain_digest" = "$toolchain_digest" ] || fail
 git_binary=$(command -v git) || fail
 run_git() {
 	env -i \
@@ -67,8 +84,6 @@ module_cache=$build_dir/modcache
 go_path=$build_dir/gopath
 tmp_dir=$build_dir/tmp
 mkdir -m 700 "$home_dir" "$cache_dir" "$module_cache" "$go_path" "$tmp_dir" || fail
-go_dir=${go_binary%/*}
-[ -n "$go_dir" ] || go_dir=/
 trusted_path=$go_dir:/usr/bin:/bin
 run_go() {
 	env -i \

@@ -51,9 +51,11 @@ func runWithPrompt(ctx context.Context, args []string, env envMap, in io.Reader,
 
 func runMigrateCommand(ctx context.Context, args []string, env envMap, in io.Reader, out, promptOut io.Writer) error {
 	var rawDatabaseURL string
+	var legacyMigrationTree string
 	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&rawDatabaseURL, "database-url", "", "localhost-only PostgreSQL database URL")
+	fs.StringVar(&legacyMigrationTree, "backfill-legacy-migration-tree", "", "audited Git tree for a version-only migration ledger")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -73,7 +75,7 @@ func runMigrateCommand(ctx context.Context, args []string, env envMap, in io.Rea
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	st, err := openMigrationStore(ctx, databaseURL)
+	st, err := openMigrationStore(ctx, databaseURL, legacyMigrationTree)
 	if err != nil {
 		return err
 	}
@@ -238,8 +240,14 @@ func openUserStore(databaseURL string) (*storage.Store, error) {
 	return st, nil
 }
 
-func openMigrationStore(ctx context.Context, databaseURL string) (*storage.Store, error) {
-	st, err := storage.OpenPostgresMigrating(ctx, databaseURL)
+func openMigrationStore(ctx context.Context, databaseURL, legacyMigrationTree string) (*storage.Store, error) {
+	var st *storage.Store
+	var err error
+	if legacyMigrationTree == "" {
+		st, err = storage.OpenPostgresMigrating(ctx, databaseURL)
+	} else {
+		st, err = storage.OpenPostgresMigratingWithLegacyBackfill(ctx, databaseURL, legacyMigrationTree)
+	}
 	if err != nil {
 		var migrationErr *storage.PostgresMigrationError
 		if errors.As(err, &migrationErr) {

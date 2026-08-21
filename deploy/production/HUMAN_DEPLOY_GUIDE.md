@@ -129,14 +129,41 @@ set -eu
 PATH=/usr/bin:/bin
 export PATH
 export JOBCRON_REVIEWED_SHA='<approved-40-hex-commit>'
+export JOBCRON_PREVIOUS_IMAGE_COMMIT='<commit from the private deployed image.json>'
 export JOBCRON_GO_BINARY='<approved-absolute-go-binary>'
+export JOBCRON_GO_TOOLCHAIN_DIGEST='<approved-64-hex-executable-manifest-digest>'
 export GIT_NO_REPLACE_OBJECTS=1
 printf '%s\n' "$JOBCRON_REVIEWED_SHA" | grep -Eq '^[0-9a-f]{40}$'
+printf '%s\n' "$JOBCRON_PREVIOUS_IMAGE_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
+printf '%s\n' "$JOBCRON_GO_TOOLCHAIN_DIGEST" | grep -Eq '^[0-9a-f]{64}$'
 case $JOBCRON_GO_BINARY in /*) ;; *) exit 1 ;; esac
 test -x "$JOBCRON_GO_BINARY"
-test "$(git rev-parse HEAD)" = "$JOBCRON_REVIEWED_SHA"
-test -z "$(git status --porcelain=v1 --untracked-files=all)"
-test -z "$(git stash list)"
+go_dir=$(CDPATH= cd -P "${JOBCRON_GO_BINARY%/*}" && pwd)
+go_root=$(CDPATH= cd -P "$go_dir/.." && pwd)
+computed_go_toolchain_digest=$(
+  find "$go_root/bin" "$go_root/pkg/tool" -type f -perm -111 -print |
+    LC_ALL=C sort |
+    while IFS= read -r path; do
+      printf '%s  %s\n' "$(shasum -a 256 "$path" | awk '{print $1}')" "${path#"$go_root"/}"
+    done |
+    shasum -a 256 | awk '{print $1}'
+)
+test "$computed_go_toolchain_digest" = "$JOBCRON_GO_TOOLCHAIN_DIGEST"
+run_git() {
+  env -i PATH=/usr/bin:/bin HOME=/var/empty GIT_CONFIG_NOSYSTEM=1 \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_NO_REPLACE_OBJECTS=1 \
+    /usr/bin/git -c core.hooksPath=/dev/null -c core.attributesFile=/dev/null \
+      -c core.excludesFile=/dev/null "$@"
+}
+test "$(run_git rev-parse HEAD)" = "$JOBCRON_REVIEWED_SHA"
+test -z "$(run_git status --porcelain=v1 --untracked-files=all)"
+test -z "$(run_git stash list)"
+run_git cat-file -e "$JOBCRON_PREVIOUS_IMAGE_COMMIT^{commit}"
+previous_migration_tree=$(run_git rev-parse \
+  "$JOBCRON_PREVIOUS_IMAGE_COMMIT:internal/storage/postgres_migrations")
+reviewed_migration_tree=$(run_git rev-parse \
+  "$JOBCRON_REVIEWED_SHA:internal/storage/postgres_migrations")
+test "$previous_migration_tree" = "$reviewed_migration_tree"
 migration_dir=$(mktemp -d)
 migration_bin="$migration_dir/jobcron-user-$JOBCRON_REVIEWED_SHA"
 migration_builder="$migration_dir/build-reviewed-jobcron-user"
@@ -146,15 +173,17 @@ cleanup_migration_binary() {
 }
 trap cleanup_migration_binary EXIT
 trap 'exit 1' HUP INT TERM
-repo_root=$(git rev-parse --show-toplevel)
-git show "${JOBCRON_REVIEWED_SHA}:scripts/build-reviewed-jobcron-user.sh" >"$migration_builder"
+repo_root=$(run_git rev-parse --show-toplevel)
+run_git show "${JOBCRON_REVIEWED_SHA}:scripts/build-reviewed-jobcron-user.sh" >"$migration_builder"
 chmod 500 "$migration_builder"
-"$migration_builder" "$repo_root" "$JOBCRON_REVIEWED_SHA" "$migration_bin" "$JOBCRON_GO_BINARY"
-test "$(git rev-parse HEAD)" = "$JOBCRON_REVIEWED_SHA"
-test -z "$(git status --porcelain=v1 --untracked-files=all)"
-test -z "$(git stash list)"
+"$migration_builder" "$repo_root" "$JOBCRON_REVIEWED_SHA" "$migration_bin" "$JOBCRON_GO_BINARY" "$JOBCRON_GO_TOOLCHAIN_DIGEST"
+test "$(run_git rev-parse HEAD)" = "$JOBCRON_REVIEWED_SHA"
+test -z "$(run_git status --porcelain=v1 --untracked-files=all)"
+test -z "$(run_git stash list)"
 unset JOBCRON_DATABASE_PASSWORD
-"$migration_bin" migrate --database-url "$JOBCRON_MASTER_DATABASE_URL"
+"$migration_bin" migrate \
+  --database-url "$JOBCRON_MASTER_DATABASE_URL" \
+  --backfill-legacy-migration-tree "$previous_migration_tree"
 )
 ```
 
@@ -165,7 +194,18 @@ build. The Go command is an explicitly selected absolute local binary and runs
 under an environment allowlist with `GOTOOLCHAIN=local`, `CGO_ENABLED=0`, private
 caches, module checksum verification, and `-mod=readonly`. Local Git metadata,
 ignored files, overlays, ambient build controls, and concurrent worktree edits
-cannot enter the privileged binary.
+cannot enter the privileged binary. The builder also verifies a SHA-256 manifest
+of every executable in that Go distribution's `bin` and `pkg/tool` trees before
+allowing any compiler sibling to run; a lone `go` executable hash is insufficient.
+
+The previous image commit comes from the private immutable-image evidence, not
+from a mutable branch or tag. Exact migration-tree object equality proves that
+the version-only production ledger was created by the same migration bytes now
+embedded in the reviewed binary. Only after that audit may the explicit
+backfill argument add each filename and pinned SHA-256 digest; the binary also
+requires that audited tree object to equal its pinned migration tree. Without
+the argument, a legacy ledger fails closed; a tree, filename, or digest mismatch
+always fails closed.
 
 The URL must contain the master username but no password, use exactly the
 `127.0.0.1` Session Manager tunnel, and set only `sslmode=require`.

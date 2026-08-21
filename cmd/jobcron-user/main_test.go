@@ -113,6 +113,21 @@ func TestRunMigrateRedactsDatabaseFailure(t *testing.T) {
 	}
 }
 
+func TestRunMigrateRejectsWrongLegacyMigrationTreeBeforeDatabase(t *testing.T) {
+	var out bytes.Buffer
+	err := run(context.Background(), []string{
+		"migrate",
+		"--database-url", "postgres://master@127.0.0.1:1/jobcron?sslmode=require",
+		"--backfill-legacy-migration-tree", strings.Repeat("0", 40),
+	}, envMap{"JOBCRON_DATABASE_PASSWORD": "synthetic-password"}, nil, &out)
+	if err == nil || err.Error() != `user: PostgreSQL migration "schema_migrations" failed during legacy-audit` {
+		t.Fatalf("run error = %v, want legacy-audit rejection", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("legacy audit failure wrote output %q", out.String())
+	}
+}
+
 func TestRunCreateOwnerUsesPasswordFromEnv(t *testing.T) {
 	postgresURL := os.Getenv("JOBCRON_TEST_POSTGRES_URL")
 	if postgresURL == "" {

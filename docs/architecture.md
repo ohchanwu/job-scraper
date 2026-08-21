@@ -112,8 +112,10 @@ See the [demo deployment reference](../deploy/demo/README.md).
 - `internal/storage` exposes one concrete repository, a read-only PostgreSQL schema-version gate,
   and an explicit operator migration path.
   Both paths validate one canonical embedded migration manifest and reject malformed files,
-  duplicate versions, pending versions, and database-ahead versions as applicable. The production
-  role can read `schema_migrations` but cannot insert, update, or delete its rows.
+  duplicate versions, changed pinned SQL, pending versions, database-ahead versions, and stored
+  filename or SHA-256 mismatches as applicable. A one-time version-only ledger conversion requires
+  an exact audited migration-tree object that matches the binary's pin. The production role
+  can read `schema_migrations` but cannot insert, update, or delete its rows.
   PostgreSQL backs production and ordinary local modes. SQLite entry points exist only for the
   legacy importer, the tracked read-only demo, and compatibility tests.
 - `internal/credential` encrypts per-user provider credentials and manages the protected local
@@ -341,14 +343,22 @@ migration was missed rather than granting schema-creation privileges to the runt
 The operator command bounds connection and lock waits with one two-minute context. Each migration
 transaction takes the same PostgreSQL advisory lock and rechecks its recorded version after the
 lock, preventing concurrent operators from applying one version twice while preserving
-per-version commits and idempotent recovery.
+per-version commits and idempotent recovery. Each ledger row persists the migration version,
+filename, and pinned content digest. Runtime startup verifies all three without DDL; the operator
+path refuses an old version-only ledger unless the separate immutable-image audit established that
+its migration tree exactly equals the reviewed tree and explicitly authorizes the transactional
+backfill.
 The production guide disables replacement objects before extracting the reviewed builder, then
 clones the exact commit into a private repository with no controller-local attributes or config.
 The build removes Git metadata and runs an explicitly selected local Go binary under an environment
 allowlist, fixed local toolchain and CGO policies, private caches, module checksum verification, and
-read-only module mode. The production role helper converges restrictive role attributes and refuses
-memberships or production-object ownership, revokes direct and public migration-ledger writes, and
-checks effective privileges before emitting readiness.
+read-only module mode. It authenticates the complete executable Go toolchain manifest before using
+compiler siblings. The production role helper rejects the master identity, pins both role and
+database-specific search paths, converges privileges deny-first, refuses forward or reverse
+memberships and non-public ownership/authority, revokes direct and public migration-ledger writes
+including TRUNCATE, and checks effective database/schema/table/sequence/routine privileges before
+emitting readiness. Ledger access uses an explicitly qualified schema identifier derived only from
+the bounded database URL search path.
 
 The main ownership split is:
 
