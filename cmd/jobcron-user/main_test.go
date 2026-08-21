@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -14,6 +15,83 @@ import (
 	"github.com/ohchanwu/jobcron/internal/auth"
 	"github.com/ohchanwu/jobcron/internal/storage"
 )
+
+func TestMigrationDatabaseURL(t *testing.T) {
+	const password = "database secret with :/@"
+	got, err := migrationDatabaseURL(
+		"postgres://master@127.0.0.1:15432/jobcron?sslmode=require",
+		password,
+	)
+	if err != nil {
+		t.Fatalf("migrationDatabaseURL: %v", err)
+	}
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("parse result: %v", err)
+	}
+	if parsed.User.Username() != "master" {
+		t.Fatalf("username = %q, want master", parsed.User.Username())
+	}
+	if gotPassword, ok := parsed.User.Password(); !ok || gotPassword != password {
+		t.Fatalf("password round trip ok=%v value=%q", ok, gotPassword)
+	}
+}
+
+func TestMigrationDatabaseURLRejectsUnsafeInputsWithoutDisclosure(t *testing.T) {
+	const secret = "must not be disclosed"
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{"embedded password", "postgres://master:embedded@127.0.0.1:15432/jobcron?sslmode=require"},
+		{"remote host", "postgres://master@db.example.invalid:5432/jobcron?sslmode=require"},
+		{"missing port", "postgres://master@127.0.0.1/jobcron?sslmode=require"},
+		{"weak TLS", "postgres://master@127.0.0.1:15432/jobcron?sslmode=disable"},
+		{"extra query", "postgres://master@127.0.0.1:15432/jobcron?sslmode=require&application_name=test"},
+		{"missing user", "postgres://127.0.0.1:15432/jobcron?sslmode=require"},
+		{"missing database", "postgres://master@127.0.0.1:15432/?sslmode=require"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := migrationDatabaseURL(tc.raw, secret)
+			if err == nil {
+				t.Fatal("migrationDatabaseURL error = nil")
+			}
+			if strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), tc.raw) {
+				t.Fatalf("error disclosed private input: %q", err)
+			}
+		})
+	}
+}
+
+func TestRunMigrateRequiresPassword(t *testing.T) {
+	err := run(context.Background(), []string{
+		"migrate",
+		"--database-url", "postgres://master@127.0.0.1:15432/jobcron?sslmode=require",
+	}, envMap{}, strings.NewReader("\n"), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "database password is required") {
+		t.Fatalf("run error = %v, want database password requirement", err)
+	}
+}
+
+func TestRunMigrateRedactsDatabaseFailure(t *testing.T) {
+	const (
+		databaseURL = "postgres://master@127.0.0.1:1/jobcron?sslmode=require"
+		password    = "private database password"
+	)
+	var out bytes.Buffer
+	err := run(context.Background(), []string{
+		"migrate", "--database-url", databaseURL,
+	}, envMap{"JOBCRON_DATABASE_PASSWORD": password}, nil, &out)
+	if err == nil {
+		t.Fatal("run error = nil, want database-open error")
+	}
+	if got, want := err.Error(), "user: open PostgreSQL database"; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+	if strings.Contains(err.Error(), password) || strings.Contains(err.Error(), databaseURL) || out.Len() != 0 {
+		t.Fatalf("failure disclosed private input: error=%q output=%q", err, out.String())
+	}
+}
 
 func TestRunCreateOwnerUsesPasswordFromEnv(t *testing.T) {
 	postgresURL := os.Getenv("JOBCRON_TEST_POSTGRES_URL")
@@ -357,6 +435,7 @@ func TestRunPasswordCommandsRequireFlags(t *testing.T) {
 		args []string
 		want string
 	}{
+		{"migrate database URL", []string{"migrate"}, "--database-url"},
 		{"reset database URL", []string{"reset-password", "--email", "a@example.com"}, "--database-url"},
 		{"reset email", []string{"reset-password", "--database-url", "unused"}, "--email"},
 		{"create database URL", []string{"create-owner", "--email", "a@example.com"}, "--database-url"},

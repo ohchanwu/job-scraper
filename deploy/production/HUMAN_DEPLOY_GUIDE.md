@@ -117,7 +117,22 @@ separate Session Manager sessions for host operations and later private
 verification. Do not capture the commands or resolved parameters in tracked
 evidence.
 
-## 6. Create the lower-privilege database role
+## 6. Apply schema migrations through the private tunnel
+
+Before the first runtime start, run the application's embedded migrations with
+the RDS master role from the trusted Mac:
+
+```sh
+go run ./cmd/jobcron-user migrate --database-url "$JOBCRON_MASTER_DATABASE_URL"
+```
+
+The URL must contain the master username but no password, use the localhost
+Session Manager tunnel, and set `sslmode=require` or `sslmode=verify-full`.
+Enter the AWS-managed master password only through the silent stdin prompt.
+The command emits only `database_migrations_ready=true`; the master credential
+never reaches the host or a command argument.
+
+## 7. Create the lower-privilege database role
 
 Set the helper's private inputs to the localhost-only master URL, private RDS
 endpoint, application role name, owner-only `database-role.env`, and
@@ -132,7 +147,8 @@ stdin prompts. It grants connect, schema usage, table DML, and sequence usage;
 it cannot create a database, superuser, extension, or replication role. Verify
 the catalog grants without printing names or passwords. The helper stores the
 lower-privilege TLS `DATABASE_URL` only in the private runtime JSON and emits
-only `database_role_ready=true`.
+only `database_role_ready=true`. Run this helper after every operator migration
+so newly created tables and sequences receive the runtime grants.
 
 If the approved legacy SQLite import is still required, keep the source and
 optional key file on the trusted Mac. Through the same tunnel, create exactly
@@ -141,7 +157,7 @@ category counts and collisions, then repeat the identical approved command
 with `--apply`. Never send the RDS master credential or legacy files to the
 host.
 
-## 7. Populate the runtime secret outside Terraform
+## 8. Populate the runtime secret outside Terraform
 
 Complete `runtime-secret.json` locally with exactly:
 
@@ -161,7 +177,7 @@ Through a Session Manager host session, write the separate classic
 `0600`. It must not be `GITHUB_TOKEN`, part of the runtime secret, or retained
 after the image pull.
 
-## 8. Prove the systemd runtime fails closed, then start
+## 9. Prove the systemd runtime fails closed, then start
 
 First select an intentionally incomplete synthetic secret version and start
 `jobcron.service`. Confirm the prior stack is stopped, preparation fails,
@@ -181,7 +197,7 @@ Compose in that order. Confirm:
 Run `/opt/jobcron/jobcron-runtime.sh verify-local-state` and record only its
 value-blind booleans and counts.
 
-## 9. Complete private verification
+## 10. Complete private verification
 
 Forward trusted-Mac ports through Session Manager to host loopback ports `7777`
 and `8443`. With the required headless browser workflow, walk the login page,
@@ -193,7 +209,7 @@ Separately verify Caddy's Origin CA certificate with the private CA material;
 do not bypass certificate verification. Record sanitized results in the private
 `private-verification.md`. This is private verification only.
 
-## 10. Prove reboot recovery
+## 11. Prove reboot recovery
 
 After private verification succeeds, enable `jobcron.service` and reboot the
 replacement host. Confirm the memory-backed runtime directory was cleared,
@@ -204,7 +220,7 @@ another registry token.
 Any incomplete secret, wrong mode, failed pull, unhealthy container, public
 listener, or failed user-path check is a stop condition.
 
-## 11. Verify recovery manifests and restore
+## 12. Verify recovery manifests and restore
 
 Run `jobcron-recovery.service` once and enable its timer only after that run
 succeeds. The service uploads a custom-format database dump, sanitized Jobcron
@@ -228,7 +244,7 @@ Record only sanitized outcomes in `recovery-verification.md`. Failed download,
 manifest, tagging, restore, row-count, or sanitization checks are stop
 conditions.
 
-## 12. Stop before public cutover
+## 13. Stop before public cutover
 
 Run a final no-change Terraform plan and confirm the old host, old database,
 reserved EIP, prior image, and recovery materials remain available. Confirm no

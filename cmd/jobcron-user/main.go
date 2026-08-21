@@ -1,4 +1,4 @@
-// Command jobcron-user manages production app user accounts.
+// Command jobcron-user manages production database operations.
 package main
 
 import (
@@ -8,6 +8,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 
@@ -31,9 +33,11 @@ func run(ctx context.Context, args []string, env envMap, in io.Reader, out io.Wr
 
 func runWithPrompt(ctx context.Context, args []string, env envMap, in io.Reader, out, promptOut io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: jobcron-user create-owner|reset-password|delete-user --database-url URL --email EMAIL")
+		return errors.New("usage: jobcron-user migrate|create-owner|reset-password|delete-user --database-url URL")
 	}
 	switch args[0] {
+	case "migrate":
+		return runMigrateCommand(args[1:], env, in, out, promptOut)
 	case "create-owner":
 		return runOwnerCommand(ctx, args[0], args[1:], env, in, out, promptOut, false)
 	case "reset-password":
@@ -43,6 +47,76 @@ func runWithPrompt(ctx context.Context, args []string, env envMap, in io.Reader,
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func runMigrateCommand(args []string, env envMap, in io.Reader, out, promptOut io.Writer) error {
+	var rawDatabaseURL string
+	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.StringVar(&rawDatabaseURL, "database-url", "", "localhost-only PostgreSQL database URL")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if rawDatabaseURL == "" {
+		return errors.New("user: --database-url is required")
+	}
+	password, err := commandPassword(env, "JOBCRON_DATABASE_PASSWORD", "Database", in, promptOut)
+	if err != nil {
+		return err
+	}
+	databaseURL, err := migrationDatabaseURL(rawDatabaseURL, password)
+	if err != nil {
+		return err
+	}
+	st, err := openUserStore(databaseURL)
+	if err != nil {
+		return err
+	}
+	if err := st.Close(); err != nil {
+		return errors.New("user: close PostgreSQL database")
+	}
+	fmt.Fprintln(out, "database_migrations_ready=true")
+	return nil
+}
+
+func migrationDatabaseURL(raw, password string) (string, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Opaque != "" || parsed.Fragment != "" {
+		return "", errors.New("user: invalid migration database URL")
+	}
+	if parsed.Scheme != "postgres" && parsed.Scheme != "postgresql" {
+		return "", errors.New("user: migration database URL must use PostgreSQL")
+	}
+	if parsed.User == nil || parsed.User.Username() == "" {
+		return "", errors.New("user: migration database URL requires a username")
+	}
+	if _, present := parsed.User.Password(); present {
+		return "", errors.New("user: migration database URL must not contain a password")
+	}
+	host := parsed.Hostname()
+	ip := net.ParseIP(host)
+	if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+		return "", errors.New("user: migration database URL must use a loopback host")
+	}
+	if parsed.Port() == "" {
+		return "", errors.New("user: migration database URL requires a tunnel port")
+	}
+	database := strings.TrimPrefix(parsed.Path, "/")
+	if database == "" || strings.Contains(database, "/") {
+		return "", errors.New("user: migration database URL requires one database name")
+	}
+	query, err := url.ParseQuery(parsed.RawQuery)
+	if err != nil || len(query) != 1 || len(query["sslmode"]) != 1 {
+		return "", errors.New("user: migration database URL requires only one sslmode")
+	}
+	if mode := query.Get("sslmode"); mode != "require" && mode != "verify-full" {
+		return "", errors.New("user: migration database URL requires TLS")
+	}
+	if password == "" {
+		return "", errors.New("user: database password is required")
+	}
+	parsed.User = url.UserPassword(parsed.User.Username(), password)
+	return parsed.String(), nil
 }
 
 func runOwnerCommand(ctx context.Context, name string, args []string, env envMap, in io.Reader, out, promptOut io.Writer, reset bool) error {

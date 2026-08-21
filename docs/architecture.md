@@ -329,6 +329,11 @@ gate are documented in the
 
 Normal application startup uses PostgreSQL only. `storage.OpenPostgres` checks connectivity and
 applies pending embedded migrations transactionally before returning the repository.
+Production operators apply those same embedded migrations with the RDS master role through a
+localhost-only Session Manager tunnel before starting a new runtime. They then refresh grants for
+the lower-privilege application role. The master credential stays on the trusted controller; the
+host receives only the DML-capable runtime URL. Normal startup remains fail-closed if an operator
+migration was missed rather than granting schema-creation privileges to the runtime role.
 
 The main ownership split is:
 
