@@ -109,6 +109,34 @@ func TestJobcronRuntimePrepareValidatesIdentifier(t *testing.T) {
 	}
 }
 
+func TestProductionHelpersPreferGNUStatForms(t *testing.T) {
+	t.Run("runtime", func(t *testing.T) {
+		fixture := newRuntimeFixture(t)
+		installGNUStatCollision(t, fixture.binDir)
+		if result := fixture.run(t, validRuntimeSecret(), "prepare"); result.err != nil {
+			t.Fatalf("prepare rejected GNU stat semantics: %v\n%s", result.err, result.output)
+		}
+	})
+
+	t.Run("RDS role", func(t *testing.T) {
+		fixture := newPrivateOpsFixture(t)
+		installGNUStatCollision(t, fixture.binDir)
+		if result := fixture.run(t, rdsRoleHelper, "master-password\napplication-password\n"); result.err != nil {
+			t.Fatalf("RDS helper rejected GNU stat semantics: %v\n%s", result.err, result.output)
+		}
+	})
+}
+
+func installGNUStatCollision(t *testing.T, binDir string) {
+	t.Helper()
+	writeExecutable(t, filepath.Join(binDir, "stat"), `#!/bin/sh
+if [ "$1" = -f ]; then printf '%s\n' gnu-filesystem-output; exit 0; fi
+if [ "$1" = -c ] && [ "$2" = %a ]; then printf '%s\n' 600; exit 0; fi
+if [ "$1" = -c ] && [ "$2" = %u ]; then id -u; exit 0; fi
+exit 1
+`)
+}
+
 func TestJobcronRuntimePullUsesImageOwnerAndTransientCredentials(t *testing.T) {
 	fixture := newRuntimeFixture(t)
 	if result := fixture.run(t, validRuntimeSecret(), "prepare"); result.err != nil {

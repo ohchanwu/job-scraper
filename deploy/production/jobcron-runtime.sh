@@ -15,11 +15,11 @@ fail() {
 }
 
 mode() {
-	stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"
+	stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
 }
 
 owner() {
-	stat -f '%u' "$1" 2>/dev/null || stat -c '%u' "$1"
+	stat -c '%u' "$1" 2>/dev/null || stat -f '%u' "$1"
 }
 
 remove_runtime_outputs() {
