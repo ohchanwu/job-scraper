@@ -246,9 +246,10 @@ run "replacement_host_contract" {
   assert {
     condition = (
       length(aws_instance.replacement_host.user_data) < 16384 &&
-      strcontains(aws_instance.replacement_host.user_data, "dnf install -y docker curl jq postgresql15") &&
+      strcontains(aws_instance.replacement_host.user_data, "dnf install -y docker jq postgresql15") &&
       !strcontains(aws_instance.replacement_host.user_data, "docker-compose-plugin") &&
       !strcontains(aws_instance.replacement_host.user_data, "awscli2") &&
+      strcontains(aws_instance.replacement_host.user_data, "command -v curl") &&
       strcontains(aws_instance.replacement_host.user_data, "command -v aws") &&
       strcontains(aws_instance.replacement_host.user_data, "aws-cli/2.*") &&
       strcontains(aws_instance.replacement_host.user_data, "compose_version='v5.5.0'") &&

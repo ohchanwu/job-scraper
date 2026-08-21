@@ -425,10 +425,10 @@ an upstream `latest` pointer cannot silently schedule host replacement. Changing
 explicit replacement operation that requires its own reviewed plan. Local controllers supply the
 pin from a mode-`0600` packet; the manual GitHub plan workflow receives the same input from its
 protected `production` environment secret `TF_VAR_REPLACEMENT_HOST_AMI_ID` without printing it.
-Bootstrap installs only packages published by the pinned Amazon Linux repositories, requires the
-AMI-provided AWS CLI v2, and installs the exact arm64 Docker Compose plugin from Docker's release
-assets only after verifying its pinned SHA-256. Runtime assets are written only after those tool
-gates pass.
+Bootstrap installs only Docker, `jq`, and the PostgreSQL client from the pinned Amazon Linux
+repositories, requires the AMI-provided `curl` and AWS CLI v2, and installs the exact arm64 Docker
+Compose plugin from Docker's release assets only after verifying its pinned SHA-256. Runtime assets
+are written only after those tool gates pass.
 Systemd materializes secret values only below `/run/jobcron`. Post-stop cleanup removes generated
 runtime material but preserves an unconsumed one-shot registry token across preflight failures;
 the pull path consumes and removes that token on both success and failure.

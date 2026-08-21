@@ -7,8 +7,10 @@ printf 'required deployment asset missing\n' >&2
 exit 1
 %{ endif ~}
 
-dnf install -y docker curl jq postgresql15
+dnf install -y docker jq postgresql15
 
+command -v curl >/dev/null
+curl --version >/dev/null
 command -v aws >/dev/null
 aws_version="$(aws --version 2>&1)"
 case "$aws_version" in
