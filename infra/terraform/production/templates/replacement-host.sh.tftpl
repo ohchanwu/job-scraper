@@ -51,6 +51,6 @@ printf '%s\n' '${runtime_secret_arn}' \
 chmod 0600 /etc/jobcron/runtime-secret-id
 
 systemctl daemon-reload
-systemctl enable docker.service jobcron-recovery.timer
+systemctl enable docker.service
 systemctl start docker.service
 systemctl stop jobcron.service

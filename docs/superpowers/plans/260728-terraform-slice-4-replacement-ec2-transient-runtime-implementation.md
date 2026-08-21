@@ -676,8 +676,8 @@ The inline policy has separate statements for the one runtime secret and
 
 The value-blind template installs packages, writes tracked assets from
 base64-encoded Terraform template inputs, verifies checksums, creates
-`/opt/jobcron` with root ownership, enables Docker and the recovery timer, and
-does not start Jobcron. Terraform renders
+`/opt/jobcron` with root ownership, enables Docker, leaves the recovery timer
+disabled pending its first verified manual run, and does not start Jobcron. Terraform renders
 `aws_secretsmanager_secret.runtime.arn` into
 `/etc/jobcron/runtime-secret-id`, owned by root with directory mode `0700` and
 file mode `0600`. This persistent file contains a private **identifier**, which

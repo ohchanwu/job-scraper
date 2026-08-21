@@ -432,7 +432,8 @@ always replaces any pre-existing plugin with that verified artifact before execu
 are written only after those tool gates pass.
 Systemd materializes secret values only below `/run/jobcron`. Post-stop cleanup removes generated
 runtime material but preserves an unconsumed one-shot registry token across preflight failures;
-the pull path consumes and removes that token on both success and failure.
+the pull path consumes and removes that token on both success and failure. Bootstrap leaves the
+recovery timer disabled until one manually verified recovery run succeeds.
 
 The origin security group carries the public semantic discovery tag
 `jobcron:edge-target = origin-security-group`. The adopted canonical VPC remains untagged because

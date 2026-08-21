@@ -262,10 +262,11 @@ run "replacement_host_contract" {
       strcontains(aws_instance.replacement_host.user_data, "docker compose version --short") &&
       !strcontains(aws_instance.replacement_host.user_data, "/opt/jobcron/.env") &&
       strcontains(aws_instance.replacement_host.user_data, "/etc/jobcron/runtime-secret-id") &&
-      strcontains(aws_instance.replacement_host.user_data, "systemctl enable") &&
+      strcontains(aws_instance.replacement_host.user_data, "systemctl enable docker.service") &&
+      !strcontains(aws_instance.replacement_host.user_data, "systemctl enable docker.service jobcron-recovery.timer") &&
       strcontains(aws_instance.replacement_host.user_data, "systemctl stop jobcron.service")
     )
-    error_message = "Bootstrap must stay below EC2 raw user-data limits, install tools, copy assets, enable units, and leave Jobcron stopped."
+    error_message = "Bootstrap must stay below EC2 raw user-data limits, install tools, copy assets, enable Docker only, and leave Jobcron stopped."
   }
 
   assert {
