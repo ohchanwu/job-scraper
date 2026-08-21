@@ -109,11 +109,12 @@ pull() {
 		grep -Eq '^ghcr\.io/[a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?/jobcron@sha256:[0-9a-f]{64}$' || fail
 	registry_owner=${image#ghcr.io/}
 	registry_owner=${registry_owner%%/jobcron@sha256:*}
+	token_file=$run_dir/registry-token
 	if docker image inspect "$image" >/dev/null 2>&1; then
+		rm -f "$token_file"
 		return
 	fi
 
-	token_file=$run_dir/registry-token
 	[ -f "$token_file" ] || fail
 	[ "$(mode "$token_file")" = 600 ] || fail
 	[ -s "$token_file" ] || fail

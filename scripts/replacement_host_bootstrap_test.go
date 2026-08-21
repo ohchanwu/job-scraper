@@ -51,6 +51,50 @@ printf 'corrupt download' >"$output"`)
 	}
 }
 
+func TestDockerConfigExcludesHomeComposePlugin(t *testing.T) {
+	docker, err := exec.LookPath("docker")
+	if err != nil {
+		t.Skipf("Docker CLI unavailable: %v", err)
+	}
+
+	home := t.TempDir()
+	configDir := t.TempDir()
+	pluginDir := filepath.Join(home, ".docker", "cli-plugins")
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
+		t.Fatalf("create user plugin directory: %v", err)
+	}
+	pluginLog := filepath.Join(home, "user-plugin.log")
+	writeBootstrapMock(t, pluginDir, "docker-compose", `if [ "${1:-}" = docker-cli-plugin-metadata ]; then
+	printf '%s\n' '{"SchemaVersion":"0.1.0","Vendor":"test","Version":"5.5.0","ShortDescription":"test"}'
+	exit 0
+fi
+printf 'executed\n' >>"$USER_PLUGIN_LOG"
+printf '5.5.0\n'`)
+
+	env := append(withoutEnv(os.Environ(), "HOME", "DOCKER_CONFIG", "DOCKER_CLI_PLUGIN_EXTRA_DIRS"),
+		"HOME="+home, "USER_PLUGIN_LOG="+pluginLog)
+	control := exec.Command(docker, "compose", "version", "--short")
+	control.Env = env
+	if output, err := control.CombinedOutput(); err != nil {
+		t.Fatalf("control user plugin was not discoverable: %v\n%s", err, output)
+	}
+	if contents, err := os.ReadFile(pluginLog); err != nil || len(contents) == 0 {
+		t.Fatalf("control user plugin did not execute: %v", err)
+	}
+	if err := os.Remove(pluginLog); err != nil {
+		t.Fatalf("clear control log: %v", err)
+	}
+
+	isolated := exec.Command(docker, "--config", configDir, "compose", "version", "--short")
+	isolated.Env = env
+	_ = isolated.Run()
+	if contents, err := os.ReadFile(pluginLog); err == nil && len(contents) > 0 {
+		t.Fatalf("isolated Docker config executed user plugin:\n%s", contents)
+	} else if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read isolated plugin log: %v", err)
+	}
+}
+
 func writeBootstrapMock(t *testing.T, binDir, name, body string) {
 	t.Helper()
 	path := filepath.Join(binDir, name)

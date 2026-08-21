@@ -244,6 +244,38 @@ func TestJobcronRuntimePullNeedsNoTokenForPresentDigest(t *testing.T) {
 	}
 }
 
+func TestJobcronRuntimeCachedImageConsumesRetainedToken(t *testing.T) {
+	fixture := newRuntimeFixture(t)
+	tokenPath := filepath.Join(fixture.runDir, "registry-token")
+	writeFile(t, tokenPath, "registry-token-secret\n", 0o600)
+
+	if result := fixture.run(t, `{}`, "prepare"); result.err == nil {
+		t.Fatal("incomplete preflight unexpectedly succeeded")
+	}
+	if result := fixture.run(t, validRuntimeSecret(), "cleanup"); result.err != nil {
+		t.Fatalf("failed-preflight cleanup: %v\n%s", result.err, result.output)
+	}
+	if _, err := os.Stat(tokenPath); err != nil {
+		t.Fatalf("failed preflight did not retain token: %v", err)
+	}
+	if result := fixture.run(t, validRuntimeSecret(), "prepare"); result.err != nil {
+		t.Fatalf("restored prepare: %v\n%s", result.err, result.output)
+	}
+	fixture.env = append(fixture.env, "FAKE_IMAGE_PRESENT=1")
+	if result := fixture.run(t, validRuntimeSecret(), "pull"); result.err != nil {
+		t.Fatalf("cached-image pull: %v\n%s", result.err, result.output)
+	}
+	if result := fixture.run(t, validRuntimeSecret(), "cleanup"); result.err != nil {
+		t.Fatalf("cached-image cleanup: %v\n%s", result.err, result.output)
+	}
+	if _, err := os.Stat(tokenPath); !os.IsNotExist(err) {
+		t.Fatalf("cached-image success retained registry token: %v", err)
+	}
+	if log := readFile(t, fixture.logPath); strings.Contains(log, "login ") {
+		t.Fatalf("cached image caused registry login:\n%s", log)
+	}
+}
+
 func TestJobcronRuntimeArchiveIsWriteOnlyAndSanitized(t *testing.T) {
 	fixture := newRuntimeFixture(t)
 	if result := fixture.run(t, validRuntimeSecret(), "prepare"); result.err != nil {
