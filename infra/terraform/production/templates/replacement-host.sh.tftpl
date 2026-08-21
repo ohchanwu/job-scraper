@@ -22,19 +22,16 @@ compose_version='v5.5.0'
 compose_expected_version='5.5.0'
 compose_sha256='ff42489f5a9b879d5d117c5ffea6defc27390b3286da8ad52cbc9c6ab5df590e'
 compose_path='/usr/local/lib/docker/cli-plugins/docker-compose'
-compose_installed_version="$(docker compose version --short 2>/dev/null || true)"
-if [ "$compose_installed_version" != "$compose_expected_version" ]; then
-  install -d -m 0755 -o root -g root "$(dirname "$compose_path")"
-  compose_tmp="$(mktemp)"
-  trap 'unlink "$compose_tmp" 2>/dev/null || true' EXIT
-  curl --fail --show-error --location --retry 3 \
-    --output "$compose_tmp" \
-    "https://github.com/docker/compose/releases/download/$compose_version/docker-compose-linux-aarch64"
-  printf '%s  %s\n' "$compose_sha256" "$compose_tmp" | sha256sum -c -
-  install -m 0755 -o root -g root "$compose_tmp" "$compose_path"
-  unlink "$compose_tmp"
-  trap - EXIT
-fi
+install -d -m 0755 -o root -g root "$(dirname "$compose_path")"
+compose_tmp="$(mktemp)"
+trap 'unlink "$compose_tmp" 2>/dev/null || true' EXIT
+curl --fail --show-error --location --retry 3 \
+  --output "$compose_tmp" \
+  "https://github.com/docker/compose/releases/download/$compose_version/docker-compose-linux-aarch64"
+printf '%s  %s\n' "$compose_sha256" "$compose_tmp" | sha256sum -c -
+install -m 0755 -o root -g root "$compose_tmp" "$compose_path"
+unlink "$compose_tmp"
+trap - EXIT
 test "$(docker compose version --short)" = "$compose_expected_version"
 
 install -d -m 0755 -o root -g root /opt/jobcron

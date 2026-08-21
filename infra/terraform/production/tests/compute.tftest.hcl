@@ -258,6 +258,7 @@ run "replacement_host_contract" {
       strcontains(aws_instance.replacement_host.user_data, "/usr/local/lib/docker/cli-plugins/docker-compose") &&
       strcontains(aws_instance.replacement_host.user_data, "curl --fail --show-error --location --retry 3") &&
       strcontains(aws_instance.replacement_host.user_data, "sha256sum -c -") &&
+      !strcontains(aws_instance.replacement_host.user_data, "compose_installed_version") &&
       strcontains(aws_instance.replacement_host.user_data, "docker compose version --short") &&
       !strcontains(aws_instance.replacement_host.user_data, "/opt/jobcron/.env") &&
       strcontains(aws_instance.replacement_host.user_data, "/etc/jobcron/runtime-secret-id") &&
