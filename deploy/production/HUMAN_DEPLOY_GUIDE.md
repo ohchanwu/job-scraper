@@ -126,8 +126,14 @@ untracked worktree change, or any stash:
 ```sh
 (
 set -eu
+PATH=/usr/bin:/bin
+export PATH
 export JOBCRON_REVIEWED_SHA='<approved-40-hex-commit>'
+export JOBCRON_GO_BINARY='<approved-absolute-go-binary>'
+export GIT_NO_REPLACE_OBJECTS=1
 printf '%s\n' "$JOBCRON_REVIEWED_SHA" | grep -Eq '^[0-9a-f]{40}$'
+case $JOBCRON_GO_BINARY in /*) ;; *) exit 1 ;; esac
+test -x "$JOBCRON_GO_BINARY"
 test "$(git rev-parse HEAD)" = "$JOBCRON_REVIEWED_SHA"
 test -z "$(git status --porcelain=v1 --untracked-files=all)"
 test -z "$(git stash list)"
@@ -141,9 +147,9 @@ cleanup_migration_binary() {
 trap cleanup_migration_binary EXIT
 trap 'exit 1' HUP INT TERM
 repo_root=$(git rev-parse --show-toplevel)
-git show "$JOBCRON_REVIEWED_SHA:scripts/build-reviewed-jobcron-user.sh" >"$migration_builder"
+git show "${JOBCRON_REVIEWED_SHA}:scripts/build-reviewed-jobcron-user.sh" >"$migration_builder"
 chmod 500 "$migration_builder"
-"$migration_builder" "$repo_root" "$JOBCRON_REVIEWED_SHA" "$migration_bin"
+"$migration_builder" "$repo_root" "$JOBCRON_REVIEWED_SHA" "$migration_bin" "$JOBCRON_GO_BINARY"
 test "$(git rev-parse HEAD)" = "$JOBCRON_REVIEWED_SHA"
 test -z "$(git status --porcelain=v1 --untracked-files=all)"
 test -z "$(git stash list)"
@@ -152,10 +158,14 @@ unset JOBCRON_DATABASE_PASSWORD
 )
 ```
 
-The builder itself and its source tree come from the reviewed commit. It builds
-from a private `git archive` with `GOENV=off`, empty `GOFLAGS`, `GOWORK=off`, and
-`-mod=readonly`, so ignored files, overlays, ambient workspaces, and concurrent
-worktree edits cannot enter the privileged binary.
+The builder itself comes from the reviewed commit. It disables Git replacement
+objects, clones the reviewed object into a private repository that has no local
+attributes or configuration, and then removes the clone metadata before the
+build. The Go command is an explicitly selected absolute local binary and runs
+under an environment allowlist with `GOTOOLCHAIN=local`, `CGO_ENABLED=0`, private
+caches, module checksum verification, and `-mod=readonly`. Local Git metadata,
+ignored files, overlays, ambient build controls, and concurrent worktree edits
+cannot enter the privileged binary.
 
 The URL must contain the master username but no password, use exactly the
 `127.0.0.1` Session Manager tunnel, and set only `sslmode=require`.
@@ -182,11 +192,15 @@ Enter the master and application passwords only through the helper's silent
 stdin prompts. It grants connect, schema usage, application-table DML, sequence
 usage, and read-only access to `schema_migrations`; the runtime role cannot
 forge the migration ledger or create a database, superuser, extension, or
-replication role. Verify the catalog grants without printing names or passwords.
-The helper stores the lower-privilege TLS `DATABASE_URL` only in the private
-runtime JSON and emits only `database_role_ready=true`. Run this helper after
-every operator migration so newly created tables and sequences receive the
-runtime grants and ledger writes are revoked again.
+replication role. Existing elevated role attributes are removed, while any role
+membership or ownership of the production database, public schema, or public
+relations makes the transaction fail closed. Direct and public ledger writes
+are revoked, and effective `SELECT`/`INSERT`/`UPDATE`/`DELETE` privileges are
+checked before readiness. Verify the catalog grants without printing names or
+passwords. The helper stores the lower-privilege TLS `DATABASE_URL` only in the
+private runtime JSON and emits only `database_role_ready=true`. Run this helper
+after every operator migration so newly created tables and sequences receive
+the runtime grants and ledger writes are revoked again.
 
 If the approved legacy SQLite import is still required, keep the source and
 optional key file on the trusted Mac. Through the same tunnel, create exactly

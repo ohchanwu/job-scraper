@@ -74,19 +74,67 @@ BEGIN;
 DO \$jobcron\$
 BEGIN
 	IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$app_user') THEN
-		CREATE ROLE $app_user LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
+		CREATE ROLE $app_user LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
 	END IF;
 END
 \$jobcron\$;
-ALTER ROLE $app_user PASSWORD '$escaped_application_password';
+ALTER ROLE $app_user LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD '$escaped_application_password';
+ALTER ROLE $app_user RESET ALL;
+DO \$jobcron\$
+BEGIN
+	IF EXISTS (
+		SELECT 1
+		FROM pg_auth_members membership
+		JOIN pg_roles member_role ON member_role.oid = membership.member
+		WHERE member_role.rolname = '$app_user'
+	) THEN
+		RAISE EXCEPTION 'application role has inherited role membership';
+	END IF;
+	IF EXISTS (
+		SELECT 1 FROM pg_roles
+		WHERE rolname = '$app_user'
+		  AND (NOT rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls)
+	) THEN
+		RAISE EXCEPTION 'application role attributes are not restrictive';
+	END IF;
+	IF EXISTS (
+		SELECT 1 FROM pg_database
+		WHERE datname = current_database() AND pg_get_userbyid(datdba) = '$app_user'
+	) OR EXISTS (
+		SELECT 1 FROM pg_namespace
+		WHERE nspname = 'public' AND pg_get_userbyid(nspowner) = '$app_user'
+	) OR EXISTS (
+		SELECT 1
+		FROM pg_class relation
+		JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+		WHERE namespace.nspname = 'public' AND pg_get_userbyid(relation.relowner) = '$app_user'
+	) THEN
+		RAISE EXCEPTION 'application role owns production database objects';
+	END IF;
+END
+\$jobcron\$;
 GRANT CONNECT ON DATABASE $database TO $app_user;
 GRANT USAGE ON SCHEMA public TO $app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO $app_user;
-REVOKE INSERT, UPDATE, DELETE ON TABLE schema_migrations FROM $app_user;
-GRANT SELECT ON TABLE schema_migrations TO $app_user;
+REVOKE INSERT, UPDATE, DELETE ON TABLE public.schema_migrations FROM $app_user;
+REVOKE INSERT, UPDATE, DELETE ON TABLE public.schema_migrations FROM PUBLIC;
+GRANT SELECT ON TABLE public.schema_migrations TO $app_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO $app_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE INSERT, UPDATE, DELETE ON TABLES FROM PUBLIC;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO $app_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO $app_user;
+DO \$jobcron\$
+BEGIN
+	IF NOT has_database_privilege('$app_user', current_database(), 'CONNECT')
+		OR NOT has_schema_privilege('$app_user', 'public', 'USAGE')
+		OR NOT has_table_privilege('$app_user', 'public.schema_migrations', 'SELECT')
+		OR has_table_privilege('$app_user', 'public.schema_migrations', 'INSERT')
+		OR has_table_privilege('$app_user', 'public.schema_migrations', 'UPDATE')
+		OR has_table_privilege('$app_user', 'public.schema_migrations', 'DELETE') THEN
+		RAISE EXCEPTION 'application role effective migration-ledger privileges are unsafe';
+	END IF;
+END
+\$jobcron\$;
 COMMIT;
 SQL
 then

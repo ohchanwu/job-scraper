@@ -193,11 +193,14 @@ func TestProductionMigrationDocsBindReviewedSource(t *testing.T) {
 	}
 	for _, required := range []string{
 		"(\nset -eu",
+		"PATH=/usr/bin:/bin",
 		"JOBCRON_REVIEWED_SHA",
+		"GIT_NO_REPLACE_OBJECTS=1",
+		"JOBCRON_GO_BINARY",
 		"git rev-parse HEAD",
 		"git status --porcelain=v1 --untracked-files=all",
 		"git stash list",
-		"git show \"$JOBCRON_REVIEWED_SHA:scripts/build-reviewed-jobcron-user.sh\"",
+		"git show \"${JOBCRON_REVIEWED_SHA}:scripts/build-reviewed-jobcron-user.sh\"",
 		"build-reviewed-jobcron-user",
 		"jobcron-user-$JOBCRON_REVIEWED_SHA",
 	} {

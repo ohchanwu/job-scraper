@@ -342,8 +342,13 @@ The operator command bounds connection and lock waits with one two-minute contex
 transaction takes the same PostgreSQL advisory lock and rechecks its recorded version after the
 lock, preventing concurrent operators from applying one version twice while preserving
 per-version commits and idempotent recovery.
-The production guide extracts the reviewed builder from the exact commit and builds the migration
-binary from that commit's private Git archive with ambient Go configuration disabled.
+The production guide disables replacement objects before extracting the reviewed builder, then
+clones the exact commit into a private repository with no controller-local attributes or config.
+The build removes Git metadata and runs an explicitly selected local Go binary under an environment
+allowlist, fixed local toolchain and CGO policies, private caches, module checksum verification, and
+read-only module mode. The production role helper converges restrictive role attributes and refuses
+memberships or production-object ownership, revokes direct and public migration-ledger writes, and
+checks effective privileges before emitting readiness.
 
 The main ownership split is:
 

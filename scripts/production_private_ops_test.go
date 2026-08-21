@@ -57,13 +57,20 @@ func TestProductionPrivateOpsRDSUsesOneLeastPrivilegeTransaction(t *testing.T) {
 	for _, want := range []string{
 		"BEGIN;",
 		"IF NOT EXISTS",
-		"CREATE ROLE jobcron_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;",
-		"ALTER ROLE jobcron_app PASSWORD '" + applicationPassword + "';",
+		"CREATE ROLE jobcron_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;",
+		"ALTER ROLE jobcron_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD '" + applicationPassword + "';",
+		"ALTER ROLE jobcron_app RESET ALL;",
+		"pg_auth_members",
+		"pg_get_userbyid",
 		"GRANT CONNECT ON DATABASE jobcron TO jobcron_app;",
 		"GRANT USAGE ON SCHEMA public TO jobcron_app;",
 		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO jobcron_app;",
-		"REVOKE INSERT, UPDATE, DELETE ON TABLE schema_migrations FROM jobcron_app;",
-		"GRANT SELECT ON TABLE schema_migrations TO jobcron_app;",
+		"REVOKE INSERT, UPDATE, DELETE ON TABLE public.schema_migrations FROM jobcron_app;",
+		"REVOKE INSERT, UPDATE, DELETE ON TABLE public.schema_migrations FROM PUBLIC;",
+		"GRANT SELECT ON TABLE public.schema_migrations TO jobcron_app;",
+		"has_table_privilege('jobcron_app', 'public.schema_migrations', 'INSERT')",
+		"has_table_privilege('jobcron_app', 'public.schema_migrations', 'UPDATE')",
+		"has_table_privilege('jobcron_app', 'public.schema_migrations', 'DELETE')",
 		"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO jobcron_app;",
 		"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO jobcron_app;",
 		"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO jobcron_app;",
@@ -107,7 +114,7 @@ func TestProductionPrivateOpsRDSUsesOneLeastPrivilegeTransaction(t *testing.T) {
 	}
 	secondSQL := readFile(t, fixture.sqlLog)
 	if !strings.Contains(secondSQL, "IF NOT EXISTS") ||
-		!strings.Contains(secondSQL, "ALTER ROLE jobcron_app PASSWORD '"+secondPassword+"';") {
+		!strings.Contains(secondSQL, "ALTER ROLE jobcron_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD '"+secondPassword+"';") {
 		t.Fatalf("rerun was not idempotent password rotation:\n%s", secondSQL)
 	}
 }

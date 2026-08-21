@@ -245,6 +245,12 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ` + schema + ` TO ` + role); err 
 	if _, err := runtime.SQLDB().Exec(`INSERT INTO schema_migrations (version) VALUES (9999)`); err == nil {
 		t.Fatal("runtime role inserted a forged migration version")
 	}
+	if _, err := runtime.SQLDB().Exec(`UPDATE schema_migrations SET version = 9999 WHERE version = 19`); err == nil {
+		t.Fatal("runtime role updated a migration version")
+	}
+	if _, err := runtime.SQLDB().Exec(`DELETE FROM schema_migrations WHERE version = 19`); err == nil {
+		t.Fatal("runtime role deleted a migration version")
+	}
 	if err := runtime.Close(); err != nil {
 		t.Fatalf("close runtime store: %v", err)
 	}
@@ -314,6 +320,15 @@ func TestPostgresMigrationManifestRejectsInvalidEntries(t *testing.T) {
 		"duplicate version": {
 			"0001_first.sql":  &fstest.MapFile{Data: []byte("SELECT 1")},
 			"0001_second.sql": &fstest.MapFile{Data: []byte("SELECT 2")},
+		},
+		"malformed version": {
+			"abcd_invalid.sql": &fstest.MapFile{Data: []byte("SELECT 1")},
+		},
+		"nonpositive version": {
+			"0000_invalid.sql": &fstest.MapFile{Data: []byte("SELECT 1")},
+		},
+		"wrong suffix": {
+			"0001_invalid.txt": &fstest.MapFile{Data: []byte("SELECT 1")},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
