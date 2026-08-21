@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"fmt"
@@ -18,6 +19,26 @@ var migrationsFS embed.FS
 
 //go:embed postgres_migrations/*.sql
 var postgresMigrationsFS embed.FS
+
+const postgresMigrationAdvisoryLock int64 = 0x4a4f4243524f4e
+
+// PostgresMigrationError identifies the embedded migration and phase that
+// failed without exposing driver diagnostics or connection coordinates.
+type PostgresMigrationError struct {
+	Migration string
+	Stage     string
+	err       error
+}
+
+func (e *PostgresMigrationError) Error() string {
+	return fmt.Sprintf("storage: postgres migration %q failed during %s", e.Migration, e.Stage)
+}
+
+func (e *PostgresMigrationError) Unwrap() error { return e.err }
+
+func postgresMigrationError(migration, stage string, err error) error {
+	return &PostgresMigrationError{Migration: migration, Stage: stage, err: err}
+}
 
 // Store is the jobcron persistence layer: a single concrete handle over
 // the configured SQL database, with every repository method hanging off it.
@@ -46,22 +67,52 @@ func OpenSQLiteAt(path string) (*Store, error) {
 	return &Store{db: db, dialect: DialectSQLite}, nil
 }
 
-// OpenPostgres opens a PostgreSQL database URL and applies pending PostgreSQL
-// migrations.
+// OpenPostgres opens a PostgreSQL database URL and verifies that every embedded
+// migration is already applied without issuing DDL.
 func OpenPostgres(databaseURL string) (*Store, error) {
+	return openPostgres(context.Background(), databaseURL, verifyPostgresMigrations)
+}
+
+// OpenPostgresMigrating opens a PostgreSQL database URL and applies pending
+// migrations. Production callers must reserve it for operator credentials.
+func OpenPostgresMigrating(ctx context.Context, databaseURL string) (*Store, error) {
+	return openPostgres(ctx, databaseURL, migratePostgres)
+}
+
+func openPostgres(ctx context.Context, databaseURL string, prepare func(context.Context, *sql.DB) error) (*Store, error) {
 	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("storage: open postgres: %w", err)
 	}
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("storage: open postgres: %w", err)
 	}
-	if err := migratePostgres(db); err != nil {
+	if err := prepare(ctx, db); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return &Store{db: db, dialect: DialectPostgres}, nil
+}
+
+func verifyPostgresMigrations(ctx context.Context, db *sql.DB) error {
+	entries, err := fs.ReadDir(postgresMigrationsFS, "postgres_migrations")
+	if err != nil {
+		return fmt.Errorf("storage: read postgres migrations: %w", err)
+	}
+	for _, entry := range entries {
+		version, err := strconv.Atoi(entry.Name()[:4])
+		if err != nil {
+			return fmt.Errorf("storage: postgres migration %q: name must start with a 4-digit version", entry.Name())
+		}
+		var applied int
+		if err := db.QueryRowContext(ctx, `SELECT 1 FROM schema_migrations WHERE version = $1`, version).Scan(&applied); err == sql.ErrNoRows {
+			return fmt.Errorf("storage: pending postgres migration %q", entry.Name())
+		} else if err != nil {
+			return fmt.Errorf("storage: verify postgres migration %q: %w", entry.Name(), err)
+		}
+	}
+	return nil
 }
 
 // Close releases the database handle.
@@ -118,13 +169,21 @@ func migrate(db *sql.DB) error {
 	return nil
 }
 
-func migratePostgres(db *sql.DB) error {
-	if _, err := db.Exec(`
+func migratePostgres(ctx context.Context, db *sql.DB) error {
+	tx, err := beginPostgresMigration(ctx, db, "schema_migrations")
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version    integer PRIMARY KEY,
     applied_at timestamptz NOT NULL DEFAULT now()
 )`); err != nil {
-		return fmt.Errorf("storage: ensure postgres schema_migrations: %w", err)
+		tx.Rollback()
+		return postgresMigrationError("schema_migrations", "prepare", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return postgresMigrationError("schema_migrations", "commit", err)
 	}
 	entries, err := fs.ReadDir(postgresMigrationsFS, "postgres_migrations")
 	if err != nil {
@@ -133,33 +192,47 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 	for _, e := range entries {
 		version, err := strconv.Atoi(e.Name()[:4])
 		if err != nil {
-			return fmt.Errorf("storage: postgres migration %q: name must start with a 4-digit version", e.Name())
-		}
-		var applied int
-		if err := db.QueryRow(`SELECT 1 FROM schema_migrations WHERE version = $1`, version).Scan(&applied); err == nil {
-			continue
-		} else if err != sql.ErrNoRows {
-			return fmt.Errorf("storage: check postgres migration %q: %w", e.Name(), err)
+			return postgresMigrationError(e.Name(), "validate", err)
 		}
 		stmts, err := postgresMigrationsFS.ReadFile("postgres_migrations/" + e.Name())
 		if err != nil {
-			return fmt.Errorf("storage: read postgres migration %q: %w", e.Name(), err)
+			return postgresMigrationError(e.Name(), "read", err)
 		}
-		tx, err := db.Begin()
+		tx, err := beginPostgresMigration(ctx, db, e.Name())
 		if err != nil {
-			return fmt.Errorf("storage: begin postgres migration %q: %w", e.Name(), err)
+			return err
 		}
-		if _, err := tx.Exec(string(stmts)); err != nil {
+		var applied int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM schema_migrations WHERE version = $1`, version).Scan(&applied); err == nil {
 			tx.Rollback()
-			return fmt.Errorf("storage: apply postgres migration %q: %w", e.Name(), err)
+			continue
+		} else if err != sql.ErrNoRows {
+			tx.Rollback()
+			return postgresMigrationError(e.Name(), "check", err)
 		}
-		if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES ($1, now())`, version); err != nil {
+		if _, err := tx.ExecContext(ctx, string(stmts)); err != nil {
 			tx.Rollback()
-			return fmt.Errorf("storage: record postgres migration %q: %w", e.Name(), err)
+			return postgresMigrationError(e.Name(), "apply", err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES ($1, now())`, version); err != nil {
+			tx.Rollback()
+			return postgresMigrationError(e.Name(), "record", err)
 		}
 		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("storage: commit postgres migration %q: %w", e.Name(), err)
+			return postgresMigrationError(e.Name(), "commit", err)
 		}
 	}
 	return nil
+}
+
+func beginPostgresMigration(ctx context.Context, db *sql.DB, name string) (*sql.Tx, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, postgresMigrationError(name, "begin", err)
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, postgresMigrationAdvisoryLock); err != nil {
+		tx.Rollback()
+		return nil, postgresMigrationError(name, "lock", err)
+	}
+	return tx, nil
 }

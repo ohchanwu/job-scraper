@@ -735,7 +735,8 @@ git commit -m "infra: define the narrow replacement production host"
 
 Prove:
 
-- the RDS helper requires `127.0.0.1` and `sslmode=verify-full`/`require`;
+- the RDS helper requires `127.0.0.1` and exactly `sslmode=require`; `verify-full`
+  cannot verify the RDS certificate against the tunnel's loopback hostname;
 - master and application passwords enter `psql` without argv, stdout, or
   history exposure;
 - SQL grants only connect, schema usage, current/future table DML, and current

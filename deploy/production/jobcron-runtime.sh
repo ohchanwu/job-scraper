@@ -150,6 +150,20 @@ archive() {
 	[ -n "${JOBCRON_RECOVERY_BUCKET:-}" ] || fail
 	database_url=$(compose_value DATABASE_URL)
 	[ -n "$database_url" ] || fail
+	printf '%s\n' "$database_url" |
+		grep -Eq '^postgres://[A-Za-z_][A-Za-z0-9_]*:([A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+@[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+\.rds\.amazonaws\.com:[0-9]+/[A-Za-z_][A-Za-z0-9_]*\?sslmode=require$' ||
+		fail
+	authority=${database_url#postgres://}
+	userinfo=${authority%%@*}
+	connection=${authority#*@}
+	database_user=${userinfo%%:*}
+	encoded_password=${userinfo#*:}
+	database_endpoint=${connection%%/*}
+	database_port=${database_endpoint##*:}
+	[ "$database_port" -ge 1 ] 2>/dev/null && [ "$database_port" -le 65535 ] 2>/dev/null || fail
+	database_password=$(printf '%b' "$(printf '%s' "$encoded_password" | sed 's/%/\\x/g')")
+	[ -n "$database_password" ] || fail
+	password_free_url="postgres://$database_user@$connection"
 	now=${JOBCRON_NOW:-$(date -u +%Y%m%dT%H%M%SZ)}
 	printf '%s\n' "$now" | grep -Eq '^[0-9]{8}T[0-9]{6}Z$' || fail
 	archive_dir=$run_dir/archive
@@ -163,7 +177,10 @@ archive() {
 	}
 	trap 'cleanup_archive_raw' EXIT HUP INT TERM
 
-	PGDATABASE=$database_url pg_dump -Fc -f "$archive_dir/database.dump" >/dev/null 2>&1 || fail
+	# libpq expands a URI only when it is the dbname argument; keep its password off argv.
+	PGPASSWORD=$database_password pg_dump --dbname="$password_free_url" -Fc \
+		-f "$archive_dir/database.dump" >/dev/null 2>&1 || fail
+	unset database_password encoded_password
 	(cd "$deploy_dir" && docker compose --env-file "$run_dir/compose.env" logs --no-color app >"$jobcron_raw") || fail
 	(cd "$deploy_dir" && docker compose --env-file "$run_dir/compose.env" logs --no-color caddy >"$caddy_raw") || fail
 	sanitize_logs <"$jobcron_raw" >"$archive_dir/jobcron.log"

@@ -179,6 +179,30 @@ func TestProductionDocsUseTransientSSMOperations(t *testing.T) {
 	}
 }
 
+func TestProductionMigrationDocsBindReviewedSource(t *testing.T) {
+	contents, err := os.ReadFile(filepath.Join("..", "deploy", "production", "HUMAN_DEPLOY_GUIDE.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	if strings.Contains(text, "go run ./cmd/jobcron-user migrate") {
+		t.Fatal("production guide runs privileged migration from the ambient worktree")
+	}
+	for _, required := range []string{
+		"(\nset -eu",
+		"JOBCRON_REVIEWED_SHA",
+		"git rev-parse HEAD",
+		"git status --porcelain=v1 --untracked-files=all",
+		"git stash list",
+		"go build -trimpath",
+		"jobcron-user-$JOBCRON_REVIEWED_SHA",
+	} {
+		if !strings.Contains(text, required) {
+			t.Errorf("production guide does not bind migration source with %q", required)
+		}
+	}
+}
+
 func TestProductionSurfacesUseExistingDailyScrapeTimeVariable(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join(".."))
 	standaloneInventedName := "JOBCRON_DAILY_" + "TIME"

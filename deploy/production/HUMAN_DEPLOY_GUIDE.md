@@ -119,18 +119,45 @@ evidence.
 
 ## 6. Apply schema migrations through the private tunnel
 
-Before the first runtime start, run the application's embedded migrations with
-the RDS master role from the trusted Mac:
+Before the first runtime start, bind the migration binary to the full exact SHA
+approved by independent review. Refuse a different HEAD, any tracked or
+untracked worktree change, or any stash:
 
 ```sh
-go run ./cmd/jobcron-user migrate --database-url "$JOBCRON_MASTER_DATABASE_URL"
+(
+set -eu
+export JOBCRON_REVIEWED_SHA='<approved-40-hex-commit>'
+printf '%s\n' "$JOBCRON_REVIEWED_SHA" | grep -Eq '^[0-9a-f]{40}$'
+test "$(git rev-parse HEAD)" = "$JOBCRON_REVIEWED_SHA"
+test -z "$(git status --porcelain=v1 --untracked-files=all)"
+test -z "$(git stash list)"
+migration_dir=$(mktemp -d)
+migration_bin="$migration_dir/jobcron-user-$JOBCRON_REVIEWED_SHA"
+cleanup_migration_binary() {
+  rm -f -- "$migration_bin" "$migration_bin.sha256"
+  rmdir "$migration_dir"
+}
+trap cleanup_migration_binary EXIT
+trap 'exit 1' HUP INT TERM
+go build -trimpath -o "$migration_bin" ./cmd/jobcron-user
+chmod 500 "$migration_bin"
+shasum -a 256 "$migration_bin" >"$migration_bin.sha256"
+chmod 400 "$migration_bin.sha256"
+unset JOBCRON_DATABASE_PASSWORD
+"$migration_bin" migrate --database-url "$JOBCRON_MASTER_DATABASE_URL"
+)
 ```
 
-The URL must contain the master username but no password, use the localhost
-Session Manager tunnel, and set `sslmode=require` or `sslmode=verify-full`.
-Enter the AWS-managed master password only through the silent stdin prompt.
-The command emits only `database_migrations_ready=true`; the master credential
-never reaches the host or a command argument.
+The URL must contain the master username but no password, use exactly the
+`127.0.0.1` Session Manager tunnel, and set only `sslmode=require`.
+`verify-full` cannot verify the RDS certificate against a loopback hostname.
+For this production run, leave `JOBCRON_DATABASE_PASSWORD` unset and enter the
+AWS-managed master password only through the silent stdin prompt. The command's
+environment source exists for controlled automation and tests, not this manual
+path. It emits only `database_migrations_ready=true`; the master credential
+never reaches the host or a command argument. The operation has a two-minute
+total deadline and serializes concurrent migrators with a PostgreSQL advisory
+lock.
 
 ## 7. Create the lower-privilege database role
 
@@ -225,6 +252,10 @@ listener, or failed user-path check is a stop condition.
 Run `jobcron-recovery.service` once and enable its timer only after that run
 succeeds. The service uploads a custom-format database dump, sanitized Jobcron
 and Caddy logs, and one SHA-256 recovery manifest for each artifact.
+It accepts only the generated TLS RDS URL, passes a password-free URL as
+`pg_dump`'s database argument, and supplies the decoded password only through
+the child environment. Confirm the process arguments and sanitized evidence do
+not contain either the encoded or decoded database password.
 
 On the trusted Mac, set the private bucket, timestamped prefix, and owner-only
 destination, then run:

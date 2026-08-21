@@ -22,6 +22,7 @@ func TestProductionPrivateOpsRDSRejectsNonLocalOrWeakTLS(t *testing.T) {
 	for _, databaseURL := range []string{
 		"postgres://master@db.example.invalid:5432/jobcron?sslmode=require",
 		"postgres://master@127.0.0.1:15432/jobcron?sslmode=disable",
+		"postgres://master@127.0.0.1:15432/jobcron?sslmode=verify-full",
 		"postgres://master@localhost:15432/jobcron?sslmode=require",
 	} {
 		t.Run(databaseURL, func(t *testing.T) {

@@ -53,13 +53,16 @@ func stubRuntimeDependencies(
 	oldEnsure := ensureLocalPostgres
 	oldLoadKey := loadLocalMasterKey
 	oldOpenStore := openRuntimeUserStore
+	oldOpenMigratingStore := openMigratingRuntimeUserStore
 	ensureLocalPostgres = ensure
 	loadLocalMasterKey = loadKey
 	openRuntimeUserStore = openStore
+	openMigratingRuntimeUserStore = openStore
 	t.Cleanup(func() {
 		ensureLocalPostgres = oldEnsure
 		loadLocalMasterKey = oldLoadKey
 		openRuntimeUserStore = oldOpenStore
+		openMigratingRuntimeUserStore = oldOpenMigratingStore
 	})
 }
 
@@ -262,6 +265,10 @@ func TestResolveRuntimeProductionNeverCreatesLocalMasterKey(t *testing.T) {
 		func() ([]byte, error) { keyCalls++; return nil, errors.New("unexpected local key load") },
 		func(string) (runtimeUserStore, error) { return store, nil },
 	)
+	openMigratingRuntimeUserStore = func(string) (runtimeUserStore, error) {
+		t.Fatal("production opened the migration-capable store")
+		return nil, nil
+	}
 
 	runtime, err := resolvePostgresRuntime(context.Background(), config.Config{
 		Production:              true,

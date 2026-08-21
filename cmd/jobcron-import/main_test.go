@@ -291,7 +291,7 @@ func TestImportApplyCopiesRepresentativeData(t *testing.T) {
 	targetURL := databaseURLWithSearchPath(postgresURL, schema)
 	ownerEmail := "intended-owner@example.com"
 
-	preexisting, err := storage.OpenPostgres(targetURL)
+	preexisting, err := storage.OpenPostgresMigrating(context.Background(), targetURL)
 	if err != nil {
 		t.Fatalf("OpenPostgres preexisting target: %v", err)
 	}
@@ -903,7 +903,7 @@ func TestImportSQLiteToPostgresUsesExistingOwnerWithoutChangingPassword(t *testi
 	ownerEmail := "existing-owner@example.com"
 	passwordHash := "real-owner-password-hash"
 
-	preexisting, err := storage.OpenPostgres(targetURL)
+	preexisting, err := storage.OpenPostgresMigrating(context.Background(), targetURL)
 	if err != nil {
 		t.Fatalf("OpenPostgres preexisting target: %v", err)
 	}
@@ -1077,7 +1077,7 @@ func prepareImportTarget(t *testing.T, postgresURL string, emails ...string) (st
 	t.Helper()
 	schema := createPostgresImportSchema(t, postgresURL)
 	targetURL := databaseURLWithSearchPath(postgresURL, schema)
-	target, err := storage.OpenPostgres(targetURL)
+	target, err := storage.OpenPostgresMigrating(context.Background(), targetURL)
 	if err != nil {
 		t.Fatalf("open prepared import target: %v", err)
 	}

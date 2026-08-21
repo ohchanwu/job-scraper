@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/rand/v2"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -160,7 +162,7 @@ func TestOpenPostgresInvalidURLReturnsOpenError(t *testing.T) {
 	}
 }
 
-func TestOpenPostgresAppliesSchema(t *testing.T) {
+func TestOpenPostgresMigratingAppliesSchema(t *testing.T) {
 	st, schema := newPostgresTestStoreWithSchema(t)
 	if st.Dialect() != DialectPostgres {
 		t.Fatalf("Dialect = %v, want postgres", st.Dialect())
@@ -179,6 +181,122 @@ func TestOpenPostgresAppliesSchema(t *testing.T) {
 	}
 	if version != 19 {
 		t.Fatalf("schema version = %d, want 19", version)
+	}
+}
+
+func TestOpenPostgresVerifiesMigratedSchemaWithoutCreatePrivilege(t *testing.T) {
+	databaseURL := os.Getenv("JOBCRON_TEST_POSTGRES_URL")
+	if databaseURL == "" {
+		t.Skip("JOBCRON_TEST_POSTGRES_URL not set")
+	}
+	schema := fmt.Sprintf("test_runtime_%d", rand.Uint64())
+	role := fmt.Sprintf("runtime_%d", rand.Uint64())
+	const password = "runtime-test-password"
+	admin, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		t.Fatalf("open postgres admin: %v", err)
+	}
+	if _, err := admin.Exec(`CREATE SCHEMA ` + schema); err != nil {
+		admin.Close()
+		t.Fatalf("create postgres test schema: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
+		_, _ = admin.Exec(`DROP ROLE IF EXISTS ` + role)
+		_ = admin.Close()
+	})
+	schemaURL := databaseURLWithSearchPath(databaseURL, schema)
+	if _, err := OpenPostgres(schemaURL); err == nil {
+		t.Fatal("OpenPostgres accepted a schema with pending migrations")
+	}
+	var runtimeCreatedMigrationTable bool
+	if err := admin.QueryRow(`SELECT to_regclass($1) IS NOT NULL`, schema+`.schema_migrations`).Scan(&runtimeCreatedMigrationTable); err != nil {
+		t.Fatalf("query unexpected runtime DDL: %v", err)
+	}
+	if runtimeCreatedMigrationTable {
+		t.Fatal("OpenPostgres created schema_migrations")
+	}
+	migrating, err := OpenPostgresMigrating(context.Background(), schemaURL)
+	if err != nil {
+		t.Fatalf("OpenPostgresMigrating: %v", err)
+	}
+	if err := migrating.Close(); err != nil {
+		t.Fatalf("close migrating store: %v", err)
+	}
+	if _, err := admin.Exec(`CREATE ROLE ` + role + ` LOGIN PASSWORD '` + password + `'`); err != nil {
+		t.Fatalf("create runtime role: %v", err)
+	}
+	if _, err := admin.Exec(`GRANT USAGE ON SCHEMA ` + schema + ` TO ` + role + `;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ` + schema + ` TO ` + role + `;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ` + schema + ` TO ` + role); err != nil {
+		t.Fatalf("grant runtime privileges: %v", err)
+	}
+	parsed, err := url.Parse(databaseURLWithSearchPath(databaseURL, schema))
+	if err != nil {
+		t.Fatalf("parse test database URL: %v", err)
+	}
+	parsed.User = url.UserPassword(role, password)
+	runtime, err := OpenPostgres(parsed.String())
+	if err != nil {
+		t.Fatalf("OpenPostgres with DML-only role: %v", err)
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("close runtime store: %v", err)
+	}
+	var canCreate bool
+	if err := admin.QueryRow(`SELECT has_schema_privilege($1, $2, 'CREATE')`, role, schema).Scan(&canCreate); err != nil {
+		t.Fatalf("query runtime CREATE privilege: %v", err)
+	}
+	if canCreate {
+		t.Fatal("runtime role unexpectedly has schema CREATE")
+	}
+}
+
+func TestOpenPostgresMigratingHonorsContextWhileWaitingForAdvisoryLock(t *testing.T) {
+	databaseURL := os.Getenv("JOBCRON_TEST_POSTGRES_URL")
+	if databaseURL == "" {
+		t.Skip("JOBCRON_TEST_POSTGRES_URL not set")
+	}
+	schema := fmt.Sprintf("test_lock_%d", rand.Uint64())
+	admin, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		t.Fatalf("open postgres admin: %v", err)
+	}
+	if _, err := admin.Exec(`CREATE SCHEMA ` + schema); err != nil {
+		admin.Close()
+		t.Fatalf("create postgres test schema: %v", err)
+	}
+	blocker, err := admin.Begin()
+	if err != nil {
+		admin.Close()
+		t.Fatalf("begin advisory-lock blocker: %v", err)
+	}
+	if _, err := blocker.Exec(`SELECT pg_advisory_xact_lock($1)`, postgresMigrationAdvisoryLock); err != nil {
+		_ = blocker.Rollback()
+		admin.Close()
+		t.Fatalf("hold migration advisory lock: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = blocker.Rollback()
+		_, _ = admin.Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
+		_ = admin.Close()
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err = OpenPostgresMigrating(ctx, databaseURLWithSearchPath(databaseURL, schema))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("OpenPostgresMigrating error = %v, want context deadline", err)
+	}
+	var migrationErr *PostgresMigrationError
+	if !errors.As(err, &migrationErr) {
+		t.Fatalf("OpenPostgresMigrating error type = %T, want PostgresMigrationError", err)
+	}
+	if migrationErr.Migration != "schema_migrations" || migrationErr.Stage != "lock" {
+		t.Fatalf("migration failure = %q/%q, want schema_migrations/lock", migrationErr.Migration, migrationErr.Stage)
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("migration cancellation took %s", elapsed)
 	}
 }
 
@@ -327,7 +445,7 @@ func newPostgresTestStore(t *testing.T) *Store {
 		_, _ = admin.Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
 		_ = admin.Close()
 	})
-	st, err := OpenPostgres(databaseURLWithSearchPath(databaseURL, schema))
+	st, err := OpenPostgresMigrating(context.Background(), databaseURLWithSearchPath(databaseURL, schema))
 	if err != nil {
 		t.Fatalf("OpenPostgres: %v", err)
 	}

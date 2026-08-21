@@ -44,9 +44,13 @@ func TestMigrationDatabaseURLRejectsUnsafeInputsWithoutDisclosure(t *testing.T) 
 		raw  string
 	}{
 		{"embedded password", "postgres://master:embedded@127.0.0.1:15432/jobcron?sslmode=require"},
+		{"alternate scheme", "postgresql://master@127.0.0.1:15432/jobcron?sslmode=require"},
+		{"localhost name", "postgres://master@localhost:15432/jobcron?sslmode=require"},
+		{"IPv6 loopback", "postgres://master@[::1]:15432/jobcron?sslmode=require"},
 		{"remote host", "postgres://master@db.example.invalid:5432/jobcron?sslmode=require"},
 		{"missing port", "postgres://master@127.0.0.1/jobcron?sslmode=require"},
 		{"weak TLS", "postgres://master@127.0.0.1:15432/jobcron?sslmode=disable"},
+		{"unverifiable tunnel TLS", "postgres://master@127.0.0.1:15432/jobcron?sslmode=verify-full"},
 		{"extra query", "postgres://master@127.0.0.1:15432/jobcron?sslmode=require&application_name=test"},
 		{"missing user", "postgres://127.0.0.1:15432/jobcron?sslmode=require"},
 		{"missing database", "postgres://master@127.0.0.1:15432/?sslmode=require"},
@@ -60,6 +64,22 @@ func TestMigrationDatabaseURLRejectsUnsafeInputsWithoutDisclosure(t *testing.T) 
 				t.Fatalf("error disclosed private input: %q", err)
 			}
 		})
+	}
+}
+
+func TestRunMigrateRejectsTrailingArgumentsWithoutDisclosure(t *testing.T) {
+	const accidentalSecret = "accidental-password-argument"
+	var out bytes.Buffer
+	err := run(context.Background(), []string{
+		"migrate",
+		"--database-url", "postgres://master@127.0.0.1:15432/jobcron?sslmode=require",
+		accidentalSecret,
+	}, envMap{"JOBCRON_DATABASE_PASSWORD": "private database password"}, nil, &out)
+	if err == nil || !strings.Contains(err.Error(), "unexpected positional arguments") {
+		t.Fatalf("run error = %v, want positional-argument rejection", err)
+	}
+	if strings.Contains(err.Error(), accidentalSecret) || strings.Contains(out.String(), accidentalSecret) {
+		t.Fatalf("error disclosed trailing argument: error=%q output=%q", err, out.String())
 	}
 }
 
@@ -561,6 +581,13 @@ func createUserCLITestSchema(t *testing.T, databaseURL string) string {
 	})
 	if _, err := db.Exec(`CREATE SCHEMA ` + schema); err != nil {
 		t.Fatalf("create schema %s: %v", schema, err)
+	}
+	migrating, err := storage.OpenPostgresMigrating(context.Background(), databaseURLWithSearchPath(databaseURL, schema))
+	if err != nil {
+		t.Fatalf("migrate schema %s: %v", schema, err)
+	}
+	if err := migrating.Close(); err != nil {
+		t.Fatalf("close migrated schema %s: %v", schema, err)
 	}
 	return schema
 }

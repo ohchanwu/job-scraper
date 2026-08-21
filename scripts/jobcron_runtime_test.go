@@ -14,7 +14,7 @@ const systemdDir = "../deploy/production/systemd"
 
 var runtimeSecretFields = map[string]string{
 	"JOBCRON_IMAGE":                     "ghcr.io/example/jobcron@sha256:" + strings.Repeat("a", 64),
-	"DATABASE_URL":                      "postgres://app:db-secret@db.example.invalid/jobcron?sslmode=require",
+	"DATABASE_URL":                      "postgres://app:db%3Asecret%40value@synthetic.cluster-abc.ap-northeast-2.rds.amazonaws.com:5432/jobcron?sslmode=require",
 	"SESSION_SECRET":                    "session-secret-at-least-32-bytes",
 	"JOBCRON_CREDENTIAL_ENCRYPTION_KEY": "credential-key-secret",
 	"JOBCRON_SIGNUP_ACCESS_CODE":        "signup-code-secret",
@@ -315,8 +315,14 @@ func TestJobcronRuntimeArchiveIsWriteOnlyAndSanitized(t *testing.T) {
 	}
 	assertNoRuntimeSecret(t, result.output)
 	log := readFile(t, fixture.logPath)
-	if !strings.Contains(log, "pg_dump -Fc") {
-		t.Fatalf("pg_dump was not custom format:\n%s", log)
+	const safeDumpURL = "postgres://app@synthetic.cluster-abc.ap-northeast-2.rds.amazonaws.com:5432/jobcron?sslmode=require"
+	if !strings.Contains(log, "pg_dump --dbname="+safeDumpURL+" -Fc") {
+		t.Fatalf("pg_dump did not receive the password-free connection URL:\n%s", log)
+	}
+	for _, secret := range []string{"db%3Asecret%40value", "db:secret@value"} {
+		if strings.Contains(log, secret) {
+			t.Fatalf("pg_dump command disclosed database password %q:\n%s", secret, log)
+		}
 	}
 	for _, want := range []string{
 		"docker compose --env-file " + filepath.Join(fixture.runDir, "compose.env") + " logs --no-color app",
@@ -370,6 +376,30 @@ func TestJobcronRuntimeArchiveIsWriteOnlyAndSanitized(t *testing.T) {
 	}
 	if !strings.Contains(readFile(t, filepath.Join(fixture.runDir, "archive", "jobcron.log")), "INFO ready") {
 		t.Fatalf("manifests were not uploaded last:\n%s", strings.Join(uploads, "\n"))
+	}
+}
+
+func TestJobcronRuntimeArchiveRejectsUnsafeDatabaseURLBeforeDump(t *testing.T) {
+	for _, databaseURL := range []string{
+		"postgres://app:secret@db.example.invalid:5432/jobcron?sslmode=require",
+		"postgres://app:secret@synthetic.cluster-abc.ap-northeast-2.rds.amazonaws.com/jobcron?sslmode=require",
+		"postgres://app:bad%ZZ@synthetic.cluster-abc.ap-northeast-2.rds.amazonaws.com:5432/jobcron?sslmode=require",
+		"postgres://app:secret@synthetic.cluster-abc.ap-northeast-2.rds.amazonaws.com:5432/jobcron?sslmode=disable",
+		"postgres://app:secret@synthetic.cluster-abc.ap-northeast-2.rds.amazonaws.com:5432/jobcron?sslmode=verify-full",
+	} {
+		fixture := newRuntimeFixture(t)
+		secret := replaceRuntimeSecret(t, "DATABASE_URL", databaseURL)
+		if result := fixture.run(t, secret, "prepare"); result.err != nil {
+			t.Fatalf("prepare: %v\n%s", result.err, result.output)
+		}
+		result := fixture.run(t, secret, "archive")
+		if result.err == nil {
+			t.Fatalf("archive accepted unsafe database URL")
+		}
+		assertNoRuntimeSecret(t, result.output)
+		if log := readFile(t, fixture.logPath); strings.Contains(log, "pg_dump ") || strings.Contains(log, "aws s3 cp ") {
+			t.Fatalf("unsafe database URL reached backup side effects:\n%s", log)
+		}
 	}
 }
 
@@ -583,6 +613,7 @@ func newRuntimeFixture(t *testing.T) runtimeFixture {
 		"JOBCRON_NOW=20260728T120000Z",
 		"FAKE_COMMAND_LOG="+fixture.logPath,
 		"FAKE_EXPECTED_DOCKER_CONFIG="+filepath.Join(fixture.runDir, "docker"),
+		"FAKE_EXPECTED_DATABASE_PASSWORD=db:secret@value",
 	)
 	return fixture
 }
@@ -651,6 +682,8 @@ exit 0
 `)
 	writeExecutable(t, filepath.Join(f.binDir, "pg_dump"), `#!/bin/sh
 printf 'pg_dump %s\n' "$*" >>"$FAKE_COMMAND_LOG"
+[ "${PGPASSWORD:-}" = "$FAKE_EXPECTED_DATABASE_PASSWORD" ] || exit 98
+[ -z "${PGDATABASE:-}" ] || exit 99
 while [ "$#" -gt 0 ]; do
   if [ "$1" = -f ]; then shift; printf 'synthetic dump\n' >"$1"; exit 0; fi
   shift

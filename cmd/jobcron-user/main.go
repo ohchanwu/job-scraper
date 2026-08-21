@@ -8,10 +8,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ohchanwu/jobcron/internal/auth"
 	"github.com/ohchanwu/jobcron/internal/storage"
@@ -37,7 +37,7 @@ func runWithPrompt(ctx context.Context, args []string, env envMap, in io.Reader,
 	}
 	switch args[0] {
 	case "migrate":
-		return runMigrateCommand(args[1:], env, in, out, promptOut)
+		return runMigrateCommand(ctx, args[1:], env, in, out, promptOut)
 	case "create-owner":
 		return runOwnerCommand(ctx, args[0], args[1:], env, in, out, promptOut, false)
 	case "reset-password":
@@ -49,13 +49,16 @@ func runWithPrompt(ctx context.Context, args []string, env envMap, in io.Reader,
 	}
 }
 
-func runMigrateCommand(args []string, env envMap, in io.Reader, out, promptOut io.Writer) error {
+func runMigrateCommand(ctx context.Context, args []string, env envMap, in io.Reader, out, promptOut io.Writer) error {
 	var rawDatabaseURL string
 	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&rawDatabaseURL, "database-url", "", "localhost-only PostgreSQL database URL")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("user: unexpected positional arguments")
 	}
 	if rawDatabaseURL == "" {
 		return errors.New("user: --database-url is required")
@@ -68,7 +71,9 @@ func runMigrateCommand(args []string, env envMap, in io.Reader, out, promptOut i
 	if err != nil {
 		return err
 	}
-	st, err := openUserStore(databaseURL)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	st, err := openMigrationStore(ctx, databaseURL)
 	if err != nil {
 		return err
 	}
@@ -84,7 +89,7 @@ func migrationDatabaseURL(raw, password string) (string, error) {
 	if err != nil || parsed.Opaque != "" || parsed.Fragment != "" {
 		return "", errors.New("user: invalid migration database URL")
 	}
-	if parsed.Scheme != "postgres" && parsed.Scheme != "postgresql" {
+	if parsed.Scheme != "postgres" {
 		return "", errors.New("user: migration database URL must use PostgreSQL")
 	}
 	if parsed.User == nil || parsed.User.Username() == "" {
@@ -93,10 +98,8 @@ func migrationDatabaseURL(raw, password string) (string, error) {
 	if _, present := parsed.User.Password(); present {
 		return "", errors.New("user: migration database URL must not contain a password")
 	}
-	host := parsed.Hostname()
-	ip := net.ParseIP(host)
-	if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
-		return "", errors.New("user: migration database URL must use a loopback host")
+	if parsed.Hostname() != "127.0.0.1" {
+		return "", errors.New("user: migration database URL must use 127.0.0.1")
 	}
 	if parsed.Port() == "" {
 		return "", errors.New("user: migration database URL requires a tunnel port")
@@ -109,7 +112,7 @@ func migrationDatabaseURL(raw, password string) (string, error) {
 	if err != nil || len(query) != 1 || len(query["sslmode"]) != 1 {
 		return "", errors.New("user: migration database URL requires only one sslmode")
 	}
-	if mode := query.Get("sslmode"); mode != "require" && mode != "verify-full" {
+	if query.Get("sslmode") != "require" {
 		return "", errors.New("user: migration database URL requires TLS")
 	}
 	if password == "" {
@@ -230,6 +233,18 @@ func runDeleteUserCommand(ctx context.Context, args []string, out io.Writer) err
 func openUserStore(databaseURL string) (*storage.Store, error) {
 	st, err := storage.OpenPostgres(databaseURL)
 	if err != nil {
+		return nil, errors.New("user: open PostgreSQL database")
+	}
+	return st, nil
+}
+
+func openMigrationStore(ctx context.Context, databaseURL string) (*storage.Store, error) {
+	st, err := storage.OpenPostgresMigrating(ctx, databaseURL)
+	if err != nil {
+		var migrationErr *storage.PostgresMigrationError
+		if errors.As(err, &migrationErr) {
+			return nil, fmt.Errorf("user: PostgreSQL migration %q failed during %s", migrationErr.Migration, migrationErr.Stage)
+		}
 		return nil, errors.New("user: open PostgreSQL database")
 	}
 	return st, nil

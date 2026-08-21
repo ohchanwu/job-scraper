@@ -109,7 +109,8 @@ See the [demo deployment reference](../deploy/demo/README.md).
   OpenAI-compatible Chat Completions adapter for OpenAI and Gemini, prompts, response parsing,
   evidence gates, AI version identity, and the server-owned provider/model registry used by the
   profile form.
-- `internal/storage` exposes one concrete repository and applies embedded schema migrations.
+- `internal/storage` exposes one concrete repository, a read-only PostgreSQL schema-version gate,
+  and an explicit operator migration path.
   PostgreSQL backs production and ordinary local modes. SQLite entry points exist only for the
   legacy importer, the tracked read-only demo, and compatibility tests.
 - `internal/credential` encrypts per-user provider credentials and manages the protected local
@@ -328,12 +329,16 @@ gate are documented in the
 ## Persistence and ownership
 
 Normal application startup uses PostgreSQL only. `storage.OpenPostgres` checks connectivity and
-applies pending embedded migrations transactionally before returning the repository.
-Production operators apply those same embedded migrations with the RDS master role through a
+verifies every embedded migration version without issuing DDL. Production operators use
+`storage.OpenPostgresMigrating` through `jobcron-user migrate` with the RDS master role over a
 localhost-only Session Manager tunnel before starting a new runtime. They then refresh grants for
 the lower-privilege application role. The master credential stays on the trusted controller; the
-host receives only the DML-capable runtime URL. Normal startup remains fail-closed if an operator
+host receives only the DML-capable runtime URL. Normal startup fails closed when an operator
 migration was missed rather than granting schema-creation privileges to the runtime role.
+The operator command bounds connection and lock waits with one two-minute context. Each migration
+transaction takes the same PostgreSQL advisory lock and rechecks its recorded version after the
+lock, preventing concurrent operators from applying one version twice while preserving
+per-version commits and idempotent recovery.
 
 The main ownership split is:
 
@@ -440,6 +445,9 @@ Systemd materializes secret values only below `/run/jobcron`. Post-stop cleanup 
 runtime material but preserves an unconsumed one-shot registry token across preflight failures;
 the pull path consumes and removes that token on both success and failure. Bootstrap leaves the
 recovery timer disabled until one manually verified recovery run succeeds.
+Recovery accepts only the generated TLS RDS connection shape. It gives `pg_dump` a password-free
+connection URI and carries the decoded database password only in the child environment, keeping
+credentials out of process arguments and recovery evidence.
 
 The origin security group carries the public semantic discovery tag
 `jobcron:edge-target = origin-security-group`. The adopted canonical VPC remains untagged because

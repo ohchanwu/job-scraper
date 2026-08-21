@@ -18,7 +18,7 @@ role_env=${JOBCRON_DATABASE_ROLE_ENV:-}
 runtime_secret=${JOBCRON_RUNTIME_SECRET_JSON:-}
 
 printf '%s\n' "$master_url" |
-	grep -Eq '^postgres://[A-Za-z_][A-Za-z0-9_]*@127\.0\.0\.1:[0-9]+/[A-Za-z_][A-Za-z0-9_]*\?sslmode=(verify-full|require)$' ||
+	grep -Eq '^postgres://[A-Za-z_][A-Za-z0-9_]*@127\.0\.0\.1:[0-9]+/[A-Za-z_][A-Za-z0-9_]*\?sslmode=require$' ||
 	fail
 printf '%s\n' "$private_endpoint" |
 	grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+\.rds\.amazonaws\.com:[0-9]+$' ||

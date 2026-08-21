@@ -56,6 +56,9 @@ var (
 	openRuntimeUserStore = func(databaseURL string) (runtimeUserStore, error) {
 		return storage.OpenPostgres(databaseURL)
 	}
+	openMigratingRuntimeUserStore = func(databaseURL string) (runtimeUserStore, error) {
+		return storage.OpenPostgresMigrating(context.Background(), databaseURL)
+	}
 )
 
 func main() {
@@ -215,7 +218,11 @@ func resolvePostgresRuntime(ctx context.Context, cfg config.Config) (resolved ru
 			return runtimeStorage{}, fmt.Errorf("managed local PostgreSQL returned an unexpected database URL")
 		}
 	}
-	store, err := openRuntimeUserStore(databaseURL)
+	openStore := openMigratingRuntimeUserStore
+	if cfg.Production {
+		openStore = openRuntimeUserStore
+	}
+	store, err := openStore(databaseURL)
 	if err != nil {
 		return runtimeStorage{}, fmt.Errorf("open PostgreSQL runtime store: %w", err)
 	}

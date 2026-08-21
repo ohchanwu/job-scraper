@@ -1865,7 +1865,7 @@ func newPostgresTestServer(t *testing.T, f *fakeScraper) (*Server, *storage.Stor
 		_ = admin.Close()
 	})
 
-	st, err := storage.OpenPostgres(databaseURLWithSearchPath(databaseURL, schema))
+	st, err := storage.OpenPostgresMigrating(context.Background(), databaseURLWithSearchPath(databaseURL, schema))
 	if err != nil {
 		t.Fatalf("OpenPostgres: %v", err)
 	}
