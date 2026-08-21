@@ -425,6 +425,10 @@ an upstream `latest` pointer cannot silently schedule host replacement. Changing
 explicit replacement operation that requires its own reviewed plan. Local controllers supply the
 pin from a mode-`0600` packet; the manual GitHub plan workflow receives the same input from its
 protected `production` environment secret `TF_VAR_REPLACEMENT_HOST_AMI_ID` without printing it.
+Bootstrap installs only packages published by the pinned Amazon Linux repositories, requires the
+AMI-provided AWS CLI v2, and installs the exact arm64 Docker Compose plugin from Docker's release
+assets only after verifying its pinned SHA-256. Runtime assets are written only after those tool
+gates pass.
 
 The origin security group carries the public semantic discovery tag
 `jobcron:edge-target = origin-security-group`. The adopted canonical VPC remains untagged because

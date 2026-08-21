@@ -246,11 +246,18 @@ run "replacement_host_contract" {
   assert {
     condition = (
       length(aws_instance.replacement_host.user_data) < 16384 &&
-      strcontains(aws_instance.replacement_host.user_data, "dnf install -y") &&
-      strcontains(aws_instance.replacement_host.user_data, "docker-compose-plugin") &&
-      strcontains(aws_instance.replacement_host.user_data, "awscli2") &&
-      strcontains(aws_instance.replacement_host.user_data, " jq ") &&
-      strcontains(aws_instance.replacement_host.user_data, "postgresql15") &&
+      strcontains(aws_instance.replacement_host.user_data, "dnf install -y docker curl jq postgresql15") &&
+      !strcontains(aws_instance.replacement_host.user_data, "docker-compose-plugin") &&
+      !strcontains(aws_instance.replacement_host.user_data, "awscli2") &&
+      strcontains(aws_instance.replacement_host.user_data, "command -v aws") &&
+      strcontains(aws_instance.replacement_host.user_data, "aws-cli/2.*") &&
+      strcontains(aws_instance.replacement_host.user_data, "compose_version='v5.5.0'") &&
+      strcontains(aws_instance.replacement_host.user_data, "compose_sha256='ff42489f5a9b879d5d117c5ffea6defc27390b3286da8ad52cbc9c6ab5df590e'") &&
+      strcontains(aws_instance.replacement_host.user_data, "docker-compose-linux-aarch64") &&
+      strcontains(aws_instance.replacement_host.user_data, "/usr/local/lib/docker/cli-plugins/docker-compose") &&
+      strcontains(aws_instance.replacement_host.user_data, "curl --fail --show-error --location --retry 3") &&
+      strcontains(aws_instance.replacement_host.user_data, "sha256sum -c -") &&
+      strcontains(aws_instance.replacement_host.user_data, "docker compose version --short") &&
       !strcontains(aws_instance.replacement_host.user_data, "/opt/jobcron/.env") &&
       strcontains(aws_instance.replacement_host.user_data, "/etc/jobcron/runtime-secret-id") &&
       strcontains(aws_instance.replacement_host.user_data, "systemctl enable") &&

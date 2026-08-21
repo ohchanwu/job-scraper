@@ -7,7 +7,33 @@ printf 'required deployment asset missing\n' >&2
 exit 1
 %{ endif ~}
 
-dnf install -y docker docker-compose-plugin awscli2 jq postgresql15
+dnf install -y docker curl jq postgresql15
+
+command -v aws >/dev/null
+aws_version="$(aws --version 2>&1)"
+case "$aws_version" in
+  aws-cli/2.*) ;;
+  *) printf 'AWS CLI v2 is required\n' >&2; exit 1 ;;
+esac
+
+compose_version='v5.5.0'
+compose_expected_version='5.5.0'
+compose_sha256='ff42489f5a9b879d5d117c5ffea6defc27390b3286da8ad52cbc9c6ab5df590e'
+compose_path='/usr/local/lib/docker/cli-plugins/docker-compose'
+compose_installed_version="$(docker compose version --short 2>/dev/null || true)"
+if [ "$compose_installed_version" != "$compose_expected_version" ]; then
+  install -d -m 0755 -o root -g root "$(dirname "$compose_path")"
+  compose_tmp="$(mktemp)"
+  trap 'unlink "$compose_tmp" 2>/dev/null || true' EXIT
+  curl --fail --show-error --location --retry 3 \
+    --output "$compose_tmp" \
+    "https://github.com/docker/compose/releases/download/$compose_version/docker-compose-linux-aarch64"
+  printf '%s  %s\n' "$compose_sha256" "$compose_tmp" | sha256sum -c -
+  install -m 0755 -o root -g root "$compose_tmp" "$compose_path"
+  unlink "$compose_tmp"
+  trap - EXIT
+fi
+test "$(docker compose version --short)" = "$compose_expected_version"
 
 install -d -m 0755 -o root -g root /opt/jobcron
 install -d -m 0700 -o root -g root /etc/jobcron
