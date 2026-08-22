@@ -210,6 +210,24 @@ systemctl stop jobcron.service
 EOF
 chmod 0600 "$fixture_root/replacement-user-data"
 
+# terraform console prints the jsonencode result as a quoted Terraform string,
+# so recovering the raw bootstrap requires decoding both string layers.
+jq -Rs '@json' "$fixture_root/replacement-user-data" \
+  >"$fixture_root/replacement-user-data.console"
+jq -ejr '
+  fromjson |
+  if type == "string" and length > 0 then . else error("invalid") end
+' "$fixture_root/replacement-user-data.console" \
+  >"$fixture_root/replacement-user-data.decoded"
+if ! cmp -s \
+  "$fixture_root/replacement-user-data" \
+  "$fixture_root/replacement-user-data.decoded"; then
+  printf 'FAIL: Terraform console output did not decode to raw user-data bytes\n' >&2
+  failures=$((failures + 1))
+else
+  printf 'PASS: decoded Terraform console output to raw user-data bytes\n'
+fi
+
 if command -v sha1sum >/dev/null 2>&1; then
   replacement_user_data_hash="$(sha1sum "$fixture_root/replacement-user-data" | awk '{print $1}')"
 else
@@ -219,16 +237,25 @@ fi
 jq --arg user_data_hash "$replacement_user_data_hash" '
   .resource_changes |= map(
     if .address == "aws_instance.replacement_host" then
+      .action_reason = "replace_by_request" |
       .change = {
         actions: ["delete", "create"],
         importing: null,
         before: {
+          ami: "ami-reviewed-arm64",
+          instance_type: "t4g.micro",
+          subnet_id: "subnet-reviewed-public",
+          iam_instance_profile: "jobcron-replacement-host",
           key_name: null,
           associate_public_ip_address: true,
           vpc_security_group_ids: ["sg-origin"],
           user_data: "old-user-data-hash"
         },
         after: {
+          ami: "ami-reviewed-arm64",
+          instance_type: "t4g.micro",
+          subnet_id: "subnet-reviewed-public",
+          iam_instance_profile: "jobcron-replacement-host",
           key_name: null,
           associate_public_ip_address: true,
           vpc_security_group_ids: ["sg-origin"],
@@ -431,6 +458,30 @@ replacement_plan_mutation "wrong-action-order" \
 replacement_plan_mutation "second-action" \
   '(.resource_changes[] | select(.address == "aws_iam_role.replacement_host") |
     .change.actions) = ["update"]'
+replacement_plan_mutation "missing-replace-request" \
+  'del(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
+    .action_reason)'
+replacement_plan_mutation "wrong-replace-reason" \
+  '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
+    .action_reason) = "replace_because_cannot_update"'
+replacement_plan_mutation "instance-profile-change" \
+  '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
+    .change.after.iam_instance_profile) = "unexpected-profile"'
+replacement_plan_mutation "ami-change" \
+  '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
+    .change.after.ami) = "ami-unreviewed"'
+replacement_plan_mutation "instance-type-change" \
+  '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
+    .change.after.instance_type) = "t4g.small"'
+replacement_plan_mutation "subnet-change" \
+  '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
+    .change.after.subnet_id) = "subnet-unreviewed"'
+replacement_plan_mutation "old-key-pair" \
+  '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
+    .change.before.key_name) = "unexpected-key"'
+replacement_plan_mutation "old-public-ip-disabled" \
+  '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
+    .change.before.associate_public_ip_address) = false'
 replacement_plan_mutation "key-pair" \
   '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
     .change.after.key_name) = "unexpected-key"'
@@ -446,6 +497,9 @@ replacement_plan_mutation "unencrypted-root" \
 replacement_plan_mutation "unknown-security-control" \
   '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
     .change.after_unknown.key_name) = true'
+replacement_plan_mutation "unknown-recovery-field" \
+  '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
+    .change.after_unknown.iam_instance_profile) = true'
 replacement_plan_mutation "known-output" \
   '.output_changes.replacement_instance_id.after_unknown = false'
 replacement_plan_mutation "created-output" \

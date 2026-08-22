@@ -95,7 +95,7 @@ trap 'rm -f "$render_json" "$TF_SLICE4_RENDERED_USER_DATA"' EXIT HUP INT TERM
 terraform -chdir=infra/terraform/production console >"$render_json" <<'EOF'
 jsonencode(local.replacement_user_data)
 EOF
-jq -er 'if type == "string" and length > 0 then . else error("invalid") end' \
+jq -ejr 'fromjson | if type == "string" and length > 0 then . else error("invalid") end' \
   "$render_json" >"$TF_SLICE4_RENDERED_USER_DATA"
 chmod 0600 "$TF_SLICE4_RENDERED_USER_DATA"
 rm -f "$render_json"
@@ -115,11 +115,13 @@ scripts/check-terraform-slice-4-plan.sh \
 ```
 
 This mode requires exactly one destroy-then-create action for the replacement
-instance, every other protected resource as a no-op, the sensitive instance-ID
-output transition, unchanged security-group binding, no key pair, IMDSv2, the
-encrypted 8 GiB root volume, and the exact tracked bootstrap asset digests. It
-rejects extra actions, diagnostics, unknown security controls, stale assets,
-or a rendered bootstrap that is not a regular mode-`0600` file. Remove the
+instance with explicit replace-by-request provenance, every other protected
+resource as a no-op, the sensitive instance-ID output transition, unchanged
+AMI, instance type, subnet, instance profile, and security-group binding,
+keyless public-IP behavior before and after, IMDSv2, the encrypted 8 GiB root
+volume, and the exact tracked bootstrap asset digests. It rejects extra
+actions, diagnostics, unknown recovery or security controls, stale assets, or
+a rendered bootstrap that is not a regular mode-`0600` file. Remove the
 rendered file after the exact saved-plan digest receives independent approval;
 regenerating either artifact invalidates that approval.
 

@@ -147,7 +147,8 @@ jq -e --arg mode "$mode" --arg expected_user_data_hash "$expected_user_data_hash
         (.change.importing // null) == null and
         (
           if .address == "aws_instance.replacement_host" then
-            .change.actions == ["delete", "create"]
+            (.action_reason == "replace_by_request") and
+            (.change.actions == ["delete", "create"])
           else
             .change.actions == ["no-op"]
           end
@@ -155,7 +156,21 @@ jq -e --arg mode "$mode" --arg expected_user_data_hash "$expected_user_data_hash
       ) and
       ($instance.change.before | type == "object") and
       ($instance.change.after | type == "object") and
+      ($instance.change.before.ami | type == "string") and
+      ($instance.change.before.ami | length > 0) and
+      ($instance.change.after.ami == $instance.change.before.ami) and
+      ($instance.change.before.instance_type | type == "string") and
+      ($instance.change.before.instance_type | length > 0) and
+      ($instance.change.after.instance_type == $instance.change.before.instance_type) and
+      ($instance.change.before.subnet_id | type == "string") and
+      ($instance.change.before.subnet_id | length > 0) and
+      ($instance.change.after.subnet_id == $instance.change.before.subnet_id) and
+      ($instance.change.before.iam_instance_profile | type == "string") and
+      ($instance.change.before.iam_instance_profile | length > 0) and
+      ($instance.change.after.iam_instance_profile == $instance.change.before.iam_instance_profile) and
+      ($instance.change.before.key_name == null) and
       ($instance.change.after.key_name == null) and
+      ($instance.change.before.associate_public_ip_address == true) and
       ($instance.change.after.associate_public_ip_address == true) and
       ($instance.change.before.vpc_security_group_ids | type == "array") and
       ($instance.change.after.vpc_security_group_ids | type == "array") and
@@ -177,6 +192,10 @@ jq -e --arg mode "$mode" --arg expected_user_data_hash "$expected_user_data_hash
       ($instance.change.before.user_data != $instance.change.after.user_data) and
       (($instance.change.after_unknown.key_name // false) == false) and
       (($instance.change.after_unknown.associate_public_ip_address // false) == false) and
+      (($instance.change.after_unknown.ami // false) == false) and
+      (($instance.change.after_unknown.instance_type // false) == false) and
+      (($instance.change.after_unknown.subnet_id // false) == false) and
+      (($instance.change.after_unknown.iam_instance_profile // false) == false) and
       (($instance.change.after_unknown.vpc_security_group_ids // false) == false) and
       (($instance.change.after_unknown.metadata_options // false) == false) and
       (($instance.change.after_unknown.root_block_device // false) == false) and
