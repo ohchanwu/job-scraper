@@ -181,58 +181,80 @@ func TestOpenPostgresMigratingKeepsLedgerAndDDLInLiveSessionSchema(t *testing.T)
 	if databaseURL == "" {
 		t.Skip("JOBCRON_TEST_POSTGRES_URL not set")
 	}
-	schema := fmt.Sprintf("test_live_schema_%d", rand.Uint64())
-	role := fmt.Sprintf("live_schema_%d", rand.Uint64())
-	const password = "live-schema-test-password"
-	admin, err := sql.Open("pgx", databaseURL)
-	if err != nil {
-		t.Fatalf("open postgres admin: %v", err)
-	}
-	if _, err := admin.Exec(`CREATE ROLE ` + role + ` LOGIN PASSWORD '` + password + `'`); err != nil {
-		admin.Close()
-		t.Fatalf("create migration role: %v", err)
-	}
-	if _, err := admin.Exec(`CREATE SCHEMA ` + schema + ` AUTHORIZATION ` + role + `;
-ALTER ROLE ` + role + ` SET search_path TO ` + schema + `;
-GRANT CREATE ON SCHEMA public TO ` + role); err != nil {
-		_, _ = admin.Exec(`DROP ROLE IF EXISTS ` + role)
-		admin.Close()
-		t.Fatalf("configure live-session schema: %v", err)
-	}
-	var opened *Store
-	t.Cleanup(func() {
-		if opened != nil {
-			_ = opened.Close()
-		}
-		_, _ = admin.Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
-		_, _ = admin.Exec(`DROP OWNED BY ` + role + ` CASCADE`)
-		_, _ = admin.Exec(`DROP ROLE IF EXISTS ` + role)
-		_ = admin.Close()
-	})
-	parsed, err := url.Parse(databaseURL)
-	if err != nil {
-		t.Fatalf("parse test database URL: %v", err)
-	}
-	query := parsed.Query()
-	query.Del("search_path")
-	parsed.RawQuery = query.Encode()
-	parsed.User = url.UserPassword(role, password)
-	opened, err = OpenPostgresMigrating(context.Background(), parsed.String())
-	if err != nil {
-		t.Fatalf("OpenPostgresMigrating with role search_path: %v", err)
-	}
-	for _, table := range []string{"schema_migrations", "postings", "users"} {
-		var total, inLiveSchema int
-		if err := admin.QueryRow(`
+	for _, tc := range []struct {
+		name         string
+		publicSchema bool
+	}{
+		{name: "custom application schema"},
+		{name: "production pg_catalog public ordering", publicSchema: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := "public"
+			if !tc.publicSchema {
+				schema = fmt.Sprintf("test_live_schema_%d", rand.Uint64())
+			}
+			role := fmt.Sprintf("live_schema_%d", rand.Uint64())
+			const password = "live-schema-test-password"
+			admin, err := sql.Open("pgx", databaseURL)
+			if err != nil {
+				t.Fatalf("open postgres admin: %v", err)
+			}
+			if _, err := admin.Exec(`CREATE ROLE ` + role + ` LOGIN PASSWORD '` + password + `'`); err != nil {
+				admin.Close()
+				t.Fatalf("create migration role: %v", err)
+			}
+			var opened *Store
+			t.Cleanup(func() {
+				if opened != nil {
+					_ = opened.Close()
+				}
+				_, _ = admin.Exec(`DROP OWNED BY ` + role + ` CASCADE`)
+				_, _ = admin.Exec(`DROP ROLE IF EXISTS ` + role)
+				_ = admin.Close()
+			})
+			setup := `GRANT CREATE ON SCHEMA public TO ` + role + `;
+ALTER ROLE ` + role + ` SET search_path TO pg_catalog, public`
+			if !tc.publicSchema {
+				setup = `CREATE SCHEMA ` + schema + ` AUTHORIZATION ` + role + `;
+ALTER ROLE ` + role + ` SET search_path TO pg_catalog, ` + schema
+			}
+			if _, err := admin.Exec(setup); err != nil {
+				t.Fatalf("configure live-session schema: %v", err)
+			}
+			parsed, err := url.Parse(databaseURL)
+			if err != nil {
+				t.Fatalf("parse test database URL: %v", err)
+			}
+			query := parsed.Query()
+			query.Del("search_path")
+			parsed.RawQuery = query.Encode()
+			parsed.User = url.UserPassword(role, password)
+			opened, err = OpenPostgresMigrating(context.Background(), parsed.String())
+			if err != nil {
+				t.Fatalf("OpenPostgresMigrating with role search_path: %v", err)
+			}
+			if err := opened.Close(); err != nil {
+				t.Fatalf("close migrating store: %v", err)
+			}
+			opened = nil
+			opened, err = OpenPostgres(parsed.String())
+			if err != nil {
+				t.Fatalf("OpenPostgres runtime verification: %v", err)
+			}
+			for _, table := range []string{"schema_migrations", "postings", "users"} {
+				var total, inLiveSchema int
+				if err := admin.QueryRow(`
 SELECT count(*), count(*) FILTER (WHERE table_schema = $2)
   FROM information_schema.tables
  WHERE table_name = $1
    AND table_schema IN ($2, 'public')`, table, schema).Scan(&total, &inLiveSchema); err != nil {
-			t.Fatalf("locate %s: %v", table, err)
-		}
-		if total != 1 || inLiveSchema != 1 {
-			t.Errorf("%s copies = %d, copies in live session schema %q = %d; want exactly one there", table, total, schema, inLiveSchema)
-		}
+					t.Fatalf("locate %s: %v", table, err)
+				}
+				if total != 1 || inLiveSchema != 1 {
+					t.Errorf("%s copies = %d, copies in live session schema %q = %d; want exactly one there", table, total, schema, inLiveSchema)
+				}
+			}
+		})
 	}
 }
 

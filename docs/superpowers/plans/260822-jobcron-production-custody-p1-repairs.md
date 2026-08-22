@@ -56,3 +56,20 @@
 5. Commit the successor locally with a descriptive message; do not push.
 6. Send one durable rereview request on canonical thread `thread-7d7bb04fd73e`, naming the exact successor SHA, sole parent, tree, clean status, and verification evidence.
 7. Keep Guzzle and production stopped unless Witness returns a durable exact-SHA approval. If approved, rebind Guzzle's operational task to that exact SHA; if not, implement the next successor.
+
+## Task 4: Close exact `ef258f6` adversarial follow-up findings
+
+**Files:**
+
+- Modify: `internal/storage/store.go`
+- Modify: `internal/storage/store_test.go`
+- Modify: `scripts/build-reviewed-jobcron-user.sh`
+- Modify: `scripts/build_reviewed_jobcron_user_test.go`
+- Modify: `deploy/production/HUMAN_DEPLOY_GUIDE.md`
+- Modify: `docs/architecture.md`
+
+1. Add red regressions for the production `pg_catalog, public` search-path order, an unreadable GOROOT file that makes per-file hashing fail, and a `bin/go` symlink to an external executable.
+2. Select the first non-system schema from the live effective search path, keep the ledger qualified, and retain the transaction-local application-schema plus `pg_catalog` pin.
+3. Materialize the GOROOT path list and manifest in owner-only temporary files and require every POSIX-shell stage to succeed explicitly.
+4. Reject symlinks and other non-directory, non-regular entries anywhere in the selected GOROOT before hashing or execution.
+5. Repeat the focused adversarial checks and all Task 3 gates, commit one local successor, and request rereview on the same canonical thread.

@@ -140,6 +140,52 @@ func TestReviewedJobcronUserBuildRejectsInvalidInputs(t *testing.T) {
 
 func TestReviewedJobcronUserBuildRejectsChangedNonExecutableGOROOTInput(t *testing.T) {
 	repo, reviewedSHA := newReviewedBuildRepo(t)
+	goBinary, sourceDir := newFakeReviewedGoToolchain(t)
+	source := filepath.Join(sourceDir, "runtime.go")
+	approvedDigest := reviewedToolchainDigest(t, goBinary)
+	if err := os.WriteFile(source, []byte("package runtime\n// changed after review\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	assertReviewedBuildRejected(t, repo, reviewedSHA, goBinary, approvedDigest)
+}
+
+func TestReviewedJobcronUserBuildRejectsToolchainHashFailure(t *testing.T) {
+	repo, reviewedSHA := newReviewedBuildRepo(t)
+	goBinary, sourceDir := newFakeReviewedGoToolchain(t)
+	approvedDigest := reviewedToolchainDigest(t, goBinary)
+	unreadable := filepath.Join(sourceDir, "unreadable.go")
+	if err := os.WriteFile(unreadable, []byte("package runtime\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(unreadable, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o600) })
+	assertReviewedBuildRejected(t, repo, reviewedSHA, goBinary, approvedDigest)
+}
+
+func TestReviewedJobcronUserBuildRejectsSymlinkedGoBinary(t *testing.T) {
+	repo, reviewedSHA := newReviewedBuildRepo(t)
+	goBinary, _ := newFakeReviewedGoToolchain(t)
+	externalRoot := t.TempDir()
+	externalRoot, err := filepath.EvalSymlinks(externalRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	externalGo := filepath.Join(externalRoot, "go")
+	writeFakeReviewedGo(t, externalGo)
+	if err := os.Remove(goBinary); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(externalGo, goBinary); err != nil {
+		t.Fatal(err)
+	}
+	approvedDigest := reviewedToolchainDigest(t, goBinary)
+	assertReviewedBuildRejected(t, repo, reviewedSHA, goBinary, approvedDigest)
+}
+
+func newFakeReviewedGoToolchain(t *testing.T) (string, string) {
+	t.Helper()
 	goRoot := t.TempDir()
 	goRoot, err := filepath.EvalSymlinks(goRoot)
 	if err != nil {
@@ -153,6 +199,18 @@ func TestReviewedJobcronUserBuildRejectsChangedNonExecutableGOROOTInput(t *testi
 			t.Fatal(err)
 		}
 	}
+	writeFakeReviewedGo(t, goBinary)
+	if err := os.WriteFile(filepath.Join(toolDir, "compile"), []byte("tool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "runtime.go"), []byte("package runtime\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return goBinary, sourceDir
+}
+
+func writeFakeReviewedGo(t *testing.T, path string) {
+	t.Helper()
 	fakeGo := `#!/bin/sh
 set -eu
 if [ "$1" = mod ]; then
@@ -171,25 +229,18 @@ while [ "$#" -gt 0 ]; do
 done
 exit 2
 `
-	if err := os.WriteFile(goBinary, []byte(fakeGo), 0o755); err != nil {
+	if err := os.WriteFile(path, []byte(fakeGo), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(toolDir, "compile"), []byte("tool"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	source := filepath.Join(sourceDir, "runtime.go")
-	if err := os.WriteFile(source, []byte("package runtime\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	approvedDigest := reviewedToolchainDigest(t, goBinary)
-	if err := os.WriteFile(source, []byte("package runtime\n// changed after review\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+}
+
+func assertReviewedBuildRejected(t *testing.T, repo, reviewedSHA, goBinary, approvedDigest string) {
+	t.Helper()
 	output := filepath.Join(t.TempDir(), "jobcron-user")
 	cmd := exec.Command("sh", "build-reviewed-jobcron-user.sh", repo, reviewedSHA, output, goBinary, approvedDigest)
 	buildOutput, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("reviewed build accepted changed non-executable GOROOT input:\n%s", buildOutput)
+		t.Fatalf("reviewed build accepted an unauthenticated toolchain:\n%s", buildOutput)
 	}
 	if _, err := os.Stat(output); !os.IsNotExist(err) {
 		t.Fatalf("rejected reviewed build left output: %v", err)

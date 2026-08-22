@@ -126,6 +126,7 @@ untracked worktree change, or any stash:
 ```sh
 (
 set -eu
+umask 077
 PATH=/usr/bin:/bin
 export PATH
 export JOBCRON_REVIEWED_SHA='<approved-40-hex-commit>'
@@ -140,16 +141,29 @@ case $JOBCRON_GO_BINARY in /*) ;; *) exit 1 ;; esac
 test -x "$JOBCRON_GO_BINARY"
 go_dir=$(CDPATH= cd -P "${JOBCRON_GO_BINARY%/*}" && pwd)
 go_root=$(CDPATH= cd -P "$go_dir/.." && pwd)
-computed_go_toolchain_digest=$(
-  (
-    cd "$go_root"
-    find . -type f -print0 |
-      LC_ALL=C sort -z |
-      xargs -0 shasum -a 256
-  ) |
-    shasum -a 256 | awk '{print $1}'
-)
+toolchain_manifest_dir=$(mktemp -d)
+toolchain_unsupported="$toolchain_manifest_dir/unsupported"
+toolchain_paths="$toolchain_manifest_dir/paths"
+toolchain_sorted_paths="$toolchain_manifest_dir/sorted-paths"
+toolchain_manifest="$toolchain_manifest_dir/manifest"
+cleanup_toolchain_manifest() {
+  rm -f -- "$toolchain_unsupported" "$toolchain_paths" \
+    "$toolchain_sorted_paths" "$toolchain_manifest"
+  rmdir "$toolchain_manifest_dir"
+}
+trap cleanup_toolchain_manifest EXIT
+trap 'exit 1' HUP INT TERM
+(cd "$go_root" && find . ! -type d ! -type f -print0 >"$toolchain_unsupported")
+test ! -s "$toolchain_unsupported"
+(cd "$go_root" && find . -type f -print0 >"$toolchain_paths")
+test -s "$toolchain_paths"
+LC_ALL=C sort -z <"$toolchain_paths" >"$toolchain_sorted_paths"
+(cd "$go_root" && xargs -0 shasum -a 256 <"$toolchain_sorted_paths" >"$toolchain_manifest")
+computed_go_toolchain_digest=$(shasum -a 256 "$toolchain_manifest")
+computed_go_toolchain_digest=${computed_go_toolchain_digest%% *}
 test "$computed_go_toolchain_digest" = "$JOBCRON_GO_TOOLCHAIN_DIGEST"
+cleanup_toolchain_manifest
+trap - EXIT HUP INT TERM
 run_git() {
   env -i PATH=/usr/bin:/bin HOME=/var/empty GIT_CONFIG_NOSYSTEM=1 \
     GIT_CONFIG_GLOBAL=/dev/null GIT_NO_REPLACE_OBJECTS=1 \
@@ -195,8 +209,9 @@ build. The Go command is an explicitly selected absolute local binary and runs
 under an environment allowlist with `GOTOOLCHAIN=local`, `CGO_ENABLED=0`, private
 caches, module checksum verification, and `-mod=readonly`. Local Git metadata,
 ignored files, overlays, ambient build controls, and concurrent worktree edits
-cannot enter the privileged binary. The builder also verifies a SHA-256 manifest
-of every regular file in the selected Go distribution's complete GOROOT before
+cannot enter the privileged binary. The builder rejects symlinks and other
+non-regular GOROOT entries, checks every manifest stage explicitly, and verifies
+a SHA-256 manifest of every regular file in the selected Go distribution before
 allowing the toolchain to run; executable-only or lone-`go` hashes are insufficient.
 
 The previous image commit comes from the private immutable-image evidence, not

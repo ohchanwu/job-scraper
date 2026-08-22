@@ -36,15 +36,30 @@ go_dir=$(CDPATH= cd -P "${go_binary%/*}" 2>/dev/null && pwd) || fail
 go_root=$(CDPATH= cd -P "$go_dir/.." 2>/dev/null && pwd) || fail
 [ "$go_binary" = "$go_dir/go" ] || fail
 [ -d "$go_root/bin" ] && [ -d "$go_root/pkg/tool" ] || fail
-actual_toolchain_digest=$(
-	(
-		cd "$go_root"
-		find . -type f -print0 |
-			LC_ALL=C sort -z |
-			xargs -0 /usr/bin/shasum -a 256
-	) |
-	/usr/bin/shasum -a 256 | /usr/bin/awk '{print $1}'
-) || fail
+build_dir=$(mktemp -d) || fail
+cleanup() {
+	chmod -R u+w "$build_dir" 2>/dev/null || true
+	rm -rf -- "$build_dir"
+}
+cleanup_failure() {
+	rm -f -- "$output"
+	cleanup
+}
+trap cleanup_failure EXIT
+trap 'exit 1' HUP INT TERM
+
+toolchain_unsupported=$build_dir/toolchain-unsupported
+toolchain_paths=$build_dir/toolchain-paths
+toolchain_sorted_paths=$build_dir/toolchain-sorted-paths
+toolchain_manifest=$build_dir/toolchain-manifest
+(cd "$go_root" && find . ! -type d ! -type f -print0 >"$toolchain_unsupported") || fail
+[ ! -s "$toolchain_unsupported" ] || fail
+(cd "$go_root" && find . -type f -print0 >"$toolchain_paths") || fail
+[ -s "$toolchain_paths" ] || fail
+LC_ALL=C sort -z <"$toolchain_paths" >"$toolchain_sorted_paths" || fail
+(cd "$go_root" && xargs -0 /usr/bin/shasum -a 256 <"$toolchain_sorted_paths" >"$toolchain_manifest") || fail
+actual_toolchain_digest=$(/usr/bin/shasum -a 256 "$toolchain_manifest") || fail
+actual_toolchain_digest=${actual_toolchain_digest%% *}
 [ "$actual_toolchain_digest" = "$toolchain_digest" ] || fail
 git_binary=$(command -v git) || fail
 run_git() {
@@ -57,18 +72,6 @@ run_git() {
 }
 resolved_sha=$(run_git -C "$repo_root" rev-parse --verify "$reviewed_sha^{commit}" 2>/dev/null) || fail
 [ "$resolved_sha" = "$reviewed_sha" ] || fail
-
-build_dir=$(mktemp -d) || fail
-cleanup() {
-	chmod -R u+w "$build_dir" 2>/dev/null || true
-	rm -rf -- "$build_dir"
-}
-cleanup_failure() {
-	rm -f -- "$output"
-	cleanup
-}
-trap cleanup_failure EXIT
-trap 'exit 1' HUP INT TERM
 
 source_dir=$build_dir/source
 run_git -c core.attributesFile=/dev/null \

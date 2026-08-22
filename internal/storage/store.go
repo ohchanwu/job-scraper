@@ -210,14 +210,21 @@ func openPostgres(ctx context.Context, databaseURL string, prepare func(context.
 }
 
 func postgresMigrationTarget(ctx context.Context, db *sql.DB) (string, string, error) {
-	var schema sql.NullString
-	if err := db.QueryRowContext(ctx, `SELECT current_schema()`).Scan(&schema); err != nil {
+	var schema string
+	if err := db.QueryRowContext(ctx, `
+SELECT schema_name
+  FROM pg_catalog.unnest(pg_catalog.current_schemas(false))
+       WITH ORDINALITY AS schemas(schema_name, position)
+ WHERE pg_catalog.substr(schema_name, 1, 3) <> 'pg_'
+   AND schema_name <> 'information_schema'
+ ORDER BY position
+ LIMIT 1`).Scan(&schema); err != nil {
 		return "", "", postgresMigrationError("schema_migrations", "schema", err)
 	}
-	if !schema.Valid || schema.String == "" {
+	if schema == "" {
 		return "", "", postgresMigrationError("schema_migrations", "schema", fmt.Errorf("current schema is unset"))
 	}
-	quotedSchema := quotePostgresIdentifier(schema.String)
+	quotedSchema := quotePostgresIdentifier(schema)
 	return quotedSchema, quotedSchema + `.schema_migrations`, nil
 }
 

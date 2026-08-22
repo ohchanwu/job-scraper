@@ -352,14 +352,15 @@ The production guide disables replacement objects before extracting the reviewed
 clones the exact commit into a private repository with no controller-local attributes or config.
 The build removes Git metadata and runs an explicitly selected local Go binary under an environment
 allowlist, fixed local toolchain and CGO policies, private caches, module checksum verification, and
-read-only module mode. It authenticates every regular file in the selected GOROOT before using the
-toolchain. The production role helper rejects the master identity, pins both role and
+read-only module mode. It rejects symlinked or non-regular GOROOT entries, checks every manifest
+stage explicitly, and authenticates every regular file before using the toolchain. The production
+role helper rejects the master identity, pins both role and
 database-specific search paths, converges privileges deny-first, refuses forward or reverse
 memberships and non-public ownership/authority, revokes direct and public migration-ledger writes
 including TRUNCATE, and checks effective database/schema/table/sequence/routine privileges before
-emitting readiness. Migration startup resolves `current_schema()` from the live PostgreSQL session,
-uses that explicitly qualified schema for the ledger, and pins every migration transaction to the
-same schema before executing embedded DDL.
+emitting readiness. Migration startup selects the first non-system schema from the live effective
+PostgreSQL search path, uses that explicitly qualified schema for the ledger, and pins every
+migration transaction to the same application schema before executing embedded DDL.
 
 The main ownership split is:
 
