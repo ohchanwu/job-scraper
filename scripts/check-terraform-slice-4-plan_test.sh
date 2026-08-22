@@ -15,6 +15,13 @@ destroy_or_replace=0
 aggregate_cost=PASS
 slice3_checkpoint=PASS
 PASS'
+expected_replacement_output='resource_changes=1
+output_changes=1
+sensitive_outputs=1
+destroy_or_replace=1
+aggregate_cost=PASS
+slice3_checkpoint=PASS
+PASS'
 
 expect_verified() {
   local name="$1"
@@ -46,6 +53,56 @@ expect_rejected() {
 
   set +e
   output="$("$checker" "$plan" "$cost" "$checkpoint" 2>&1)"
+  rc=$?
+  set -e
+
+  if [[ "$rc" -eq 0 ]]; then
+    printf 'FAIL: accepted %s\n' "$name" >&2
+    failures=$((failures + 1))
+    return
+  fi
+  if [[ "$output" != "$generic_error" ]]; then
+    printf 'FAIL: %s disclosed input or emitted a non-generic error\n' "$name" >&2
+    failures=$((failures + 1))
+    return
+  fi
+  printf 'PASS: rejected %s without private output\n' "$name"
+}
+
+expect_replacement_verified() {
+  local name="$1"
+  local plan="$2"
+  local cost="$3"
+  local checkpoint="$4"
+  local user_data="$5"
+  local output
+
+  if ! output="$("$checker" "$plan" "$cost" "$checkpoint" "$user_data" 2>&1)"; then
+    printf 'FAIL: rejected valid %s fixture\n' "$name" >&2
+    failures=$((failures + 1))
+    return
+  fi
+  if [[ "$output" != "$expected_replacement_output" ]]; then
+    printf 'FAIL: valid %s fixture emitted unexpected output\n' "$name" >&2
+    failures=$((failures + 1))
+    return
+  fi
+  printf 'PASS: verified %s fixture\n' "$name"
+}
+
+expect_replacement_rejected() {
+  local name="$1"
+  local plan="$2"
+  local user_data="${3:-$fixture_root/replacement-user-data}"
+  local output
+  local rc
+
+  set +e
+  output="$("$checker" \
+    "$plan" \
+    "$fixture_root/cost-valid.json" \
+    "$fixture_root/checkpoint-valid.json" \
+    "$user_data" 2>&1)"
   rc=$?
   set -e
 
@@ -135,6 +192,87 @@ jq -n '{
   },
   diagnostics: []
 }' >"$fixture_root/plan-valid.json"
+
+cat >"$fixture_root/replacement-user-data" <<'EOF'
+#!/bin/bash
+/opt/jobcron/compose.yaml 7fde13860b93a4c4b5b519b3ff2004604c8876c12858f0a370dc1496e598577e
+/opt/jobcron/Caddyfile 3b52c1f296b4fa709ae4ce50aced61f23a4d1d00ff7939d5f6b0f8a193c863f6
+/opt/jobcron/jobcron-runtime.sh 94afa9a407b5921f9fd32eb5e206720e1f71165676e419dc02b537c485020bdf
+/etc/systemd/system/jobcron.service f450f85dd50c75250b0c5ae4c40cbcc61da8453356b3b89cec8abe9c647e10dd
+/etc/systemd/system/jobcron-recovery.service f1ead8f00c5cdf8dab3b1dd2564b3e20956fa38f388fe82016098383ea3e361c
+/etc/systemd/system/jobcron-recovery.timer 4b9831517333fcb689dd40e7db55faf1773495bc85f54612e0ab8db6e75a834c
+docker-compose-linux-aarch64 ff42489f5a9b879d5d117c5ffea6defc27390b3286da8ad52cbc9c6ab5df590e
+sha256sum -c -
+/etc/jobcron/runtime-secret-id
+systemctl enable docker.service
+systemctl start docker.service
+systemctl stop jobcron.service
+EOF
+chmod 0600 "$fixture_root/replacement-user-data"
+
+if command -v sha1sum >/dev/null 2>&1; then
+  replacement_user_data_hash="$(sha1sum "$fixture_root/replacement-user-data" | awk '{print $1}')"
+else
+  replacement_user_data_hash="$(shasum "$fixture_root/replacement-user-data" | awk '{print $1}')"
+fi
+
+jq --arg user_data_hash "$replacement_user_data_hash" '
+  .resource_changes |= map(
+    if .address == "aws_instance.replacement_host" then
+      .change = {
+        actions: ["delete", "create"],
+        importing: null,
+        before: {
+          key_name: null,
+          associate_public_ip_address: true,
+          vpc_security_group_ids: ["sg-origin"],
+          user_data: "old-user-data-hash"
+        },
+        after: {
+          key_name: null,
+          associate_public_ip_address: true,
+          vpc_security_group_ids: ["sg-origin"],
+          metadata_options: [{
+            http_endpoint: "enabled",
+            http_tokens: "required",
+            http_put_response_hop_limit: 1
+          }],
+          root_block_device: [{
+            encrypted: true,
+            volume_type: "gp3",
+            volume_size: 8,
+            delete_on_termination: true
+          }],
+          user_data: $user_data_hash
+        },
+        after_unknown: {
+          id: true,
+          arn: true,
+          public_dns: true,
+          public_ip: true
+        }
+      }
+    elif .change.actions == ["create"] then
+      .change = {
+        actions: ["no-op"],
+        importing: null,
+        before: {synthetic: true},
+        after: {synthetic: true},
+        after_unknown: {}
+      }
+    else
+      .change.after_unknown = {}
+    end
+  ) |
+  .output_changes.replacement_instance_id = {
+    actions: ["update"],
+    before: "old-sensitive-selector",
+    after: null,
+    after_unknown: true,
+    before_sensitive: true,
+    after_sensitive: true
+  }
+' "$fixture_root/plan-valid.json" >"$fixture_root/plan-replacement-valid.json"
 
 jq -n --arg checked_at "$now" '{
   checked_at: $checked_at,
@@ -268,6 +406,68 @@ expect_verified \
   "$fixture_root/plan-valid.json" \
   "$fixture_root/cost-valid.json" \
   "$fixture_root/checkpoint-valid.json"
+
+expect_replacement_verified \
+  "exact Slice 4 replacement" \
+  "$fixture_root/plan-replacement-valid.json" \
+  "$fixture_root/cost-valid.json" \
+  "$fixture_root/checkpoint-valid.json" \
+  "$fixture_root/replacement-user-data"
+
+replacement_plan_mutation() {
+  local name="$1"
+  local filter="$2"
+
+  jq "$filter" "$fixture_root/plan-replacement-valid.json" \
+    >"$fixture_root/plan-replacement-$name.json"
+  expect_replacement_rejected \
+    "$name replacement plan" \
+    "$fixture_root/plan-replacement-$name.json"
+}
+
+replacement_plan_mutation "wrong-action-order" \
+  '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
+    .change.actions) = ["create", "delete"]'
+replacement_plan_mutation "second-action" \
+  '(.resource_changes[] | select(.address == "aws_iam_role.replacement_host") |
+    .change.actions) = ["update"]'
+replacement_plan_mutation "key-pair" \
+  '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
+    .change.after.key_name) = "unexpected-key"'
+replacement_plan_mutation "security-group-change" \
+  '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
+    .change.after.vpc_security_group_ids) = ["sg-unexpected"]'
+replacement_plan_mutation "metadata-v1" \
+  '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
+    .change.after.metadata_options[0].http_tokens) = "optional"'
+replacement_plan_mutation "unencrypted-root" \
+  '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
+    .change.after.root_block_device[0].encrypted) = false'
+replacement_plan_mutation "unknown-security-control" \
+  '(.resource_changes[] | select(.address == "aws_instance.replacement_host") |
+    .change.after_unknown.key_name) = true'
+replacement_plan_mutation "known-output" \
+  '.output_changes.replacement_instance_id.after_unknown = false'
+replacement_plan_mutation "created-output" \
+  '.output_changes.replacement_instance_id.actions = ["create"]'
+replacement_plan_mutation "diagnostic" \
+  '.diagnostics = [{summary: "synthetic warning"}]'
+
+cp "$fixture_root/replacement-user-data" \
+  "$fixture_root/replacement-user-data-missing-asset"
+sed -i.bak '/jobcron-recovery.timer/d' \
+  "$fixture_root/replacement-user-data-missing-asset"
+rm -f "$fixture_root/replacement-user-data-missing-asset.bak"
+expect_replacement_rejected \
+  "missing reviewed user-data asset" \
+  "$fixture_root/plan-replacement-valid.json" \
+  "$fixture_root/replacement-user-data-missing-asset"
+
+chmod 0644 "$fixture_root/replacement-user-data"
+expect_replacement_rejected \
+  "non-private rendered user-data" \
+  "$fixture_root/plan-replacement-valid.json"
+chmod 0600 "$fixture_root/replacement-user-data"
 
 plan_mutation "unexpected address" \
   '.resource_changes[0].address = "aws_instance.unexpected"'

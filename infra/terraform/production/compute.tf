@@ -41,6 +41,19 @@ locals {
     for asset in values(local.replacement_asset_sources) :
     fileexists(asset.path)
   ])
+
+  replacement_user_data = templatefile("${path.module}/templates/replacement-host.sh.tftpl", {
+    assets = {
+      for target, asset in local.replacement_assets :
+      target => {
+        mode    = asset.mode
+        payload = base64gzip(asset.content)
+        sha256  = sha256(asset.content)
+      }
+    }
+    assets_ready       = local.replacement_assets_ready
+    runtime_secret_arn = aws_secretsmanager_secret.runtime.arn
+  })
 }
 
 resource "aws_iam_role" "replacement_host" {
@@ -97,18 +110,7 @@ resource "aws_instance" "replacement_host" {
   vpc_security_group_ids      = [aws_security_group.origin.id]
   iam_instance_profile        = aws_iam_instance_profile.replacement_host.name
 
-  user_data = templatefile("${path.module}/templates/replacement-host.sh.tftpl", {
-    assets = {
-      for target, asset in local.replacement_assets :
-      target => {
-        mode    = asset.mode
-        payload = base64gzip(asset.content)
-        sha256  = sha256(asset.content)
-      }
-    }
-    assets_ready       = local.replacement_assets_ready
-    runtime_secret_arn = aws_secretsmanager_secret.runtime.arn
-  })
+  user_data = local.replacement_user_data
 
   metadata_options {
     http_endpoint               = "enabled"

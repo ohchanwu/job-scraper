@@ -84,6 +84,45 @@ fresh aggregate cost within both ceilings, and a passing Slice 3 checkpoint.
 An independent reviewer must approve the exact commit and saved-plan digest.
 Regenerating the plan invalidates that review.
 
+If an independently approved recovery must replace an already-created host,
+do not reuse the create-plan verdict and do not infer that updating `user_data`
+will replay cloud-init. Render the exact evaluated bootstrap privately:
+
+```sh
+umask 077
+render_json="$(mktemp)"
+trap 'rm -f "$render_json" "$TF_SLICE4_RENDERED_USER_DATA"' EXIT HUP INT TERM
+terraform -chdir=infra/terraform/production console >"$render_json" <<'EOF'
+jsonencode(local.replacement_user_data)
+EOF
+jq -er 'if type == "string" and length > 0 then . else error("invalid") end' \
+  "$render_json" >"$TF_SLICE4_RENDERED_USER_DATA"
+chmod 0600 "$TF_SLICE4_RENDERED_USER_DATA"
+rm -f "$render_json"
+```
+
+Create the saved plan with the explicit
+`-replace=aws_instance.replacement_host` option, render its JSON without
+printing it, then run the same checker with the private rendered bootstrap as
+the fourth argument:
+
+```sh
+scripts/check-terraform-slice-4-plan.sh \
+  "$TF_SLICE4_PLAN_JSON" \
+  "$TF_AGGREGATE_COST_JSON" \
+  "$TF_SLICE3_CHECKPOINT_JSON" \
+  "$TF_SLICE4_RENDERED_USER_DATA"
+```
+
+This mode requires exactly one destroy-then-create action for the replacement
+instance, every other protected resource as a no-op, the sensitive instance-ID
+output transition, unchanged security-group binding, no key pair, IMDSv2, the
+encrypted 8 GiB root volume, and the exact tracked bootstrap asset digests. It
+rejects extra actions, diagnostics, unknown security controls, stale assets,
+or a rendered bootstrap that is not a regular mode-`0600` file. Remove the
+rendered file after the exact saved-plan digest receives independent approval;
+regenerating either artifact invalidates that approval.
+
 ## 4. Apply only the reviewed replacement-host plan
 
 Recheck the saved-plan digest, then apply the binary plan exactly once:
