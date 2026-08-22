@@ -138,6 +138,64 @@ func TestReviewedJobcronUserBuildRejectsInvalidInputs(t *testing.T) {
 	}
 }
 
+func TestReviewedJobcronUserBuildRejectsChangedNonExecutableGOROOTInput(t *testing.T) {
+	repo, reviewedSHA := newReviewedBuildRepo(t)
+	goRoot := t.TempDir()
+	goRoot, err := filepath.EvalSymlinks(goRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goBinary := filepath.Join(goRoot, "bin", "go")
+	toolDir := filepath.Join(goRoot, "pkg", "tool")
+	sourceDir := filepath.Join(goRoot, "src", "runtime")
+	for _, dir := range []string{filepath.Dir(goBinary), toolDir, sourceDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fakeGo := `#!/bin/sh
+set -eu
+if [ "$1" = mod ]; then
+	exit 0
+fi
+[ "$1" = build ] || exit 2
+shift
+while [ "$#" -gt 0 ]; do
+	if [ "$1" = -o ]; then
+		shift
+		printf '#!/bin/sh\nexit 0\n' >"$1"
+		chmod 700 "$1"
+		exit 0
+	fi
+	shift
+done
+exit 2
+`
+	if err := os.WriteFile(goBinary, []byte(fakeGo), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(toolDir, "compile"), []byte("tool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(sourceDir, "runtime.go")
+	if err := os.WriteFile(source, []byte("package runtime\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	approvedDigest := reviewedToolchainDigest(t, goBinary)
+	if err := os.WriteFile(source, []byte("package runtime\n// changed after review\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "jobcron-user")
+	cmd := exec.Command("sh", "build-reviewed-jobcron-user.sh", repo, reviewedSHA, output, goBinary, approvedDigest)
+	buildOutput, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("reviewed build accepted changed non-executable GOROOT input:\n%s", buildOutput)
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("rejected reviewed build left output: %v", err)
+	}
+}
+
 func newReviewedBuildRepo(t *testing.T) (string, string) {
 	t.Helper()
 	repo := t.TempDir()
@@ -190,25 +248,17 @@ func reviewedToolchainDigest(t *testing.T, goBinary string) string {
 	t.Helper()
 	goRoot := filepath.Dir(filepath.Dir(goBinary))
 	var paths []string
-	for _, root := range []string{filepath.Join(goRoot, "bin"), filepath.Join(goRoot, "pkg", "tool")} {
-		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if entry.Type().IsRegular() {
-				info, err := entry.Info()
-				if err != nil {
-					return err
-				}
-				if info.Mode().Perm()&0o111 != 0 {
-					paths = append(paths, path)
-				}
-			}
-			return nil
-		})
+	err := filepath.WalkDir(goRoot, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
-			t.Fatalf("walk Go toolchain: %v", err)
+			return err
 		}
+		if entry.Type().IsRegular() {
+			paths = append(paths, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk Go toolchain: %v", err)
 	}
 	sort.Strings(paths)
 	var manifest []byte
@@ -218,7 +268,8 @@ func reviewedToolchainDigest(t *testing.T, goBinary string) string {
 			t.Fatalf("read Go toolchain file: %v", err)
 		}
 		digest := sha256.Sum256(contents)
-		manifest = append(manifest, []byte(fmt.Sprintf("%x  %s\n", digest, strings.TrimPrefix(path, goRoot+string(filepath.Separator))))...)
+		relative := strings.TrimPrefix(path, goRoot+string(filepath.Separator))
+		manifest = append(manifest, []byte(fmt.Sprintf("%x  ./%s\n", digest, filepath.ToSlash(relative)))...)
 	}
 	digest := sha256.Sum256(manifest)
 	return fmt.Sprintf("%x", digest)

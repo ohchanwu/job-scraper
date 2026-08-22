@@ -131,7 +131,7 @@ export PATH
 export JOBCRON_REVIEWED_SHA='<approved-40-hex-commit>'
 export JOBCRON_PREVIOUS_IMAGE_COMMIT='<commit from the private deployed image.json>'
 export JOBCRON_GO_BINARY='<approved-absolute-go-binary>'
-export JOBCRON_GO_TOOLCHAIN_DIGEST='<approved-64-hex-executable-manifest-digest>'
+export JOBCRON_GO_TOOLCHAIN_DIGEST='<approved-64-hex-complete-goroot-manifest-digest>'
 export GIT_NO_REPLACE_OBJECTS=1
 printf '%s\n' "$JOBCRON_REVIEWED_SHA" | grep -Eq '^[0-9a-f]{40}$'
 printf '%s\n' "$JOBCRON_PREVIOUS_IMAGE_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
@@ -141,11 +141,12 @@ test -x "$JOBCRON_GO_BINARY"
 go_dir=$(CDPATH= cd -P "${JOBCRON_GO_BINARY%/*}" && pwd)
 go_root=$(CDPATH= cd -P "$go_dir/.." && pwd)
 computed_go_toolchain_digest=$(
-  find "$go_root/bin" "$go_root/pkg/tool" -type f -perm -111 -print |
-    LC_ALL=C sort |
-    while IFS= read -r path; do
-      printf '%s  %s\n' "$(shasum -a 256 "$path" | awk '{print $1}')" "${path#"$go_root"/}"
-    done |
+  (
+    cd "$go_root"
+    find . -type f -print0 |
+      LC_ALL=C sort -z |
+      xargs -0 shasum -a 256
+  ) |
     shasum -a 256 | awk '{print $1}'
 )
 test "$computed_go_toolchain_digest" = "$JOBCRON_GO_TOOLCHAIN_DIGEST"
@@ -195,8 +196,8 @@ under an environment allowlist with `GOTOOLCHAIN=local`, `CGO_ENABLED=0`, privat
 caches, module checksum verification, and `-mod=readonly`. Local Git metadata,
 ignored files, overlays, ambient build controls, and concurrent worktree edits
 cannot enter the privileged binary. The builder also verifies a SHA-256 manifest
-of every executable in that Go distribution's `bin` and `pkg/tool` trees before
-allowing any compiler sibling to run; a lone `go` executable hash is insufficient.
+of every regular file in the selected Go distribution's complete GOROOT before
+allowing the toolchain to run; executable-only or lone-`go` hashes are insufficient.
 
 The previous image commit comes from the private immutable-image evidence, not
 from a mutable branch or tag. Exact migration-tree object equality proves that

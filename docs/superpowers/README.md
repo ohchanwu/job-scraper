@@ -6,6 +6,7 @@ decision records needed for the current task.
 
 ## Active Work
 
+- [Jobcron production custody P1 repairs][jobcron-custody-p1-plan]
 - [Terraform AWS foundation and Cloudflare ingress automation][terraform-aws-foundation]
 - [Terraform-first production launch human-blocked steps][terraform-launch-human-steps]
 - [Pre-Batch-1 human input checklist][pre-batch-1-checklist]
@@ -106,6 +107,8 @@ decision records needed for the current task.
   archive/2026-07-26-postgresql-account-mutation-clock-source/260726-postgresql-account-mutation-clock-source.md
 [terraform-aws-foundation]:
   specs/260719-terraform-aws-foundation-and-cloudflare-ingress-automation.md
+[jobcron-custody-p1-plan]:
+  plans/260822-jobcron-production-custody-p1-repairs.md
 [terraform-launch-human-steps]:
   specs/260726-terraform-first-production-launch-human-blocked-steps.md
 [pre-batch-1-checklist]:

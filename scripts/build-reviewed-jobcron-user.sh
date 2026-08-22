@@ -37,11 +37,12 @@ go_root=$(CDPATH= cd -P "$go_dir/.." 2>/dev/null && pwd) || fail
 [ "$go_binary" = "$go_dir/go" ] || fail
 [ -d "$go_root/bin" ] && [ -d "$go_root/pkg/tool" ] || fail
 actual_toolchain_digest=$(
-	find "$go_root/bin" "$go_root/pkg/tool" -type f -perm -111 -print |
-	LC_ALL=C sort |
-	while IFS= read -r path; do
-		printf '%s  %s\n' "$(/usr/bin/shasum -a 256 "$path" | /usr/bin/awk '{print $1}')" "${path#"$go_root"/}"
-	done |
+	(
+		cd "$go_root"
+		find . -type f -print0 |
+			LC_ALL=C sort -z |
+			xargs -0 /usr/bin/shasum -a 256
+	) |
 	/usr/bin/shasum -a 256 | /usr/bin/awk '{print $1}'
 ) || fail
 [ "$actual_toolchain_digest" = "$toolchain_digest" ] || fail

@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -184,16 +183,12 @@ func OpenPostgresMigratingWithLegacyBackfill(ctx context.Context, databaseURL, a
 	if auditedMigrationTree != pinnedPostgresMigrationTree {
 		return nil, postgresMigrationError("schema_migrations", "legacy-audit", fmt.Errorf("audited migration tree differs"))
 	}
-	return openPostgres(ctx, databaseURL, func(ctx context.Context, db *sql.DB, ledger string) error {
-		return migratePostgresWithLegacyBackfill(ctx, db, ledger, true)
+	return openPostgres(ctx, databaseURL, func(ctx context.Context, db *sql.DB, schema, ledger string) error {
+		return migratePostgresWithLegacyBackfill(ctx, db, schema, ledger, true)
 	})
 }
 
-func openPostgres(ctx context.Context, databaseURL string, prepare func(context.Context, *sql.DB, string) error) (*Store, error) {
-	ledger, err := postgresMigrationLedgerName(databaseURL)
-	if err != nil {
-		return nil, err
-	}
+func openPostgres(ctx context.Context, databaseURL string, prepare func(context.Context, *sql.DB, string, string) error) (*Store, error) {
 	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("storage: open postgres: %w", err)
@@ -202,34 +197,35 @@ func openPostgres(ctx context.Context, databaseURL string, prepare func(context.
 		db.Close()
 		return nil, fmt.Errorf("storage: open postgres: %w", err)
 	}
-	if err := prepare(ctx, db, ledger); err != nil {
+	schema, ledger, err := postgresMigrationTarget(ctx, db)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := prepare(ctx, db, schema, ledger); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return &Store{db: db, dialect: DialectPostgres}, nil
 }
 
-func postgresMigrationLedgerName(databaseURL string) (string, error) {
-	parsed, err := url.Parse(databaseURL)
-	if err != nil {
-		return "", fmt.Errorf("storage: invalid postgres database URL: %w", err)
+func postgresMigrationTarget(ctx context.Context, db *sql.DB) (string, string, error) {
+	var schema sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT current_schema()`).Scan(&schema); err != nil {
+		return "", "", postgresMigrationError("schema_migrations", "schema", err)
 	}
-	schema := parsed.Query().Get("search_path")
-	if schema == "" {
-		return "public.schema_migrations", nil
+	if !schema.Valid || schema.String == "" {
+		return "", "", postgresMigrationError("schema_migrations", "schema", fmt.Errorf("current schema is unset"))
 	}
-	if strings.IndexByte(schema, ',') >= 0 || len(schema) == 0 || (schema[0] != '_' && (schema[0] < 'A' || schema[0] > 'Z') && (schema[0] < 'a' || schema[0] > 'z')) {
-		return "", fmt.Errorf("storage: postgres search_path must contain one simple schema")
-	}
-	for _, ch := range schema[1:] {
-		if ch != '_' && (ch < 'A' || ch > 'Z') && (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') {
-			return "", fmt.Errorf("storage: postgres search_path must contain one simple schema")
-		}
-	}
-	return `"` + schema + `".schema_migrations`, nil
+	quotedSchema := quotePostgresIdentifier(schema.String)
+	return quotedSchema, quotedSchema + `.schema_migrations`, nil
 }
 
-func verifyPostgresMigrations(ctx context.Context, db *sql.DB, ledger string) error {
+func quotePostgresIdentifier(identifier string) string {
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
+}
+
+func verifyPostgresMigrations(ctx context.Context, db *sql.DB, _ string, ledger string) error {
 	migrations, err := embeddedPostgresMigrationManifest()
 	if err != nil {
 		return err
@@ -336,16 +332,16 @@ func migrate(db *sql.DB) error {
 	return nil
 }
 
-func migratePostgres(ctx context.Context, db *sql.DB, ledger string) error {
-	return migratePostgresWithLegacyBackfill(ctx, db, ledger, false)
+func migratePostgres(ctx context.Context, db *sql.DB, schema, ledger string) error {
+	return migratePostgresWithLegacyBackfill(ctx, db, schema, ledger, false)
 }
 
-func migratePostgresWithLegacyBackfill(ctx context.Context, db *sql.DB, ledger string, allowLegacyBackfill bool) error {
+func migratePostgresWithLegacyBackfill(ctx context.Context, db *sql.DB, schema, ledger string, allowLegacyBackfill bool) error {
 	migrations, err := embeddedPostgresMigrationManifest()
 	if err != nil {
 		return err
 	}
-	tx, err := beginPostgresMigration(ctx, db, "schema_migrations")
+	tx, err := beginPostgresMigration(ctx, db, "schema_migrations", schema)
 	if err != nil {
 		return err
 	}
@@ -385,7 +381,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS schema_migrations_name_idx ON %s(name)`, ledge
 		return err
 	}
 	for _, migration := range migrations {
-		tx, err := beginPostgresMigration(ctx, db, migration.name)
+		tx, err := beginPostgresMigration(ctx, db, migration.name, schema)
 		if err != nil {
 			return err
 		}
@@ -474,7 +470,7 @@ func backfillPostgresMigrationLedger(ctx context.Context, tx *sql.Tx, ledger str
 	return nil
 }
 
-func beginPostgresMigration(ctx context.Context, db *sql.DB, name string) (*sql.Tx, error) {
+func beginPostgresMigration(ctx context.Context, db *sql.DB, name, schema string) (*sql.Tx, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, postgresMigrationError(name, "begin", err)
@@ -482,6 +478,10 @@ func beginPostgresMigration(ctx context.Context, db *sql.DB, name string) (*sql.
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, postgresMigrationAdvisoryLock); err != nil {
 		tx.Rollback()
 		return nil, postgresMigrationError(name, "lock", err)
+	}
+	if _, err := tx.ExecContext(ctx, `SET LOCAL search_path TO `+schema+`, pg_catalog`); err != nil {
+		tx.Rollback()
+		return nil, postgresMigrationError(name, "schema", err)
 	}
 	return tx, nil
 }
